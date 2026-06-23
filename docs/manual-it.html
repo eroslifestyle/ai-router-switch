@@ -1,0 +1,1086 @@
+<!--
+  AI Router Stack - Manuale Operativo (IT)
+  Generato automaticamente. Self-contained: no CDN, no dipendenze esterne.
+  Per la versione markdown: docs/MANUAL.md
+  Per la versione inglese: docs/manual-en.html
+  Per cambiare lingua: docs/index.html
+-->
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="AI Router Stack - Manuale Operativo in Italiano">
+  <title>AI Router Stack - Manuale Operativo (IT)</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    :root {
+      --bg-dark: #0f1419;
+      --bg-light: #fafafa;
+      --text-dark: #e6edf3;
+      --text-light: #1a202c;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --code-bg-dark: #1e293b;
+      --code-bg-light: #f1f5f9;
+      --border-dark: #30363d;
+      --border-light: #e2e8f0;
+      --info-bg: #1e3a5f;
+      --warn-bg: #5f4a1e;
+      --danger-bg: #5f1e1e;
+      --sidebar-width: 280px;
+      --header-height: 60px;
+      --radius: 8px;
+      --shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      background: var(--bg-dark);
+      color: var(--text-dark);
+      min-height: 100vh;
+    }
+    
+    body.light-mode {
+      background: var(--bg-light);
+      color: var(--text-light);
+    }
+    
+    /* Header */
+    .header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: var(--header-height);
+      background: var(--bg-dark);
+      border-bottom: 1px solid var(--border-dark);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 1.5rem;
+      z-index: 1000;
+    }
+    
+    .light-mode .header {
+      background: var(--bg-light);
+      border-bottom-color: var(--border-light);
+    }
+    
+    .header-title {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--accent);
+      text-decoration: none;
+    }
+    
+    .header-nav {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+    }
+    
+    .header-nav a, .header-nav button {
+      color: var(--text-dark);
+      text-decoration: none;
+      font-size: 0.9rem;
+      padding: 0.4rem 0.8rem;
+      border-radius: var(--radius);
+      transition: background 0.2s;
+      background: none;
+      border: none;
+      cursor: pointer;
+    }
+    
+    .light-mode .header-nav a,
+    .light-mode .header-nav button {
+      color: var(--text-light);
+    }
+    
+    .header-nav a:hover, .header-nav button:hover {
+      background: rgba(59,130,246,0.1);
+    }
+    
+    .lang-toggle {
+      display: flex;
+      gap: 0.25rem;
+      background: var(--code-bg-dark);
+      border-radius: var(--radius);
+      padding: 0.2rem;
+    }
+    
+    .light-mode .lang-toggle {
+      background: var(--code-bg-light);
+    }
+    
+    .lang-toggle button {
+      padding: 0.3rem 0.6rem !important;
+      font-size: 0.8rem !important;
+    }
+    
+    .lang-toggle button.active {
+      background: var(--accent) !important;
+      color: white !important;
+    }
+    
+    /* Layout */
+    .layout {
+      display: flex;
+      margin-top: var(--header-height);
+      min-height: calc(100vh - var(--header-height));
+    }
+    
+    /* Sidebar */
+    .sidebar {
+      width: var(--sidebar-width);
+      position: fixed;
+      top: var(--header-height);
+      left: 0;
+      bottom: 0;
+      overflow-y: auto;
+      background: var(--bg-dark);
+      border-right: 1px solid var(--border-dark);
+      padding: 1.5rem 1rem;
+    }
+    
+    .light-mode .sidebar {
+      background: var(--bg-light);
+      border-right-color: var(--border-light);
+    }
+    
+    .sidebar-search {
+      width: 100%;
+      padding: 0.6rem 0.8rem;
+      border-radius: var(--radius);
+      border: 1px solid var(--border-dark);
+      background: var(--code-bg-dark);
+      color: var(--text-dark);
+      font-size: 0.9rem;
+      margin-bottom: 1rem;
+    }
+    
+    .light-mode .sidebar-search {
+      border-color: var(--border-light);
+      background: var(--code-bg-light);
+      color: var(--text-light);
+    }
+    
+    .sidebar-search::placeholder {
+      color: #888;
+    }
+    
+    .toc {
+      list-style: none;
+    }
+    
+    .toc li {
+      margin-bottom: 0.3rem;
+    }
+    
+    .toc a {
+      display: block;
+      padding: 0.4rem 0.8rem;
+      color: var(--text-dark);
+      text-decoration: none;
+      border-radius: var(--radius);
+      font-size: 0.9rem;
+      transition: all 0.2s;
+    }
+    
+    .light-mode .toc a {
+      color: var(--text-light);
+    }
+    
+    .toc a:hover {
+      background: rgba(59,130,246,0.1);
+      color: var(--accent);
+    }
+    
+    .toc a.active {
+      background: var(--accent);
+      color: white;
+    }
+    
+    .toc .toc-sub {
+      padding-left: 1.5rem;
+    }
+    
+    .toc .toc-sub a {
+      font-size: 0.85rem;
+    }
+    
+    .toc-hidden {
+      display: none !important;
+    }
+    
+    /* Main Content */
+    .main {
+      flex: 1;
+      margin-left: var(--sidebar-width);
+      padding: 2rem 3rem;
+      max-width: 900px;
+    }
+    
+    .content {
+      padding-bottom: 4rem;
+    }
+    
+    /* Typography */
+    h1 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+      color: var(--accent);
+    }
+    
+    h2 {
+      font-size: 1.75rem;
+      font-weight: 600;
+      margin: 2.5rem 0 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border-dark);
+      scroll-margin-top: calc(var(--header-height) + 1rem);
+    }
+    
+    .light-mode h2 {
+      border-top-color: var(--border-light);
+    }
+    
+    h3 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin: 1.5rem 0 0.75rem;
+      scroll-margin-top: calc(var(--header-height) + 1rem);
+    }
+    
+    h4 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin: 1rem 0 0.5rem;
+      scroll-margin-top: calc(var(--header-height) + 1rem);
+    }
+    
+    p {
+      margin-bottom: 1rem;
+    }
+    
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    
+    a:hover {
+      text-decoration: underline;
+    }
+    
+    .anchor-link {
+      opacity: 0;
+      margin-left: 0.5rem;
+      font-size: 0.8em;
+      transition: opacity 0.2s;
+    }
+    
+    h2:hover .anchor-link,
+    h3:hover .anchor-link,
+    h4:hover .anchor-link {
+      opacity: 1;
+    }
+    
+    /* Code */
+    pre, code {
+      font-family: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+    }
+    
+    pre {
+      background: var(--code-bg-dark);
+      border-radius: var(--radius);
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      margin: 1rem 0;
+      position: relative;
+      border: 1px solid var(--border-dark);
+    }
+    
+    .light-mode pre {
+      background: var(--code-bg-light);
+      border-color: var(--border-light);
+    }
+    
+    pre.diagram {
+      font-size: 0.75rem;
+      line-height: 1.4;
+    }
+    
+    code {
+      background: var(--code-bg-dark);
+      padding: 0.2rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+    
+    .light-mode code {
+      background: var(--code-bg-light);
+    }
+    
+    pre code {
+      background: none;
+      padding: 0;
+      font-size: 0.875rem;
+    }
+    
+    .code-block {
+      position: relative;
+    }
+    
+    .copy-btn {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      padding: 0.4rem 0.8rem;
+      background: rgba(255,255,255,0.1);
+      border: none;
+      border-radius: 4px;
+      color: var(--text-dark);
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    
+    .copy-btn:hover {
+      background: rgba(255,255,255,0.2);
+    }
+    
+    .copy-btn.copied {
+      background: #22c55e;
+      color: white;
+    }
+    
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      font-size: 0.9rem;
+    }
+    
+    th, td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border: 1px solid var(--border-dark);
+    }
+    
+    .light-mode th,
+    .light-mode td {
+      border-color: var(--border-light);
+    }
+    
+    th {
+      background: var(--code-bg-dark);
+      font-weight: 600;
+    }
+    
+    .light-mode th {
+      background: var(--code-bg-light);
+    }
+    
+    tr:nth-child(even) {
+      background: rgba(255,255,255,0.02);
+    }
+    
+    .light-mode tr:nth-child(even) {
+      background: rgba(0,0,0,0.02);
+    }
+    
+    /* Info Boxes */
+    .info-box, .warn-box, .danger-box {
+      padding: 1rem 1.25rem;
+      border-radius: var(--radius);
+      margin: 1rem 0;
+      border-left: 4px solid;
+    }
+    
+    .info-box {
+      background: var(--info-bg);
+      border-color: var(--accent);
+    }
+    
+    .warn-box {
+      background: var(--warn-bg);
+      border-color: #f59e0b;
+    }
+    
+    .danger-box {
+      background: var(--danger-bg);
+      border-color: #ef4444;
+    }
+    
+    .info-box strong, .warn-box strong, .danger-box strong {
+      display: block;
+      margin-bottom: 0.5rem;
+    }
+    
+    /* Lists */
+    ul, ol {
+      margin: 1rem 0;
+      padding-left: 1.5rem;
+    }
+    
+    li {
+      margin-bottom: 0.5rem;
+    }
+    
+    /* Footer */
+    .footer {
+      background: var(--code-bg-dark);
+      border-top: 1px solid var(--border-dark);
+      padding: 1.5rem;
+      text-align: center;
+      font-size: 0.85rem;
+      color: #888;
+    }
+    
+    .light-mode .footer {
+      background: var(--code-bg-light);
+      border-top-color: var(--border-light);
+      color: #666;
+    }
+    
+    .footer a {
+      color: var(--accent);
+    }
+    
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      padding: 0.75rem 1.5rem;
+      background: #22c55e;
+      color: white;
+      border-radius: var(--radius);
+      font-size: 0.9rem;
+      opacity: 0;
+      transform: translateY(1rem);
+      transition: all 0.3s;
+      z-index: 2000;
+    }
+    
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    
+    /* Responsive */
+    @media (max-width: 768px) {
+      .sidebar {
+        display: none;
+      }
+      
+      .sidebar.mobile-open {
+        display: block;
+        width: 100%;
+        position: relative;
+        top: 0;
+        max-height: 40vh;
+        border-right: none;
+        border-bottom: 1px solid var(--border-dark);
+      }
+      
+      .main {
+        margin-left: 0;
+        padding: 1.5rem;
+      }
+      
+      h1 { font-size: 2rem; }
+      h2 { font-size: 1.5rem; }
+    }
+    
+    /* Print */
+    @media print {
+      .header, .sidebar, .copy-btn, .toast, .lang-toggle, .anchor-link {
+        display: none !important;
+      }
+      
+      .main {
+        margin-left: 0;
+        max-width: 100%;
+        padding: 0;
+      }
+      
+      body {
+        background: white;
+        color: black;
+      }
+      
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+      
+      pre, table {
+        page-break-inside: avoid;
+      }
+      
+      .content {
+        padding-bottom: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <a href="#" class="header-title">AI Router Stack - Manuale Operativo</a>
+    <nav class="header-nav" aria-label="Navigazione header">
+      <a href="#" onclick="toggleSidebar(); return false;">Indice</a>
+      <a href="index.html" class="btn-link">← Home</a>
+      <a href="manual-en.html" class="btn-link">English</a>
+      <button onclick="window.print()">Stampa</button>
+      <div class="lang-toggle">
+        <button class="active">IT</button>
+        <button onclick="location.href='manual-en.html'">EN</button>
+      </div>
+    </nav>
+  </header>
+  
+  <div class="layout">
+    <aside class="sidebar" id="sidebar" aria-label="Indice dei contenuti">
+      <input type="text" class="sidebar-search" placeholder="Cerca sezione..." id="searchInput" oninput="filterTOC()">
+      <nav>
+        <ul class="toc" id="toc">
+          <li><a href="#panoramica">1. Panoramica</a></li>
+          <li><a href="#architettura">2. Architettura di Rete</a></li>
+          <li><a href="#modalita-routing">3. Le Quattro Modalità di Routing</a>
+            <ul class="toc-sub">
+              <li><a href="#modalita-anthropic">3.1 Anthropic (Pura)</a></li>
+              <li><a href="#modalita-minimax">3.2 MiniMax (Pura)</a></li>
+              <li><a href="#modalita-mixed">3.3 Mixed (Fallback Bidirezionale)</a></li>
+              <li><a href="#modalita-interactive">3.4 Interactive (Intelligente)</a></li>
+            </ul>
+          </li>
+          <li><a href="#cambiare-modalita">4. Cambiare Modalità Runtime</a>
+            <ul class="toc-sub">
+              <li><a href="#porta-dinamica">4.1 Porta Dinamica (8787)</a></li>
+              <li><a href="#porte-fisse">4.2 Porte Fisse (8771-8774)</a></li>
+            </ul>
+          </li>
+          <li><a href="#comandi-chat">5. Comandi In-Chat</a></li>
+          <li><a href="#health-check">6. Health Check</a></li>
+          <li><a href="#esempi">7. Esempi d'Uso</a>
+            <ul class="toc-sub">
+              <li><a href="#esempio-base">7.1 Claude Code di Base</a></li>
+              <li><a href="#esempio-parallelo">7.2 Sessioni Parallele</a></li>
+              <li><a href="#esempio-failover">7.3 Failover Automatico</a></li>
+              <li><a href="#esempio-risparmio">7.4 Risparmio Intelligente</a></li>
+            </ul>
+          </li>
+          <li><a href="#troubleshooting">8. Troubleshooting Rapido</a></li>
+          <li><a href="#hardening">9. Hardening e Resilienza</a></li>
+          <li><a href="#variabili">10. Variabili d'Ambiente</a></li>
+          <li><a href="#requisiti">11. Requisiti di Sistema</a></li>
+          <li><a href="#no-dovere">12. Cose da NON Fare</a></li>
+        </ul>
+      </nav>
+    </aside>
+    
+    <main class="main">
+      <article class="content">
+        <h1 id="titolo">AI Router Stack<span class="anchor-link" onclick="copyAnchor(this)">#</span></h1>
+        <p>Manuale Operativo Completo per la configurazione e l'uso del sistema di routing AI multi-provider.</p>
+        
+        <h2 id="panoramica">1. Panoramica<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
+        <p>AI Router Stack è un sistema di orchestrazione che permette di:</p>
+        <ul>
+          <li><strong>Unified Endpoint</strong>: Un solo endpoint per tutti i provider AI (Anthropic Claude, MiniMax, ecc.)</li>
+          <li><strong>Smart Routing</strong>: Instradamento automatico basato su costi, latenza, disponibilita</li>
+          <li><strong>Failover Intelligente</strong>: Fallback automatico in caso di errori o sovraccarichi</li>
+          <li><strong>Risparmio Economico</strong>: Ottimizzazione dei costi tramite routing intelligente</li>
+        </ul>
+        
+        <div class="info-box">
+          <strong>Schema Base</strong>
+          Il router funziona come proxy trasparente: le richieste arrivano sulla porta 8787 e vengono instradate al provider piu appropriato in base alla modalita configurata.
+        </div>
+        
+        <h2 id="architettura">2. Architettura di Rete<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
+        
+<pre class="diagram code-block">
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           AI ROUTER STACK                                    │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                         PORTA 8787 (Unified)                         │    │
+│  │              ┌──────────────────────────────┐                       │    │
+│  │              │     Smart Router Engine      │                       │    │
+│  │              │  ┌────────────────────────┐  │                       │    │
+│  │              │  │  Modalita:             │  │                       │    │
+│  │              │  │  - Anthropic (Pura)    │  │                       │    │
+│  │              │  │  - MiniMax (Pura)      │  │                       │    │
+│  │              │  │  - Mixed (Fallback)    │  │                       │    │
+│  │              │  │  - Interactive         │  │                       │    │
+│  │              │  └────────────────────────┘  │                       │    │
+│  └──────────────┼──────────────────────────────┼───────────────────────┘    │
+│                 │                              │                              │
+│     ┌───────────┴───────────┐                  │                              │
+│     │                       │                  │                              │
+│     ▼                       ▼                  │                              │
+│ ┌───────────┐         ┌───────────┐           │                              │
+│ │  PORTA    │         │  PORTA    │           │                              │
+│ │  8771     │         │  8772     │           │                              │
+│ │           │         │           │           │                              │
+│ │ Anthropic │         │ MiniMax   │           │                              │
+│ │ Direct    │         │ Direct    │           │                              │
+│ └───────────┘         └───────────┘           │                              │
+│                                               │                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─────────────────┐     ┌─────────────────┐
+│  api.anthropic  │     │  api.minimax.io │
+│  .com           │     │                 │
+│                 │     │                 │
+│  Claude Models  │     │  MiniMax Models │
+└─────────────────┘     └─────────────────┘
+</pre>
+        
+        <h3>Componenti</h3>
+        <table>
+          <thead>
+            <tr><th>Componente</th><th>Porta</th><th>Descrizione</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Unified Proxy</td><td>8787</td><td>Endpoint principale con routing intelligente</td></tr>
+            <tr><td>Anthropic Direct</td><td>8771</td><td>Accesso diretto solo Anthropic</td></tr>
+            <tr><td>MiniMax Direct</td><td>8772</td><td>Accesso diretto solo MiniMax</td></tr>
+            <tr><td>Health Check</td><td>8788</td><td>Endpoint per monitoraggio stato</td></tr>
+          </tbody>
+        </table>
+        
+        <h2 id="modalita-routing">3. Le Quattro Modalita di Routing<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
+        
+        <h3 id="modalita-anthropic">3.1 Anthropic (Pura)<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
+        <p>Tutto il traffico viene instradato esclusivamente verso Anthropic Claude.</p>
+        <pre class="code-block bash"><code>ANTHROPIC_API_KEY=sk-ant-...
+ROUTING_MODE=anthropic</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
+        <p><strong>Caso d'uso:</strong> quando hai bisogno solo di Claude per ragioni di compatibilita o preferenza.</p>
+        
+        <h3 id="modalita-minimax">3.2 MiniMax (Pura)<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
+        <p>Tutto il traffico viene instradato esclusivamente verso MiniMax.</p>
+        <pre class="code-block bash"><code>MINIMAX_API_KEY=eyJhbG...
+ROUTING_MODE=minimax</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
+        <p><strong>Caso d'uso:</strong> ottimizzazione costi o test specifici su MiniMax.</p>
+        
+        <h3 id="modalita-mixed">3.3 Mixed (Fallback Bidirezionale)<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
+        <p>Routing con fallback automatico bidirezionale. Se un provider fallisce, l'altro subentra.</p>
+        <pre class="code-block bash"><code>ANTHROPIC_API_KEY=sk-ant-...
+MINIMAX_API_KEY=eyJhbG...
+ROUTING_MODE=mixed
+PRIMARY_PROVIDER=anthropic
+FALLBACK_ENABLED=true</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
+        
+        <h4>Logica di Failover</h4>
+        <pre class="diagram"><code>Richiesta → Provider Primario
+                │
+                ├─[OK]→ Risposta
+                │
+                └─[ERRORE]→ Fallback Provider
+                              │
+                              ├─[OK]→ Risposta
+                              │
+                              └─[ERRORE]→ Errore "Tutti i provider non disponibili"</code></pre>
+        
+        <h3 id="modalita-interactive">3.4 Interactive (Intelligente)<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
+        <p>Routing basato su analisi del contenuto della richiesta e ottimizzazione costi.</p>
+        <pre class="code-block bash"><code>ANTHROPIC_API_KEY=sk-ant-...
+MINIMAX_API_KEY=eyJhbG...
+ROUTING_MODE=interactive
+COST_OPTIMIZATION=true
+LATENCY_THRESHOLD_MS=2000</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
+        <p><strong>Criteri di selezione:</strong></p>
+        <ul>
+          <li>Complessita della richiesta</li>
+          <li>Costo per token del provider</li>
+          <li>Latenza attuale del provider</li>
+          <li>Stato di salute del provider</li>
+        </ul>
+        
+        <h2 id="cambiare-modalita">4. Cambiare Modalita Runtime<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
+        
+        <h3 id="porta-dinamica">4.1 Porta Dinamica (8787)<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
+        <p>La porta 8787 accetta comandi speciali per cambiare modalita al volo.</p>
+        <pre class="code-block bash"><code># Cambia modalita via curl
+curl -X POST http://localhost:8787/mode \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "minimax"}'
+
+# Modalita disponibili: anthropic, minimax, mixed, interactive</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
+        
+        <div class="warn-box">
+          <strong>Cambiamenti Temporanei</strong>
+          I cambiamenti via API sono temporanei e si resettano al riavvio del servizio. Per persistenza, usa le variabili d'ambiente.
+        </div>
+        
+        <h3 id="porte-fisse">4.2 Porte Fisse (8771-8774)<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
+        <table>
+          <thead>
+            <tr><th>Porta</th><th>Provider</th><th>Modalita</th><th>Uso</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>8771</td><td>Anthropic</td><td>Diretta</td><td>Accesso esclusivo Anthropic</td></tr>
+            <tr><td>8772</td><td>MiniMax</td><td>Diretta</td><td>Accesso esclusivo MiniMax</td></tr>
+            <tr><td>8773</td><td>Mixed</td><td>Fallback</td><td>Primary Anthropic, Fallback MiniMax</td></tr>
+            <tr><td>8774</td><td>Interactive</td><td>Smart</td><td>Routing intelligente</td></tr>
+          </tbody>
+        </table>
+        
+        <h2 id="comandi-chat">5. Comandi In-Chat<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
+        <p>Puoi forzare il provider direttamente nei messaggi chat con comandi speciali.</p>
+        <pre class="code-block output"><code># Claude Code: forza MiniMax
+@minimax Scrivi un hello world in Python
+
+# Forza Anthropic (default)
+Scrivi un hello world in Python
+
+# Forza fallback
+@fallback:minimax Analizza questo codice</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
+        
+        <div class="info-box">
+          <strong>Sintassi Comandi</strong>
+          <code>@provider</code> - forza provider specifico<br>
+          <code>@fallback:provider</code> - usa come fallback dopo il primary
+        </div>
+        
+        <h2 id="health-check">6. Health Check<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
+        <pre class="code-block bash"><code># Check completo
+curl http://localhost:8788/health
+
+# Risposta JSON
+{
+  "status": "ok",
+  "providers": {
+    "anthropic": {
+      "status": "healthy",
+      "latency_ms": 150,
+      "quota_remaining": 45000
+    },
+    "minimax": {
+      "status": "healthy",
+      "latency_ms": 80,
+      "quota_remaining": 120000
+    }
+  },
+  "current_mode": "interactive",
+  "uptime_seconds": 86400
+}</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
+        
+        <h3>Endpoint Specifici</h3>
+        <pre class="code-block bash"><code># Solo Anthropic
+curl http://localhost:8788/health/anthropic
+
+# Solo MiniMax
+curl http://localhost:8788/health/minimax
+
+# Latenza
+curl http://localhost:8788/health/latency</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
+        
+        <h2 id="esempi">7. Esempi d'Uso<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
+        
+        <h3 id="esempio-base">7.1 Claude Code di Base<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
+        <p>Configurazione semplice per iniziare subito con routing automatico.</p>
+        <pre class="code-block bash"><code># .env
+ANTHROPIC_API_KEY=sk-ant-api03-...
+MINIMAX_API_KEY=eyJhbGc...
+ROUTING_MODE=interactive
+
+# Avvio
+docker-compose up -d
+
+# Claude Code
+claude-code --provider router</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
+        
+        <h3 id="esempio-parallelo">7.2 Sessioni Parallele con Backend Diversi<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
+        <pre class="code-block bash"><code># Terminale 1: Claude su Anthropic
+ANTHROPIC_API_KEY=sk-ant-... claudia-code --port 8771
+
+# Terminale 2: Claude su MiniMax
+MINIMAX_API_KEY=eyJhbG... claude-code --port 8772
+
+# Entrambi funzionano in parallelo!</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
+        
+        <h3 id="esempio-failover">7.3 Failover Automatico<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
+        <p>Configurazione per alta disponibilita con fallback automatico.</p>
+        <pre class="code-block bash"><code># .env - Alta Disponibilita
+ANTHROPIC_API_KEY=sk-ant-...
+MINIMAX_API_KEY=eyJhbG...
+ROUTING_MODE=mixed
+PRIMARY_PROVIDER=anthropic
+FALLBACK_ENABLED=true
+FALLBACK_DELAY_MS=500
+MAX_RETRIES=3
+
+# Il router tentera:
+# 1. Anthropic (primary)
+# 2. Se fallisce entro 500ms, MiniMax (fallback)
+# 3. Se anche MiniMax fallisce, ritorna errore dopo 3 retry</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
+        
+        <h3 id="esempio-risparmio">7.4 Risparmio Intelligente<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
+        <p>Ottimizzazione costi usando Interactive mode con soglie.</p>
+        <pre class="code-block bash"><code># .env - Ottimizzazione Costi
+ROUTING_MODE=interactive
+COST_OPTIMIZATION=true
+COST_THRESHOLD_CENTS=10
+PREFER_CHEAPER=true
+
+# Regole:
+# - Richieste semplici (< 10 cent): MiniMax
+# - Richieste complesse: Anthropic
+# - Fallback automatico se un provider e in sovraccarico</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
+        
+        <h2 id="troubleshooting">8. Troubleshooting Rapido<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
+        
+        <table>
+          <thead>
+            <tr><th>Problema</th><th>Soluzione</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Connessione rifiutata</td><td>Verifica che il servizio sia in esecuzione: <code>docker ps | grep router</code></td></tr>
+            <tr><td>401 Unauthorized</td><td>Controlla che le API key siano corrette nel file .env</td></tr>
+            <tr><td>Timeout frequenti</td><td>Aumenta TIMEOUT_MS o verifica la connessione internet</td></tr>
+            <tr><td>Sempre stesso provider</td><td>Verifica la modalita con <code>curl localhost:8788/health</code></td></tr>
+            <tr><td>Errore 429</td><td>Rate limit raggiunto. Attendi o aumenta i limiti con il provider</td></tr>
+          </tbody>
+        </table>
+        
+        <h3>Log Debug</h3>
+        <pre class="code-block bash"><code># Abilita log dettagliati
+LOG_LEVEL=debug docker-compose up
+
+# Cerca errori specifici
+docker-compose logs | grep -i error
+
+# Trace una richiesta specifica
+docker-compose logs -f | grep "request-id-123"</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
+        
+        <h2 id="hardening">9. Hardening e Resilienza (tripla difesa)<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
+        
+        <h3>Livello 1: Rate Limiting</h3>
+        <pre class="code-block bash"><code># Limiti per provider
+ANTHROPIC_RATE_LIMIT=100
+MINIMAX_RATE_LIMIT=200
+GLOBAL_RATE_LIMIT=150</code><button class="copy-btn" onclick="copyAnchor(this)">#</button></pre>
+        
+        <h3>Livello 2: Circuit Breaker</h3>
+        <p>Il sistema chiude automaticamente il circuito verso un provider se:</p>
+        <ul>
+          <li>5 errori consecutivi</li>
+          <li>Tasso di errore > 50% in 1 minuto</li>
+          <li>Latenza > 10 secondi</li>
+        </ul>
+        <pre class="code-block bash"><code># Configurazione Circuit Breaker
+CIRCUIT_BREAKER_THRESHOLD=5
+CIRCUIT_BREAKER_TIMEOUT=60
+CIRCUIT_BREAKER_RESET=300</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
+        
+        <h3>Livello 3: Health Monitoring</h3>
+        <pre class="code-block bash"><code># Check automatici
+HEALTH_CHECK_INTERVAL=30
+HEALTH_CHECK_ENDPOINT=/v1/models
+AUTO_RECOVERY=true</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
+        
+        <div class="danger-box">
+          <strong>Importante</strong>
+          Non disattivare mai tutti e tre i livelli di difesa insieme. Questo espone il sistema a cascate di errori e costi non controllati.
+        </div>
+        
+        <h2 id="variabili">10. Variabili d'Ambiente<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
+        
+        <table>
+          <thead>
+            <tr><th>Variabile</th><th>Default</th><th>Descrizione</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>ROUTING_MODE</code></td><td>interactive</td><td>Modalita: anthropic, minimax, mixed, interactive</td></tr>
+            <tr><td><code>ANTHROPIC_API_KEY</code></td><td>-</td><td>Chiave API Anthropic</td></tr>
+            <tr><td><code>MINIMAX_API_KEY</code></td><td>-</td><td>Chiave API MiniMax</td></tr>
+            <tr><td><code>PRIMARY_PROVIDER</code></td><td>anthropic</td><td>Provider primario per mixed mode</td></tr>
+            <tr><td><code>FALLBACK_ENABLED</code></td><td>true</td><td>Abilita fallback automatico</td></tr>
+            <tr><td><code>TIMEOUT_MS</code></td><td>30000</td><td>Timeout per richiesta (ms)</td></tr>
+            <tr><td><code>LOG_LEVEL</code></td><td>info</td><td>Livello log: debug, info, warn, error</td></tr>
+            <tr><td><code>PORT</code></td><td>8787</td><td>Porta principale</td></tr>
+            <tr><td><code>COST_OPTIMIZATION</code></td><td>false</td><td>Abilita ottimizzazione costi</td></tr>
+            <tr><td><code>CIRCUIT_BREAKER_THRESHOLD</code></td><td>5</td><td>Errori prima di aprire circuito</td></tr>
+          </tbody>
+        </table>
+        
+        <h2 id="requisiti">11. Requisiti di Sistema<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
+        
+        <table>
+          <thead>
+            <tr><th>Componente</th><th>Minimo</th><th>Raccomandato</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>CPU</td><td>1 core</td><td>2+ core</td></tr>
+            <tr><td>RAM</td><td>512 MB</td><td>1 GB</td></tr>
+            <tr><td>Docker</td><td>20.10+</td><td>24.0+</td></tr>
+            <tr><td>Docker Compose</td><td>2.0+</td><td>2.20+</td></tr>
+            <tr><td>Network</td><td>Stabile</td><td>Banda larga</td></tr>
+          </tbody>
+        </table>
+        
+        <h3>Browser Supportati</h3>
+        <ul>
+          <li>Chrome/Edge 90+</li>
+          <li>Firefox 88+</li>
+          <li>Safari 14+</li>
+        </ul>
+        
+        <h2 id="no-dovere">12. Cose da NON Fare<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
+        
+        <div class="danger-box">
+          <strong>NON Esportare API Key in Plain Text</strong>
+          <p>Non commitare mai le API key su Git. Usa .env.example come template.</p>
+        </div>
+        
+        <div class="danger-box">
+          <strong>NON Disabilitare il Circuit Breaker in Produzione</strong>
+          <p>Senza protezione, un provider guasto puo generare costi enormi.</p>
+        </div>
+        
+        <div class="danger-box">
+          <strong>NON Usare la Stessa API Key su Tutti i Backend</strong>
+          <p>Mantieni le key separate per tracciare meglio i costi.</p>
+        </div>
+        
+        <h3>Anti-pattern da Evitare</h3>
+        <ul>
+          <li><strong>No hardcoding</strong>: Usa sempre variabili d'ambiente</li>
+          <li><strong>No retry infiniti</strong>: Imposta MAX_RETRIES</li>
+          <li><strong>No logging di API key</strong>: Maschera sempre i valori sensibili</li>
+          <li><strong>No timeout infinito</strong>: Limita sempre il tempo massimo</li>
+        </ul>
+      </article>
+    </main>
+  </div>
+  
+  <footer class="footer">
+    <p>AI Router Stack - Manuale Operativo (IT) v1.0</p>
+    <p>Documento generato il 2026-06-23 | <a href="https://github.com/eroslifestyle/ai-router-switch">github.com/eroslifestyle/ai-router-switch</a></p>
+  </footer>
+  
+  <div class="toast" id="toast">Copiato!</div>
+  
+  <script>
+    // Scroll spy for TOC
+    const sections = document.querySelectorAll('h2[id], h3[id], h4[id]');
+    const tocLinks = document.querySelectorAll('.toc a');
+    
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          tocLinks.forEach(link => {
+            link.classList.remove('active');
+            if (link.getAttribute('href') === '#' + entry.target.id) {
+              link.classList.add('active');
+            }
+          });
+        }
+      });
+    }, {
+      rootMargin: '-20% 0px -70% 0px'
+    });
+    
+    sections.forEach(section => observer.observe(section));
+    
+    // Smooth scroll
+    tocLinks.forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const id = link.getAttribute('href').substring(1);
+        const element = document.getElementById(id);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        if (window.innerWidth <= 768) {
+          document.getElementById('sidebar').classList.remove('mobile-open');
+        }
+      });
+    });
+    
+    // Copy code functionality
+    function copyCode(btn) {
+      const pre = btn.parentElement;
+      const code = pre.querySelector('code');
+      const text = code ? code.textContent : pre.textContent;
+      
+      navigator.clipboard.writeText(text).then(() => {
+        btn.classList.add('copied');
+        btn.textContent = 'Copiato!';
+        showToast('Copiato!');
+        
+        setTimeout(() => {
+          btn.classList.remove('copied');
+          btn.textContent = 'Copia';
+        }, 2000);
+      });
+    }
+    
+    // Copy anchor URL
+    function copyAnchor(btn) {
+      const heading = btn.parentElement;
+      const id = heading.id;
+      const url = window.location.origin + window.location.pathname + '#' + id;
+      navigator.clipboard.writeText(url).then(() => {
+        showToast('Link copiato!');
+      });
+    }
+    
+    // Toast notification
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2000);
+    }
+    
+    // TOC search/filter
+    function filterTOC() {
+      const query = document.getElementById('searchInput').value.toLowerCase();
+      const items = document.querySelectorAll('.toc li');
+      
+      items.forEach(item => {
+        const text = item.textContent.toLowerCase();
+        const link = item.querySelector('a');
+        if (text.includes(query) || query === '') {
+          item.classList.remove('toc-hidden');
+        } else {
+          item.classList.add('toc-hidden');
+        }
+      });
+    }
+    
+    // Mobile sidebar toggle
+    function toggleSidebar() {
+      const sidebar = document.getElementById('sidebar');
+      sidebar.classList.toggle('mobile-open');
+    }
+    
+    // Add copy buttons to code blocks
+    document.querySelectorAll('pre:not(.diagram)').forEach(pre => {
+      if (!pre.querySelector('.copy-btn')) {
+        const btn = document.createElement('button');
+        btn.className = 'copy-btn';
+        btn.textContent = 'Copia';
+        btn.onclick = () => copyCode(btn);
+        pre.classList.add('code-block');
+        pre.appendChild(btn);
+      }
+    });
+    
+    // Light mode toggle (optional feature)
+    const lightToggle = document.createElement('button');
+    lightToggle.textContent = 'Tema';
+    lightToggle.style.marginLeft = '0.5rem';
+    lightToggle.onclick = () => document.body.classList.toggle('light-mode');
+    document.querySelector('.header-nav').appendChild(lightToggle);
+  </script>
+</body>
+</html>

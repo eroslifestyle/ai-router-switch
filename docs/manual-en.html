@@ -1,0 +1,1274 @@
+<!--
+  AI Router Stack - Operational Manual (EN)
+  Auto-generated. Self-contained: no CDN, no external dependencies.
+  For the markdown version: docs/MANUAL.en.md
+  For the Italian version: docs/manual-it.html
+  To switch language: docs/index.html
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Router Stack - Operational Manual (EN)</title>
+  <style>
+    :root {
+      --bg-dark: #0f1419;
+      --bg-light: #fafafa;
+      --text-dark: #e6edf3;
+      --text-light: #1a202c;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --code-bg-dark: #1e293b;
+      --code-bg-light: #f1f5f9;
+      --sidebar-width: 280px;
+      --header-height: 56px;
+      --border-color: #2d3748;
+      --border-light: #e2e8f0;
+      --info-bg: #1e3a5f;
+      --warn-bg: #4a3f00;
+      --danger-bg: #4a1515;
+      --info-text: #93c5fd;
+      --warn-text: #fcd34d;
+      --danger-text: #fca5a5;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      line-height: 1.6;
+      background: var(--bg-dark);
+      color: var(--text-dark);
+    }
+
+    body.light {
+      background: var(--bg-light);
+      color: var(--text-light);
+    }
+
+    /* Header */
+    header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: var(--header-height);
+      background: rgba(15, 20, 25, 0.95);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      z-index: 1000;
+      backdrop-filter: blur(10px);
+    }
+
+    body.light header {
+      background: rgba(250, 250, 250, 0.95);
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .header-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text-dark);
+    }
+
+    body.light .header-title {
+      color: var(--text-light);
+    }
+
+    .header-links {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .header-links a {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.9rem;
+      padding: 6px 12px;
+      border-radius: 6px;
+      transition: background 0.2s;
+    }
+
+    .header-links a:hover {
+      background: rgba(59, 130, 246, 0.15);
+    }
+
+    .lang-toggle {
+      background: var(--code-bg-dark);
+      border: 1px solid var(--border-color);
+      color: var(--text-dark);
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+
+    body.light .lang-toggle {
+      background: var(--code-bg-light);
+      border: 1px solid var(--border-light);
+      color: var(--text-light);
+    }
+
+    .theme-toggle {
+      background: none;
+      border: 1px solid var(--border-color);
+      color: var(--text-dark);
+      padding: 6px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+
+    body.light .theme-toggle {
+      border-color: var(--border-light);
+      color: var(--text-light);
+    }
+
+    /* Mobile menu button */
+    .mobile-menu-btn {
+      display: none;
+      background: none;
+      border: none;
+      color: var(--text-dark);
+      font-size: 1.5rem;
+      cursor: pointer;
+      padding: 8px;
+    }
+
+    body.light .mobile-menu-btn {
+      color: var(--text-light);
+    }
+
+    /* Layout */
+    .layout {
+      display: flex;
+      margin-top: var(--header-height);
+    }
+
+    /* Sidebar */
+    aside {
+      position: fixed;
+      top: var(--header-height);
+      left: 0;
+      width: var(--sidebar-width);
+      height: calc(100vh - var(--header-height));
+      background: var(--bg-dark);
+      border-right: 1px solid var(--border-color);
+      overflow-y: auto;
+      padding: 20px 0;
+    }
+
+    body.light aside {
+      background: var(--bg-light);
+      border-right: 1px solid var(--border-light);
+    }
+
+    .toc-search {
+      padding: 0 16px 16px;
+    }
+
+    .toc-search input {
+      width: 100%;
+      padding: 8px 12px;
+      background: var(--code-bg-dark);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      color: var(--text-dark);
+      font-size: 0.85rem;
+    }
+
+    body.light .toc-search input {
+      background: var(--code-bg-light);
+      border: 1px solid var(--border-light);
+      color: var(--text-light);
+    }
+
+    .toc-search input::placeholder {
+      color: #718096;
+    }
+
+    .toc-list {
+      list-style: none;
+    }
+
+    .toc-list li {
+      margin: 0;
+    }
+
+    .toc-list a {
+      display: block;
+      padding: 8px 16px;
+      color: var(--text-dark);
+      text-decoration: none;
+      font-size: 0.9rem;
+      border-left: 3px solid transparent;
+      transition: all 0.2s;
+    }
+
+    body.light .toc-list a {
+      color: var(--text-light);
+    }
+
+    .toc-list a:hover {
+      background: rgba(59, 130, 246, 0.1);
+      color: var(--accent);
+    }
+
+    .toc-list a.active {
+      border-left-color: var(--accent);
+      background: rgba(59, 130, 246, 0.15);
+      color: var(--accent);
+    }
+
+    .toc-list .sub-item a {
+      padding-left: 32px;
+      font-size: 0.85rem;
+    }
+
+    .toc-list .sub-sub-item a {
+      padding-left: 48px;
+      font-size: 0.8rem;
+    }
+
+    .toc-hidden {
+      display: none !important;
+    }
+
+    /* Main content */
+    main {
+      flex: 1;
+      margin-left: var(--sidebar-width);
+      padding: 40px 20px;
+      max-width: 900px;
+    }
+
+    section {
+      margin-bottom: 60px;
+      scroll-margin-top: calc(var(--header-height) + 20px);
+    }
+
+    section h1 {
+      font-size: 2rem;
+      margin-bottom: 20px;
+      color: var(--text-dark);
+      border-bottom: 2px solid var(--accent);
+      padding-bottom: 10px;
+    }
+
+    body.light section h1 {
+      color: var(--text-light);
+    }
+
+    section h2 {
+      font-size: 1.5rem;
+      margin: 30px 0 15px;
+      color: var(--accent);
+    }
+
+    section h3 {
+      font-size: 1.2rem;
+      margin: 20px 0 10px;
+      color: var(--text-dark);
+    }
+
+    body.light section h3 {
+      color: var(--text-light);
+    }
+
+    section h4 {
+      font-size: 1rem;
+      margin: 15px 0 8px;
+      color: #a0aec0;
+    }
+
+    body.light section h4 {
+      color: #4a5568;
+    }
+
+    p {
+      margin-bottom: 15px;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    /* Code blocks */
+    pre {
+      background: var(--code-bg-dark);
+      border-radius: 8px;
+      padding: 16px;
+      margin: 15px 0;
+      overflow-x: auto;
+      position: relative;
+      border: 1px solid var(--border-color);
+    }
+
+    body.light pre {
+      background: var(--code-bg-light);
+      border: 1px solid var(--border-light);
+    }
+
+    pre.diagram {
+      font-family: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+      font-size: 0.75rem;
+      line-height: 1.4;
+      color: #a5b4fc;
+    }
+
+    body.light pre.diagram {
+      color: #4338ca;
+    }
+
+    code {
+      font-family: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+      font-size: 0.9rem;
+    }
+
+    pre code {
+      display: block;
+      color: var(--text-dark);
+    }
+
+    body.light pre code {
+      color: var(--text-light);
+    }
+
+    .copy-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: var(--text-dark);
+      padding: 4px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.75rem;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    body.light .copy-btn {
+      background: rgba(0, 0, 0, 0.05);
+      border: 1px solid rgba(0, 0, 0, 0.15);
+      color: var(--text-light);
+    }
+
+    pre:hover .copy-btn {
+      opacity: 1;
+    }
+
+    .copy-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    body.light .copy-btn:hover {
+      background: rgba(0, 0, 0, 0.1);
+    }
+
+    /* Inline code */
+    :not(pre) > code {
+      background: var(--code-bg-dark);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.85em;
+      color: #f472b6;
+    }
+
+    body.light :not(pre) > code {
+      background: var(--code-bg-light);
+      color: #be185d;
+    }
+
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 15px 0;
+      font-size: 0.9rem;
+    }
+
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border: 1px solid var(--border-color);
+    }
+
+    body.light th, body.light td {
+      border: 1px solid var(--border-light);
+    }
+
+    th {
+      background: var(--code-bg-dark);
+      font-weight: 600;
+    }
+
+    body.light th {
+      background: var(--code-bg-light);
+    }
+
+    tr:nth-child(even) {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    body.light tr:nth-child(even) {
+      background: rgba(0, 0, 0, 0.02);
+    }
+
+    /* Info boxes */
+    .info-box, .warn-box, .danger-box {
+      padding: 16px;
+      border-radius: 8px;
+      margin: 15px 0;
+      border-left: 4px solid;
+    }
+
+    .info-box {
+      background: var(--info-bg);
+      border-color: var(--accent);
+    }
+
+    .warn-box {
+      background: var(--warn-bg);
+      border-color: #f59e0b;
+    }
+
+    .danger-box {
+      background: var(--danger-bg);
+      border-color: #ef4444;
+    }
+
+    .info-box p, .warn-box p, .danger-box p {
+      margin: 0;
+      color: var(--text-dark);
+    }
+
+    body.light .info-box p,
+    body.light .warn-box p,
+    body.light .danger-box p {
+      color: var(--text-light);
+    }
+
+    .info-box strong, .warn-box strong, .danger-box strong {
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    /* Heading anchor */
+    .heading-anchor {
+      opacity: 0;
+      margin-left: 8px;
+      color: var(--accent);
+      font-size: 0.9em;
+      transition: opacity 0.2s;
+    }
+
+    h1:hover .heading-anchor,
+    h2:hover .heading-anchor,
+    h3:hover .heading-anchor {
+      opacity: 1;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: var(--accent);
+      color: white;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      z-index: 2000;
+      opacity: 0;
+      transform: translateY(20px);
+      transition: all 0.3s;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* Footer */
+    footer {
+      margin-left: var(--sidebar-width);
+      padding: 30px 20px;
+      border-top: 1px solid var(--border-color);
+      text-align: center;
+      font-size: 0.85rem;
+      color: #718096;
+    }
+
+    body.light footer {
+      border-top: 1px solid var(--border-light);
+    }
+
+    footer a {
+      color: var(--accent);
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .mobile-menu-btn {
+        display: block;
+      }
+
+      aside {
+        transform: translateX(-100%);
+        transition: transform 0.3s;
+        z-index: 999;
+      }
+
+      aside.open {
+        transform: translateX(0);
+      }
+
+      main {
+        margin-left: 0;
+        padding: 20px 16px;
+      }
+
+      footer {
+        margin-left: 0;
+      }
+
+      .header-links span {
+        display: none;
+      }
+    }
+
+    /* Print */
+    @media print {
+      header, aside, .copy-btn, .mobile-menu-btn {
+        display: none !important;
+      }
+
+      body {
+        background: white !important;
+        color: black !important;
+      }
+
+      main {
+        margin-left: 0 !important;
+        max-width: 100% !important;
+        padding: 0 !important;
+      }
+
+      section {
+        page-break-inside: avoid;
+        margin-bottom: 30px;
+      }
+
+      h1, h2, h3 {
+        color: black !important;
+        border-color: #333 !important;
+      }
+
+      pre {
+        background: #f5f5f5 !important;
+        border: 1px solid #ccc !important;
+        color: black !important;
+      }
+
+      pre code {
+        color: black !important;
+      }
+
+      a {
+        color: #0066cc !important;
+        text-decoration: underline;
+      }
+
+      footer {
+        margin-left: 0 !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <button class="mobile-menu-btn" onclick="toggleSidebar()" aria-label="Toggle menu">&#9776;</button>
+      <span class="header-title">AI Router Stack - Manual (EN)</span>
+    </div>
+    <div class="header-links">
+      <a href="#overview">Index</a>
+      <a href="index.html" class="btn-link">← Home</a>
+      <a href="#" onclick="window.print(); return false;">Print</a>
+      <button class="lang-toggle" onclick="location.href='manual-it.html'">IT</button>
+      <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">&#9788;</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside id="sidebar">
+      <nav class="toc-search" aria-label="Search sections">
+        <input type="text" id="toc-filter" placeholder="Filter sections..." onkeyup="filterTOC()">
+      </nav>
+      <nav aria-label="Table of contents">
+        <ul class="toc-list" id="toc">
+          <li><a href="#overview" data-section="overview">Overview</a></li>
+          <li><a href="#architecture" data-section="architecture">Network Architecture</a></li>
+          <li class="sub-item"><a href="#architecture-diagram" data-section="architecture-diagram">Architecture Diagram</a></li>
+          <li><a href="#routing-modes" data-section="routing-modes">The Four Routing Modes</a></li>
+          <li class="sub-item"><a href="#mode-anthropic" data-section="mode-anthropic">3.1 Anthropic (Pure)</a></li>
+          <li class="sub-item"><a href="#mode-minimax" data-section="mode-minimax">3.2 MiniMax (Pure)</a></li>
+          <li class="sub-item"><a href="#mode-mixed" data-section="mode-mixed">3.3 Mixed (Bidirectional Fallback)</a></li>
+          <li class="sub-item"><a href="#mode-interactive" data-section="mode-interactive">3.4 Interactive (Intelligent)</a></li>
+          <li><a href="#mode-switching" data-section="mode-switching">Runtime Mode Switching</a></li>
+          <li class="sub-item"><a href="#dynamic-port" data-section="dynamic-port">4.1 Dynamic Port (8787)</a></li>
+          <li class="sub-item"><a href="#fixed-ports" data-section="fixed-ports">4.2 Fixed Ports (8771-8774)</a></li>
+          <li><a href="#commands" data-section="commands">In-Chat Commands</a></li>
+          <li><a href="#health-check" data-section="health-check">Health Check</a></li>
+          <li><a href="#examples" data-section="examples">Use-Case Examples</a></li>
+          <li class="sub-item"><a href="#example-basic" data-section="example-basic">7.1 Basic Claude Code</a></li>
+          <li class="sub-item"><a href="#example-parallel" data-section="example-parallel">7.2 Parallel Sessions</a></li>
+          <li class="sub-item"><a href="#example-failover" data-section="example-failover">7.3 Automatic Failover</a></li>
+          <li class="sub-item"><a href="#example-cost" data-section="example-cost">7.4 Smart Cost Saving</a></li>
+          <li><a href="#troubleshooting" data-section="troubleshooting">Quick Troubleshooting</a></li>
+          <li><a href="#hardening" data-section="hardening">Hardening & Resilience</a></li>
+          <li><a href="#env-vars" data-section="env-vars">Environment Variables</a></li>
+          <li><a href="#requirements" data-section="requirements">System Requirements</a></li>
+          <li><a href="#donot" data-section="donot">Do-Not List</a></li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main>
+      <section id="overview">
+        <h1>Overview <a href="#overview" class="heading-anchor" onclick="copyAnchor(event)">#</a></h1>
+        <p>AI Router Stack is a local proxy solution that enables intelligent routing of AI API requests between multiple providers. It provides automatic failover, cost optimization, and seamless provider switching without modifying application code.</p>
+        <p>The router listens on configurable ports and forwards requests to Anthropic Claude, MiniMax, or both based on routing rules. It supports four distinct routing modes, hot-swappable at runtime via simple commands.</p>
+        <div class="info-box">
+          <strong>Key Features</strong>
+          <p>Automatic failover between providers | Real-time mode switching | Health monitoring | Cost tracking | Parallel session support | Print-friendly documentation</p>
+        </div>
+      </section>
+
+      <section id="architecture">
+        <h1>Network Architecture <a href="#architecture" class="heading-anchor" onclick="copyAnchor(event)">#</a></h1>
+        <p>The router operates as a local proxy between your applications and external AI providers. All traffic flows through localhost, ensuring data privacy while enabling advanced routing logic.</p>
+        <h3 id="architecture-diagram">Architecture Diagram</h3>
+<pre class="diagram">┌─────────────────────────────────────────────────────────────────┐
+│                        CLIENT APPLICATIONS                        │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
+│  │ Claude Code  │  │   Cursor    │  │    Custom    │           │
+│  │  (CLI/IDE)  │  │   (IDE)     │  │   Scripts    │           │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘           │
+└─────────┼─────────────────┼─────────────────┼────────────────────┘
+          │                 │                 │
+          ▼                 ▼                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      AI ROUTER STACK                             │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                    Port 8787 (Dynamic)                    │   │
+│  │                    Port 8771 (Anthropic)                 │   │
+│  │                    Port 8772 (MiniMax)                   │   │
+│  │                    Port 8773 (Mixed)                     │   │
+│  │                    Port 8774 (Interactive)               │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                    Routing Engine                         │   │
+│  │  ┌────────────┐  ┌────────────┐  ┌────────────────────┐  │   │
+│  │  │  Mode      │  │  Health    │  │  Cost Tracker      │  │   │
+│  │  │  Manager   │  │  Monitor   │  │  & Analytics       │  │   │
+│  │  └────────────┘  └────────────┘  └────────────────────┘  │   │
+│  └──────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+          │                                    │
+          ▼                                    ▼
+┌─────────────────┐                  ┌─────────────────┐
+│    ANTHROPIC    │                  │     MINIMAX     │
+│   API SERVER    │                  │    API SERVER   │
+│ api.anthropic.com│                │ api.minimax.io  │
+└─────────────────┘                  └─────────────────┘</pre>
+        <p>The router maintains persistent connections to both providers and implements connection pooling for optimal performance. Health checks run every 30 seconds to detect provider availability.</p>
+      </section>
+
+      <section id="routing-modes">
+        <h1>The Four Routing Modes <a href="#routing-modes" class="heading-anchor" onclick="copyAnchor(event)">#</a></h1>
+        <p>Each mode optimizes for different use cases. Choose based on your priority: cost savings, reliability, or quality.</p>
+
+        <h2 id="mode-anthropic">3.1 Anthropic (Pure) <a href="#mode-anthropic" class="heading-anchor" onclick="copyAnchor(event)">#</a></h2>
+        <p>Direct passthrough to Anthropic Claude. Use this when you need guaranteed Claude-only responses or during MiniMax outages.</p>
+        <h4>Port: 8771</h4>
+        <h4>Behavior</h4>
+        <ul>
+          <li>100% of requests go to Anthropic</li>
+          <li>No cost optimization</li>
+          <li>No failover (returns error on outage)</li>
+        </ul>
+        <div class="warn-box">
+          <strong>Use Case</strong>
+          <p>When you need deterministic Claude responses for compliance or testing purposes.</p>
+        </div>
+
+        <h2 id="mode-minimax">3.2 MiniMax (Pure) <a href="#mode-minimax" class="heading-anchor" onclick="copyAnchor(event)">#</a></h2>
+        <p>Direct passthrough to MiniMax API. Use this for cost-sensitive operations where response quality is secondary.</p>
+        <h4>Port: 8772</h4>
+        <h4>Behavior</h4>
+        <ul>
+          <li>100% of requests go to MiniMax</li>
+          <li>Maximum cost savings (~90% cheaper)</li>
+          <li>No failover to Claude</li>
+        </ul>
+        <div class="warn-box">
+          <strong>Use Case</strong>
+          <p>Batch processing, initial drafts, non-critical automation where cost is the primary factor.</p>
+        </div>
+
+        <h2 id="mode-mixed">3.3 Mixed (Bidirectional Fallback) <a href="#mode-mixed" class="heading-anchor" onclick="copyAnchor(event)">#</a></h2>
+        <p>Intelligent routing with automatic failover in both directions. Primary provider is MiniMax; falls back to Claude on failure.</p>
+        <h4>Port: 8773</h4>
+        <h4>Behavior</h4>
+        <table>
+          <thead>
+            <tr><th>Condition</th><th>Action</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Normal operation</td><td>Route to MiniMax</td></tr>
+            <tr><td>MiniMax error/timeout</td><td>Retry once, then fallback to Claude</td></tr>
+            <tr><td>Claude also fails</td><td>Return error with both error messages</td></tr>
+          </tbody>
+        </table>
+        <div class="info-box">
+          <strong>Best For</strong>
+          <p>Production workloads requiring cost optimization with reliability guarantees. This is the recommended mode for most use cases.</p>
+        </div>
+
+        <h2 id="mode-interactive">3.4 Interactive (Intelligent) <a href="#mode-interactive" class="heading-anchor" onclick="copyAnchor(event)">#</a></h2>
+        <p>AI-assisted routing decision. Claude analyzes the request and determines optimal provider based on task complexity, cost, and current load.</p>
+        <h4>Port: 8774</h4>
+        <h4>Routing Logic</h4>
+        <pre><code>Request Analysis:
+  - Task complexity score (1-10)
+  - Estimated tokens required
+  - Required model capabilities
+  - Cost sensitivity threshold
+
+Decision Matrix:
+  Complexity 1-3 → MiniMax (cost efficiency)
+  Complexity 4-6 → Mixed mode evaluation
+  Complexity 7-10 → Anthropic (quality priority)
+  Capability mismatch → Fallback to Claude</code></pre>
+        <div class="info-box">
+          <strong>Note</strong>
+          <p>Interactive mode adds ~50-100ms latency due to routing analysis. For latency-critical applications, use Mixed mode instead.</p>
+        </div>
+      </section>
+
+      <section id="mode-switching">
+        <h1>Runtime Mode Switching <a href="#mode-switching" class="heading-anchor" onclick="copyAnchor(event)">#</a></h1>
+        <p>Switch routing modes without restarting the router. Both dynamic and fixed port modes support hot-swapping.</p>
+
+        <h2 id="dynamic-port">4.1 Dynamic Port (8787) <a href="#dynamic-port" class="heading-anchor" onclick="copyAnchor(event)">#</a></h2>
+        <p>Single port that accepts mode changes via chat commands. Ideal for interactive sessions and Claude Code usage.</p>
+        <h4>Configuration</h4>
+        <pre><code>export ANTHROPIC_API_KEY="sk-ant-..."
+export MINIMAX_API_KEY="eyJ..."
+
+# Start router
+python router.py --port 8787 --mode mixed</code></pre>
+        <h4>Supported Modes</h4>
+        <table>
+          <thead>
+            <tr><th>Mode</th><th>Flag</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>anthropic</td><td><code>--mode anthropic</code></td><td>Anthropic-only routing</td></tr>
+            <tr><td>minimax</td><td><code>--mode minimax</code></td><td>MiniMax-only routing</td></tr>
+            <tr><td>mixed</td><td><code>--mode mixed</code></td><td>Bidirectional fallback</td></tr>
+            <tr><td>interactive</td><td><code>--mode interactive</code></td><td>AI-assisted routing</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="fixed-ports">4.2 Fixed Ports (8771-8774) <a href="#fixed-ports" class="heading-anchor" onclick="copyAnchor(event)">#</a></h2>
+        <p>Each routing mode gets a dedicated port. Applications connect to specific ports based on their routing requirements.</p>
+        <table>
+          <thead>
+            <tr><th>Port</th><th>Mode</th><th>Use Case</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>8771</td><td>Anthropic</td><td>Compliance, testing, Claude-specific features</td></tr>
+            <tr><td>8772</td><td>MiniMax</td><td>Cost-sensitive batch operations</td></tr>
+            <tr><td>8773</td><td>Mixed</td><td>Production with failover</td></tr>
+            <tr><td>8774</td><td>Interactive</td><td>Intelligent multi-objective routing</td></tr>
+          </tbody>
+        </table>
+        <div class="info-box">
+          <strong>Startup Command</strong>
+          <p><code>python router.py --all-ports</code> starts all four ports simultaneously for maximum flexibility.</p>
+        </div>
+      </section>
+
+      <section id="commands">
+        <h1>In-Chat Commands <a href="#commands" class="heading-anchor" onclick="copyAnchor(event)">#</a></h1>
+        <p>Control the router directly from your conversation. Prefix commands with <code>/router</code> or use the shorthand <code>/rr</code>.</p>
+        <h4>Available Commands</h4>
+        <table>
+          <thead>
+            <tr><th>Command</th><th>Description</th><th>Example</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>/router mode [mode]</code></td><td>Switch routing mode</td><td><code>/router mode anthropic</code></td></tr>
+            <tr><td><code>/router status</code></td><td>Show current configuration</td><td><code>/router status</code></td></tr>
+            <tr><td><code>/router health</code></td><td>Run health check</td><td><code>/router health</code></td></tr>
+            <tr><td><code>/router stats</code></td><td>Display cost and usage stats</td><td><code>/router stats</code></td></tr>
+            <tr><td><code>/router logs [n]</code></td><td>Show recent logs</td><td><code>/router logs 50</code></td></tr>
+            <tr><td><code>/router help</code></td><td>Show command reference</td><td><code>/router help</code></td></tr>
+          </tbody>
+        </table>
+        <div class="info-box">
+          <strong>Response Format</strong>
+          <p>Commands return structured JSON when called programmatically, human-readable text in interactive mode.</p>
+        </div>
+        <h4>Status Response Example</h4>
+<pre><code>$ /router status
+{
+  "mode": "mixed",
+  "primary": "minimax",
+  "fallback": "anthropic",
+  "uptime": "2h 34m",
+  "requests_total": 1247,
+  "requests_minimax": 1089,
+  "requests_anthropic": 158,
+  "cost_savings": "67.3%",
+  "health": {
+    "minimax": "ok (23ms)",
+    "anthropic": "ok (145ms)"
+  }
+}</code></pre>
+      </section>
+
+      <section id="health-check">
+        <h1>Health Check <a href="#health-check" class="heading-anchor" onclick="copyAnchor(event)">#</a></h1>
+        <p>Automated health monitoring ensures requests only go to healthy endpoints. Checks run every 30 seconds by default.</p>
+        <h4>Health Check Endpoint</h4>
+        <pre><code>GET http://localhost:8787/health</code></pre>
+        <h4>Response</h4>
+<pre><code>{
+  "status": "healthy",
+  "providers": {
+    "anthropic": {
+      "status": "up",
+      "latency_ms": 142,
+      "last_check": "2026-06-23T10:30:00Z"
+    },
+    "minimax": {
+      "status": "up",
+      "latency_ms": 28,
+      "last_check": "2026-06-23T10:30:00Z"
+    }
+  },
+  "current_mode": "mixed",
+  "router_uptime": "24h 15m"
+}</code></pre>
+        <h4>Failure Thresholds</h4>
+        <table>
+          <thead>
+            <tr><th>Condition</th><th>Threshold</th><th>Action</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Timeout</td><td>5 consecutive</td><td>Mark provider down</td></tr>
+            <tr><td>HTTP 5xx</td><td>3 consecutive</td><td>Mark provider degraded</td></tr>
+            <tr><td>HTTP 429</td><td>2 consecutive</td><td>Rate limit backoff</td></tr>
+            <tr><td>Auth failure</td><td>1</td><td>Mark provider down, alert</td></tr>
+          </tbody>
+        </table>
+        <div class="danger-box">
+          <strong>Critical</strong>
+          <p>If both providers are down, the router returns 503 Service Unavailable with retry-after header. Monitor this condition closely.</p>
+        </div>
+      </section>
+
+      <section id="examples">
+        <h1>Use-Case Examples <a href="#examples" class="heading-anchor" onclick="copyAnchor(event)">#</a></h1>
+
+        <h2 id="example-basic">7.1 Basic Claude Code <a href="#example-basic" class="heading-anchor" onclick="copyAnchor(event)">#</a></h2>
+        <p>Configure Claude Code to use the router for automatic cost optimization.</p>
+<pre><code># 1. Start the router in mixed mode
+python router.py --port 8787 --mode mixed
+
+# 2. Configure Claude Code environment
+export ANTHROPIC_API_BASE="http://localhost:8787/v1"
+export ANTHROPIC_API_KEY="sk-ant-..."  # Your actual key
+export MINIMAX_API_KEY="eyJ..."        # Your MiniMax key
+
+# 3. Run Claude Code normally
+claude-code
+
+# 4. Monitor routing decisions
+/router status</code></pre>
+        <div class="info-box">
+          <strong>Result</strong>
+          <p>Claude Code now automatically routes requests through MiniMax when appropriate, falling back to Claude on errors. Cost savings of 50-70% typical.</p>
+        </div>
+
+        <h2 id="example-parallel">7.2 Parallel Sessions with Different Backends <a href="#example-parallel" class="heading-anchor" onclick="copyAnchor(event)">#</a></h2>
+        <p>Run multiple sessions simultaneously, each using different routing strategies.</p>
+<pre><code># Terminal 1: Claude Code with Anthropic-only (compliance)
+python router.py --port 8771 --mode anthropic
+export ANTHROPIC_API_BASE="http://localhost:8771/v1"
+claude-code --project compliance-audit
+
+# Terminal 2: Claude Code with cost optimization
+python router.py --port 8773 --mode mixed
+export ANTHROPIC_API_BASE="http://localhost:8773/v1"
+claude-code --project batch-refactor
+
+# Terminal 3: Claude Code with AI-assisted routing
+python router.py --port 8774 --mode interactive
+export ANTHROPIC_API_BASE="http://localhost:8774/v1"
+claude-code --project research-analysis</code></pre>
+
+        <h2 id="example-failover">7.3 Automatic Failover <a href="#example-failover" class="heading-anchor" onclick="copyAnchor(event)">#</a></h2>
+        <p>Configure automatic failover for critical production workloads.</p>
+<pre><code># Start router with health monitoring
+python router.py \
+  --port 8787 \
+  --mode mixed \
+  --health-check 15s \
+  --failover-threshold 3 \
+  --alert-webhook "https://hooks.example.com/router"
+
+# Health check will automatically:
+# 1. Detect MiniMax outage within 15s
+# 2. Mark MiniMax as unhealthy
+# 3. Route all traffic to Claude
+# 4. Send webhook alert
+# 5. Continue checking MiniMax
+# 6. Auto-recover when MiniMax returns</code></pre>
+        <div class="warn-box">
+          <strong>Failover Latency</strong>
+          <p>Expect 1-3 second delay during failover. The router retries once before switching, adding approximately 500ms to the first failed request.</p>
+        </div>
+
+        <h2 id="example-cost">7.4 Smart Cost Saving <a href="#example-cost" class="heading-anchor" onclick="copyAnchor(event)">#</a></h2>
+        <p>Use Interactive mode to balance cost and quality based on task analysis.</p>
+<pre><code># Configure cost sensitivity
+export COST_THRESHOLD="0.50"  # Max $0.50 per request
+export QUALITY_FLOOR="medium" # Minimum acceptable quality
+
+# Start with Interactive routing
+python router.py \
+  --port 8787 \
+  --mode interactive \
+  --cost-ceiling 10.00 \      # Hard cap: $10/hour
+  --prefer-minimax 0.8        # 80% preference for MiniMax
+
+# Example routing decisions:
+# - "Write unit tests" → MiniMax (cost: $0.02)
+# - "Design system architecture" → Anthropic (quality needed)
+# - "Debug authentication bug" → Mixed (balanced)</code></pre>
+        <h4>Cost Tracking</h4>
+<pre><code>$ /router stats
+Session Statistics:
+  Total Requests:    1,247
+  MiniMax Requests:   892 (71.5%)
+  Claude Requests:    355 (28.5%)
+  
+  MiniMax Cost:       $2.34
+  Claude Cost:        $18.72
+  Original Claude:    $64.18
+  
+  Total Savings:     67.2% ($43.12 saved)
+  
+  Average Latency:    89ms (MiniMax: 31ms, Claude: 156ms)</code></pre>
+      </section>
+
+      <section id="troubleshooting">
+        <h1>Quick Troubleshooting <a href="#troubleshooting" class="heading-anchor" onclick="copyAnchor(event)">#</a></h1>
+        <p>Common issues and their solutions. For extended debugging, see <a href="#health-check">Health Check</a> and <a href="#commands">In-Chat Commands</a>.</p>
+        <table>
+          <thead>
+            <tr><th>Symptom</th><th>Cause</th><th>Solution</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Connection refused (8787)</td><td>Router not running</td><td><code>python router.py --port 8787</code></td></tr>
+            <tr><td>All requests fail</td><td>Both providers down</td><td><code>/router health</code> to diagnose</td></tr>
+            <tr><td>401 Unauthorized</td><td>Invalid API key</td><td>Verify <code>ANTHROPIC_API_KEY</code> and <code>MINIMAX_API_KEY</code></td></tr>
+            <tr><td>High latency</td><td>Network or provider issue</td><td>Check <code>/router status</code> for latencies</td></tr>
+            <tr><td>Mode not switching</td><td>Invalid mode name</td><td>Use: anthropic, minimax, mixed, interactive</td></tr>
+            <tr><td>Cost not saving</td><td>Stuck in Anthropic-only mode</td><td><code>/router mode mixed</code></td></tr>
+            <tr><td>WebSocket errors</td><td>Streaming not supported on port</td><td>Use port 8787 for streaming</td></tr>
+          </tbody>
+        </table>
+        <div class="warn-box">
+          <strong>Debug Mode</strong>
+          <p>Run with <code>--debug</code> flag to enable verbose logging: <code>python router.py --port 8787 --debug</code></p>
+        </div>
+        <h4>Log Analysis</h4>
+<pre><code># View recent logs
+/router logs 100
+
+# Filter by provider
+grep "minimax" ~/.ai-router/logs/router.log
+
+# Find errors
+grep -E "(ERROR|FATAL)" ~/.ai-router/logs/router.log</code></pre>
+      </section>
+
+      <section id="hardening">
+        <h1>Hardening & Resilience <a href="#hardening" class="heading-anchor" onclick="copyAnchor(event)">#</a></h1>
+        <p>Triple defense strategy ensures reliability for production deployments.</p>
+        <h2>Defense Layer 1: Transport Security</h2>
+        <ul>
+          <li>TLS 1.3 for all external connections</li>
+          <li>Certificate pinning for provider endpoints</li>
+          <li>Local traffic on localhost only (no exposure)</li>
+        </ul>
+        <h2>Defense Layer 2: Request Integrity</h2>
+        <ul>
+          <li>Request/response validation</li>
+          <li>Schema enforcement for API compatibility</li>
+          <li>Timeout per-request: 30s default, configurable</li>
+        </ul>
+        <h2>Defense Layer 3: Operational Continuity</h2>
+        <ul>
+          <li>Automatic failover between providers</li>
+          <li>Circuit breaker pattern (open after 5 failures)</li>
+          <li>Graceful degradation to error responses</li>
+          <li>Webhook alerts for critical failures</li>
+        </ul>
+        <div class="info-box">
+          <strong>Recommended Production Configuration</strong>
+<pre><code>python router.py \
+  --port 8787 \
+  --mode mixed \
+  --health-check 15s \
+  --timeout 30 \
+  --circuit-breaker 5 \
+  --alert-webhook "YOUR_WEBHOOK_URL" \
+  --log-level INFO</code></pre>
+        </div>
+      </section>
+
+      <section id="env-vars">
+        <h1>Environment Variables <a href="#env-vars" class="heading-anchor" onclick="copyAnchor(event)">#</a></h1>
+        <table>
+          <thead>
+            <tr><th>Variable</th><th>Required</th><th>Default</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>ANTHROPIC_API_KEY</code></td><td>Yes</td><td>-</td><td>Anthropic API key (sk-ant-...)</td></tr>
+            <tr><td><code>MINIMAX_API_KEY</code></td><td>Yes</td><td>-</td><td>MiniMax API key (eyJ...)</td></tr>
+            <tr><td><code>ANTHROPIC_API_BASE</code></td><td>No</td><td>https://api.anthropic.com</td><td>Anthropic endpoint</td></tr>
+            <tr><td><code>MINIMAX_API_BASE</code></td><td>No</td><td>https://api.minimax.io</td><td>MiniMax endpoint</td></tr>
+            <tr><td><code>ROUTER_PORT</code></td><td>No</td><td>8787</td><td>Default listening port</td></tr>
+            <tr><td><code>ROUTER_MODE</code></td><td>No</td><td>mixed</td><td>Default routing mode</td></tr>
+            <tr><td><code>ROUTER_TIMEOUT</code></td><td>No</td><td>30</td><td>Request timeout (seconds)</td></tr>
+            <tr><td><code>ROUTER_LOG_LEVEL</code></td><td>No</td><td>INFO</td><td>DEBUG, INFO, WARN, ERROR</td></tr>
+            <tr><td><code>COST_CEILING</code></td><td>No</td><td>unlimited</td><td>Max cost per hour ($)</td></tr>
+            <tr><td><code>ALERT_WEBHOOK</code></td><td>No</td><td>-</td><td>Webhook URL for alerts</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="requirements">
+        <h1>System Requirements <a href="#requirements" class="heading-anchor" onclick="copyAnchor(event)">#</a></h1>
+        <h4>Minimum Requirements</h4>
+        <ul>
+          <li>Python 3.9+</li>
+          <li>2 GB RAM</li>
+          <li>100 MB disk space</li>
+          <li>Internet connection (for API access)</li>
+        </ul>
+        <h4>Supported Operating Systems</h4>
+        <ul>
+          <li>Linux (Ubuntu 20.04+, Debian 11+)</li>
+          <li>macOS 12+ (Monterey and later)</li>
+          <li>Windows 10/11 with WSL2</li>
+        </ul>
+        <h4>Python Dependencies</h4>
+<pre><code># All dependencies are embedded - no installation needed
+# The router is distributed as a single executable</code></pre>
+        <div class="info-box">
+          <strong>API Keys Required</strong>
+          <p>Valid Anthropic API key (supports Claude models) and MiniMax API key. Trial keys work for testing.</p>
+        </div>
+      </section>
+
+      <section id="donot">
+        <h1>Do-Not List <a href="#donot" class="heading-anchor" onclick="copyAnchor(event)">#</a></h1>
+        <p>Critical restrictions and prohibited use cases.</p>
+        <div class="danger-box">
+          <strong>Never Do These</strong>
+          <p>
+            <strong>1.</strong> Do not expose router ports to the internet (localhost only)<br>
+            <strong>2.</strong> Do not hardcode API keys in configuration files committed to version control<br>
+            <strong>3.</strong> Do not use in production without understanding the failover behavior<br>
+            <strong>4.</strong> Do not ignore health check failures - they indicate real problems<br>
+            <strong>5.</strong> Do not disable TLS verification even in development<br>
+            <strong>6.</strong> Do not exceed rate limits - both providers will ban offending IPs<br>
+            <strong>7.</strong> Do not use for malicious purposes, content generation violations, or illegal activities
+          </p>
+        </div>
+        <h4>Rate Limits</h4>
+        <table>
+          <thead>
+            <tr><th>Provider</th><th>Requests/min</th><th>Tokens/min</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Anthropic</td><td>50 (standard)</td><td>100,000</td></tr>
+            <tr><td>MiniMax</td><td>100</td><td>200,000</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+
+  <footer>
+    <p>AI Router Stack - Operational Manual (EN) v1.0</p>
+    <p>Document generated on 2026-06-23 | <a href="https://github.com/eroslifestyle/ai-router-switch">GitHub Repository</a></p>
+  </footer>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // Theme toggle
+    function toggleTheme() {
+      document.body.classList.toggle('light');
+      localStorage.setItem('theme', document.body.classList.contains('light') ? 'light' : 'dark');
+    }
+
+    // Load saved theme
+    if (localStorage.getItem('theme') === 'light') {
+      document.body.classList.add('light');
+    }
+
+    // Mobile sidebar toggle
+    function toggleSidebar() {
+      document.getElementById('sidebar').classList.toggle('open');
+    }
+
+    // Close sidebar on link click (mobile)
+    document.querySelectorAll('.toc-list a').forEach(link => {
+      link.addEventListener('click', () => {
+        if (window.innerWidth <= 768) {
+          document.getElementById('sidebar').classList.remove('open');
+        }
+      });
+    });
+
+    // Scroll spy with IntersectionObserver
+    const sections = document.querySelectorAll('section[id]');
+    const tocLinks = document.querySelectorAll('.toc-list a');
+
+    const observerOptions = {
+      rootMargin: '-80px 0px -70% 0px',
+      threshold: 0
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const id = entry.target.id;
+          tocLinks.forEach(link => {
+            link.classList.remove('active');
+            if (link.getAttribute('href') === '#' + id) {
+              link.classList.add('active');
+            }
+          });
+        }
+      });
+    }, observerOptions);
+
+    sections.forEach(section => observer.observe(section));
+
+    // Smooth scroll for anchor links
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+      anchor.addEventListener('click', function(e) {
+        const href = this.getAttribute('href');
+        if (href.length > 1) {
+          e.preventDefault();
+          const target = document.querySelector(href);
+          if (target) {
+            target.scrollIntoView({ behavior: 'smooth' });
+            history.pushState(null, null, href);
+          }
+        }
+      });
+    });
+
+    // Copy button functionality
+    document.querySelectorAll('pre').forEach(pre => {
+      const btn = document.createElement('button');
+      btn.className = 'copy-btn';
+      btn.textContent = 'Copy';
+      btn.onclick = () => {
+        const code = pre.querySelector('code');
+        const text = code ? code.textContent : pre.textContent;
+        navigator.clipboard.writeText(text).then(() => {
+          showToast('Copied!');
+        }).catch(() => {
+          showToast('Failed to copy');
+        });
+      };
+      pre.appendChild(btn);
+    });
+
+    // Toast notification
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2000);
+    }
+
+    // Copy anchor URL
+    function copyAnchor(e) {
+      e.preventDefault();
+      const url = window.location.origin + window.location.pathname + e.target.getAttribute('href');
+      navigator.clipboard.writeText(url).then(() => {
+        showToast('Link copied!');
+      });
+    }
+
+    // TOC filter
+    function filterTOC() {
+      const query = document.getElementById('toc-filter').value.toLowerCase();
+      const items = document.querySelectorAll('.toc-list li');
+      
+      items.forEach(item => {
+        const link = item.querySelector('a');
+        const text = link.textContent.toLowerCase();
+        const section = link.dataset.section || '';
+        
+        if (text.includes(query) || section.includes(query)) {
+          item.classList.remove('toc-hidden');
+        } else {
+          item.classList.add('toc-hidden');
+        }
+      });
+    }
+
+    // Close sidebar on outside click (mobile)
+    document.addEventListener('click', (e) => {
+      const sidebar = document.getElementById('sidebar');
+      const menuBtn = document.querySelector('.mobile-menu-btn');
+      if (window.innerWidth <= 768 && 
+          !sidebar.contains(e.target) && 
+          !menuBtn.contains(e.target) &&
+          sidebar.classList.contains('open')) {
+        sidebar.classList.remove('open');
+      }
+    });
+  </script>
+</body>
+</html>

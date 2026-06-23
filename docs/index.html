@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Router Stack - Manuale Operativo</title>
+    <style>
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-card: #1e293b;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --accent: #3b82f6;
+            --accent-hover: #60a5fa;
+            --border: #334155;
+            --radius: 8px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem;
+        }
+
+        /* Header */
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+            padding-bottom: 2rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, var(--text-primary), var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            font-size: 1.25rem;
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+        }
+
+        .version {
+            display: inline-block;
+            background: var(--bg-secondary);
+            padding: 0.25rem 1rem;
+            border-radius: 1rem;
+            font-size: 0.875rem;
+            color: var(--accent);
+            border: 1px solid var(--border);
+        }
+
+        /* Language Cards Section */
+        .lang-section {
+            margin-bottom: 3rem;
+        }
+
+        .section-title {
+            text-align: center;
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+            color: var(--text-primary);
+        }
+
+        .lang-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .lang-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            text-decoration: none;
+            color: var(--text-primary);
+            transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .lang-card:hover {
+            transform: scale(1.02);
+            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.15);
+            border-color: var(--accent);
+        }
+
+        .lang-card:focus {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        .lang-flag {
+            font-size: 2rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .lang-card h2 {
+            font-size: 1.25rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .lang-card p {
+            color: var(--text-secondary);
+            font-size: 0.9375rem;
+            flex-grow: 1;
+            margin-bottom: 1rem;
+        }
+
+        .lang-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            background: var(--accent);
+            color: white;
+            padding: 0.75rem 1.25rem;
+            border-radius: 6px;
+            font-weight: 500;
+            transition: background-color 0.2s ease;
+        }
+
+        .lang-card:hover .lang-btn {
+            background: var(--accent-hover);
+        }
+
+        /* Project Info Section */
+        .info-section {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            margin-bottom: 3rem;
+        }
+
+        .info-section h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+            color: var(--accent);
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+
+        .info-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .info-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+            margin-bottom: 0.25rem;
+        }
+
+        .info-value {
+            font-size: 0.9375rem;
+            color: var(--text-primary);
+        }
+
+        .info-value a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .info-value a:hover {
+            text-decoration: underline;
+        }
+
+        /* Routing Modes Table */
+        .modes-section {
+            margin-bottom: 3rem;
+        }
+
+        .modes-section h2 {
+            text-align: center;
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .modes-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+
+        .modes-table th,
+        .modes-table td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .modes-table th {
+            background: var(--bg-card);
+            font-weight: 600;
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+        }
+
+        .modes-table td {
+            font-size: 0.9375rem;
+        }
+
+        .modes-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .modes-table tr:hover td {
+            background: rgba(59, 130, 246, 0.05);
+        }
+
+        .mode-name {
+            font-weight: 600;
+            color: var(--accent);
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding-top: 2rem;
+            border-top: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        footer a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+
+        footer p {
+            margin-bottom: 0.5rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            h1 {
+                font-size: 1.75rem;
+            }
+
+            .subtitle {
+                font-size: 1rem;
+            }
+
+            .modes-table {
+                font-size: 0.875rem;
+            }
+
+            .modes-table th,
+            .modes-table td {
+                padding: 0.75rem 0.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>AI Router Stack - Manuale Operativo</h1>
+            <p class="subtitle">Documentazione completa del router proxy multi-backend</p>
+            <span class="version">v1.0 &middot; 2026-06-23</span>
+        </header>
+
+        <section class="lang-section">
+            <h2 class="section-title">Seleziona lingua / Select Language</h2>
+            <div class="lang-cards">
+                <a href="manual-it.html" class="lang-card" aria-label="Apri manuale in italiano">
+                    <span class="lang-flag" aria-hidden="true">🇮🇹</span>
+                    <h2>Manuale in Italiano</h2>
+                    <p>Documentazione completa in italiano. 321 righe markdown, ~1100 righe HTML.</p>
+                    <span class="lang-btn">Apri Manuale IT →</span>
+                </a>
+                <a href="manual-en.html" class="lang-card" aria-label="Open English manual">
+                    <span class="lang-flag" aria-hidden="true">🇬🇧</span>
+                    <h2>English Manual</h2>
+                    <p>Complete documentation in English. 352 lines markdown, ~1100 lines HTML.</p>
+                    <span class="lang-btn">Open EN Manual →</span>
+                </a>
+            </div>
+        </section>
+
+        <section class="info-section">
+            <h2>Informazioni sul progetto / Project Information</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">Repository</span>
+                    <span class="info-value"><a href="https://github.com/eroslifestyle/ai-router-switch" rel="noopener noreferrer">github.com/eroslifestyle/ai-router-switch</a></span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">License</span>
+                    <span class="info-value">MIT</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Components</span>
+                    <span class="info-value">3 systemd services + 1 proxy, 5 porte, 4 modalita</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Tech Stack</span>
+                    <span class="info-value">Python 3.11+ / aiohttp / systemd / headroom</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Status</span>
+                    <span class="info-value">production-ready, monitored</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="modes-section">
+            <h2>Modalita di routing / Routing Modes</h2>
+            <table class="modes-table">
+                <thead>
+                    <tr>
+                        <th>Modalita / Mode</th>
+                        <th>Comportamento / Behaviour</th>
+                        <th>Uso consigliato / Recommended use</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><span class="mode-name">anthropic</span></td>
+                        <td>Solo Claude (Anthropic reale) / Claude only</td>
+                        <td>Massima qualita / Max quality</td>
+                    </tr>
+                    <tr>
+                        <td><span class="mode-name">minimax</span></td>
+                        <td>Solo MiniMax (M3) / MiniMax only</td>
+                        <td>Massimo risparmio / Max savings</td>
+                    </tr>
+                    <tr>
+                        <td><span class="mode-name">mixed</span></td>
+                        <td>Fallback bidirezionale / Bidirectional fallback</td>
+                        <td>Continuita di servizio / Service continuity</td>
+                    </tr>
+                    <tr>
+                        <td><span class="mode-name">interactive</span></td>
+                        <td>T0/T1 → MiniMax, T2 → Claude verify</td>
+                        <td>Risparmio intelligente / Smart savings</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <footer>
+            <p>AI Router Stack v1.0 &middot; 2026-06-23</p>
+            <p>Repository: <a href="https://github.com/eroslifestyle/ai-router-switch" rel="noopener noreferrer">github.com/eroslifestyle/ai-router-switch</a></p>
+            <p>License: MIT</p>
+        </footer>
+    </div>
+</body>
+</html>
