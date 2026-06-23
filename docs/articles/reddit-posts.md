@@ -67,7 +67,7 @@ Two reasons:
 
 ### Repo
 
-[github.com/yourusername/ai-router-proxy](https://github.com/yourusername/ai-router-proxy)
+[github.com/eroslifestyle/ai-router-switch](https://github.com/eroslifestyle/ai-router-switch)
 
 MIT license, contributions welcome.
 
@@ -111,8 +111,7 @@ Writing 10 variations of cold emails? Local model. Debugging a gnarly recursion 
 
 ### Try It In 5 Minutes
 
-I wrote a setup guide here: [Setup Tutorial Link]
-
+I wrote a setup guide here: https://eroslifestyle.github.io/ai-router-switch/
 Single command install, works on any machine with Docker.
 
 ### Feedback Wanted

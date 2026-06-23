@@ -25,8 +25,7 @@ This is my first time building a proxy layer, so the approach might be naive. Ha
 Happy to answer questions. Constructive feedback especially welcome on the routing design and error handling approach.
 
 ## Link da includere
-
-- Repository: https://github.com/username/claude-code-router
+- Repository: https://github.com/eroslifestyle/ai-router-switch
 - Discussion: (HN submission URL after posting)
 
 ## Posting time suggestions
