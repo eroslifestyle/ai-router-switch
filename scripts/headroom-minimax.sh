@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # headroom #2 — istanza dedicata che comprime il context verso MiniMax.
-# Claude Code -> ai-router(:8789) -> [minimax] -> headroom#2(:8790) -> api.minimax.io/anthropic
+# Claude Code -> ai-router(:8787) -> [minimax] -> headroom#2(:8790) -> api.minimax.io/anthropic
 set -euo pipefail
 DIR=/opt/headroom
 HB="$DIR/.venv/bin/headroom"

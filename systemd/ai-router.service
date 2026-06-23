@@ -1,5 +1,5 @@
 [Unit]
-Description=AI Router Proxy (porta 8789) switcher anthropic/minimax/mixed/interactive — PROTETTO
+Description=AI Router Proxy (porta 8787) switcher anthropic/minimax/mixed/interactive — PROTETTO
 Documentation=file://$HOME/Obsidian/Memoria
 StartLimitIntervalSec=0
 After=headroom-proxy.service headroom-minimax.service
