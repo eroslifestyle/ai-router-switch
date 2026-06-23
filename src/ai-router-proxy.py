@@ -42,7 +42,10 @@ KEY_FILE = Path.home() / ".claude" / "secrets" / "secrets.sh"
 LOG_FILE = Path.home() / ".claude" / "logs" / "ai-router.log"
 
 # status code che in 'mixed' fanno scattare il fallback a MiniMax
-FALLBACK_STATUSES = {429, 500, 502, 503, 504, 529}
+# Fallback attivo su: 5xx/529 (server/overload) + 4xx eccetto 400/404 (client error puro).
+# 401/403 (auth/billing) -> fallback a MiniMax cosi' l'utente non resta bloccato.
+# 429 (rate limit) -> fallback per non aspettare.
+FALLBACK_STATUSES = {401, 403, 408, 409, 413, 429, 500, 502, 503, 504, 529}
 
 # Circuit breaker (D15): dopo N fail un backend va in cooldown e viene saltato.
 BREAKER_FAIL_MAX = 3
@@ -499,6 +502,11 @@ async def handle(request):
 
     # ── MODALITÀ PURE: nessuno switch, mai. Si ritorna ciò che dà l'upstream ──
     if mode in ("anthropic", "minimax"):
+        # Health-check interni headroom (/readyz /livez /health /stats /metrics):
+        # chiamate del watchdog, non traffico utente. Non loggare (rumore).
+        if not request.path.endswith("/v1/messages"):
+            up = await forwarders[mode](request, body, session)
+            return await relay(up)
         try:
             up = await forwarders[mode](request, body, session)
             log(f"{mode} (pure) -> {up.status} {request.path}")
