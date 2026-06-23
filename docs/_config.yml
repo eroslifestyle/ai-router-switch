@@ -5,8 +5,6 @@ baseurl: /ai-router-switch
 url: https://eroslifestyle.github.io
 
 exclude:
-  - manual-it.html
-  - manual-en.html
   - MANUAL.md
   - MANUAL.en.md
   - PIANO.md
