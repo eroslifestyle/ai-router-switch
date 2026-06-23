@@ -162,6 +162,65 @@ def clear_chat_mode(fp: str):
         log(f"chat {fp} -> reset")
 
 
+# ── Comandi in-chat (D5/D7/D9): !router + frasi naturali italiane ─────────
+import re as _re
+
+_NL_MODE = [
+    (_re.compile(r"solo\s+(claude|anthropic)|usa\s+(claude|anthropic)", _re.I), "anthropic"),
+    (_re.compile(r"solo\s+minimax|usa\s+minimax", _re.I), "minimax"),
+    (_re.compile(r"mod\w*\s+mist|mixed|mist[ao]\b", _re.I), "mixed"),
+    (_re.compile(r"interattiv|interactive", _re.I), "interactive"),
+]
+_CMD_VERB = _re.compile(r"\b(usa|passa|metti|imposta|attiva|cambia|adesso\s+usa)\b", _re.I)
+_EXPLICIT = _re.compile(r"^\s*!router\s+(\w+)", _re.I)
+
+
+def parse_router_command(text: str):
+    """Ritorna {'action': ...} se il messaggio è un comando router, altrimenti None.
+    Prudente (D24): naturale solo se messaggio breve + verbo di comando."""
+    if not text:
+        return None
+    t = text.strip()
+    # esplicito: !router <x>
+    m = _EXPLICIT.match(t)
+    if m:
+        arg = m.group(1).lower()
+        if arg in VALID_MODES:
+            return {"action": "set", "mode": arg}
+        if arg in ("status", "reset", "help"):
+            return {"action": arg}
+        return {"action": "help"}
+    # naturale: solo se breve (<80) e con verbo di comando (prudente)
+    if len(t) <= 80 and _CMD_VERB.search(t):
+        for rx, mode in _NL_MODE:
+            if rx.search(t):
+                return {"action": "set", "mode": mode}
+    return None
+
+
+def _router_reply_text(action: dict, fp: str) -> str:
+    if action["action"] == "set":
+        set_chat_mode(fp, action["mode"])
+        return f"✅ Questa chat ora usa: **{action['mode']}** (dal prossimo messaggio)."
+    if action["action"] == "status":
+        cm = get_chat_mode(fp)
+        return f"📍 Modalità chat: **{cm or 'default (' + get_file_mode() + ')'}**"
+    if action["action"] == "reset":
+        clear_chat_mode(fp)
+        return f"↺ Chat riportata al default: **{get_file_mode()}**"
+    return ("🧭 Comandi: `!router <anthropic|minimax|mixed|interactive>` · "
+            "`!router status` · `!router reset`. Anche a voce: «usa solo minimax».")
+
+
+def _synthetic_message(text: str) -> dict:
+    return {
+        "id": "msg_router", "type": "message", "role": "assistant",
+        "model": "ai-router", "content": [{"type": "text", "text": text}],
+        "stop_reason": "end_turn", "stop_sequence": None,
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+    }
+
+
 # ── Classificatore criticità T2 (euristiche locali, zero latenza) ──────────
 T2_KEYWORDS = (
     "quant", "quando", "data", "prezzo", "costo", "percentual", "formula",
@@ -362,13 +421,34 @@ async def handle(request):
             "minimax_key_present": bool(get_minimax_key()),
         })
 
-    # Marca-chat (solo porta dinamica :8787): se la chat è stata marcata con un
-    # comando in-chat, quella modalità vince sul default globale (D3=B/D5).
-    # Le porte fisse (forced) restano rigide e ignorano la marca.
+    # Comandi in-chat + marca-chat (solo porta dinamica :8787, solo /v1/messages).
     if forced is None and request.path.endswith("/v1/messages"):
         try:
             _data = json.loads(body)
             _fp = conversation_fingerprint(_data)
+            # D39: guarda solo l'ULTIMO messaggio vero dell'utente
+            _last = ""
+            for _m in reversed(_data.get("messages", [])):
+                if _m.get("role") == "user":
+                    _c = _m.get("content", "")
+                    _last = _c if isinstance(_c, str) else " ".join(
+                        b.get("text", "") for b in _c if isinstance(b, dict))
+                    break
+            _cmd = parse_router_command(_last)
+            if _cmd:
+                # gestione locale, risposta sintetica (D40: costo zero, no inoltro)
+                _txt = _router_reply_text(_cmd, _fp)
+                _msg = _synthetic_message(_txt)
+                log(f"in-chat command {_cmd} fp={_fp}")
+                if bool(_data.get("stream")):
+                    _resp = web.StreamResponse(status=200)
+                    _resp.headers["content-type"] = "text/event-stream"
+                    await _resp.prepare(request)
+                    await _resp.write(_sse_from_message(_msg, "router"))
+                    await _resp.write_eof()
+                    return _resp
+                return web.json_response(_msg)
+            # nessun comando: applica eventuale marca-chat (D5)
             _cm = get_chat_mode(_fp)
             if _cm in VALID_MODES:
                 mode = _cm
