@@ -116,6 +116,22 @@ See [`docs/PIANO.md`](docs/PIANO.md) for the full design (44 decisions, technica
 
 ---
 
+## 💬 Community
+
+- 💭 **[GitHub Discussions](https://github.com/eroslifestyle/ai-router-switch/discussions)** — ask questions, share setups, propose features
+- 📚 **[Wiki](https://github.com/eroslifestyle/ai-router-switch/wiki)** — community-maintained guides, tutorials, deep-dives
+- 🌐 **[GitHub Pages](https://eroslifestyle.github.io/ai-router-switch/)** — official documentation site (built from `docs/`)
+- 🐛 **[Issues](https://github.com/eroslifestyle/ai-router-switch/issues)** — bug reports and feature requests
+
+### 📖 Documentation
+
+- 🇮🇹 [Manuale IT (HTML)](docs/manual-it.html) | [Markdown](docs/MANUAL.md)
+- 🇬🇧 [English Manual (HTML)](docs/manual-en.html) | [Markdown](docs/MANUAL.en.md)
+- 📊 [Competitor comparison](assets/competitor-comparison.svg)
+- 🖼️ [Logo](assets/logo.svg) · [Square](assets/logo-square.svg) · [Banner](assets/banner.svg)
+
+---
+
 ## 📄 License
 
 MIT — see [LICENSE](LICENSE).
