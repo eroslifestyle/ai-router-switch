@@ -8,8 +8,13 @@ secrets*
 .env
 graphify-out/
 src/graphify-out/
+.graphifyignore
+.graphify_root
 
 # Claude Code session state (personal workflow notes — keep private)
 .claude/checkpoints/
 .claude/sessions/
 .claude/memory/
+.claude/codemap.json
+.claude/settings.json
+CLAUDE.md
