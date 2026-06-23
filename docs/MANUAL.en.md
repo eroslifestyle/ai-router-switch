@@ -1,4 +1,4 @@
-# Manuale Operativo - AI Router Stack
+# AI Router Proxy - Operational Guide v1.0
 
 ## Panoramica
 
