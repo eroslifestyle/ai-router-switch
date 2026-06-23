@@ -6,3 +6,5 @@ __pycache__/
 secrets*
 *.key
 .env
+graphify-out/
+src/graphify-out/
