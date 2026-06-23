@@ -120,6 +120,22 @@ poi riemetti come **SSE sintetico** (`message_start`→`content_block_delta`→
 `message_stop`). Già implementato `_sse_from_message()`. Task non-T2: passthrough
 streaming diretto.
 
+## 🚀 Deploy (aggiornato 2026-06-23)
+
+### Symlink runtime → repo (anti-drift)
+Il servizio systemd `ai-router.service` punta a `/home/mrxxx/.claude/scripts/ai-router-proxy.py`.
+**Da oggi quel file è un symlink** a `src/ai-router-proxy.py` (repo). Vantaggi:
+- Commit a `src/` si propagano al servizio live al prossimo restart (no drift).
+- Una sola fonte di verità (`src/`).
+Backup della copia precedente: `/tmp/ai-router-proxy.py.backup-20260623`.
+
+### Porte (audit 2026-06-23)
+Tutte le Description dei 3 servizi systemd ora indicano la porta reale:
+- `:8787` ai-router (punto unico, dinamico)
+- `:8790` headroom-minimax → MiniMax
+- `:8791` headroom-proxy → Anthropic
+Watchdog (`ai-stack-guard.sh`) copre crash/OOM ogni minuto, nohup come fallback.
+
 ## 📐 Fasi di build (ordine D19, aggiornato)
 1. **Fix isolamento porte** (app separate per porta, deterministico)
 2. **Fingerprint chat** (identificazione + persistenza file + pulizia 7gg)
