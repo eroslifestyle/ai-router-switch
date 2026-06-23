@@ -1,7 +1,7 @@
 # 🧭 AI Router Switch
 
 > A transparent, self-hosted routing proxy that sits in front of **Claude Code** (and any
-> Anthropic-format client) and lets you switch between **Claude** and **MiniMax** —
+> Anthropic-format client) and lets you switch between **Claude** and **MiniMax M3** —
 > with **automatic failover**, **context compression**, and **cross-model verification**.
 
 **One endpoint (`:8787`), four modes, zero app restarts.** Switch model on the fly while
@@ -64,8 +64,8 @@ ai-mode log
 ## 🚀 Quick start
 
 1. **Requirements:** Python 3.12+, `aiohttp`, a running
-   [headroom](https://github.com/headroomlabs-ai/headroom) instance per backend,
-   and API access to Claude and/or MiniMax.
+   [headroom](https://github.com/headroomlabs-ai/headroom) instance per backend
+   (one per upstream), and API access to Claude and/or MiniMax.
 
 2. **Point your client at the router:**
    ```jsonc
@@ -76,13 +76,15 @@ ai-mode log
 3. **Run the router:**
    ```bash
    python3 src/ai-router-proxy.py
-   # or install the systemd unit in systemd/
+   # or install the systemd unit in systemd/ai-router.service
    ```
 
 4. **Switch modes:** `ai-mode mixed`
 
 > The MiniMax API key is read at runtime from an encrypted secret store — it is
-> **never** stored in this repo.
+> **never** stored in this repo. The router also *does not inject* upstream
+> credentials: it forwards whatever headers your client supplies (Anthropic
+> bearer / `x-api-key`).
 
 ---
 
@@ -104,6 +106,11 @@ Tested: `kill -9` on all services → fully restored in <10s.
 - [x] **Phase 4** — circuit breaker with cooldown (bidirectional)
 
 **All phases complete & tested** ✅
+
+### 🔧 Hardening (audit 2026-06-23)
+- Symlinked runtime proxy → `src/ai-router-proxy.py` (single source of truth, no drift).
+- Aligned all systemd unit `Description=` fields with the real port (`:8787`).
+- Triple-defense resilience verified: `kill -9` on every service → fully restored in <10s.
 
 See [`docs/PIANO.md`](docs/PIANO.md) for the full design (44 decisions, technical notes).
 
