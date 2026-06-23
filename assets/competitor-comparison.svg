@@ -1,0 +1,178 @@
+<!-- AI Router Proxy - Competitor Comparison (1200x700) -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" role="img" aria-labelledby="svg-title svg-desc">
+  <title id="svg-title">AI Router Proxy vs Alternatives</title>
+  <desc id="svg-desc">Feature comparison between AI Router Proxy and other AI routing solutions: Direct API, LiteLLM, OpenRouter, and Portkey</desc>
+  
+  <defs>
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1e3a5f"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1200" height="700" fill="#0f1419"/>
+  
+  <!-- Subtle grid pattern -->
+  <g opacity="0.05">
+    <line x1="0" y1="100" x2="1200" y2="100" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="600" x2="1200" y2="600" stroke="#fff" stroke-width="1"/>
+  </g>
+  
+  <!-- Title -->
+  <text x="600" y="45" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="32" font-weight="bold" fill="#e6edf3">AI Router Proxy vs Alternatives</text>
+  
+  <!-- Table Header Background -->
+  <rect x="40" y="90" width="1120" height="50" rx="8" ry="8" fill="url(#headerGrad)"/>
+  
+  <!-- Table Headers -->
+  <g font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">
+    <text x="80" y="122">Tool</text>
+    <text x="230" y="122">Multi-Backend</text>
+    <text x="380" y="122">Auto-Fallback</text>
+    <text x="530" y="122">Cost-Saving</text>
+    <text x="680" y="122">Open Source</text>
+    <text x="830" y="122">Self-Hosted</text>
+    <text x="980" y="122">Local-First</text>
+    <text x="1100" y="122">Rating</text>
+  </g>
+  
+  <!-- Column Dividers -->
+  <g stroke="#2d3748" stroke-width="1">
+    <line x1="160" y1="90" x2="160" y2="560"/>
+    <line x1="310" y1="90" x2="310" y2="560"/>
+    <line x1="460" y1="90" x2="460" y2="560"/>
+    <line x1="610" y1="90" x2="610" y2="560"/>
+    <line x1="760" y1="90" x2="760" y2="560"/>
+    <line x1="910" y1="90" x2="910" y2="560"/>
+    <line x1="1050" y1="90" x2="1050" y2="560"/>
+  </g>
+  
+  <!-- Row 1: Direct API -->
+  <g transform="translate(0, 190)">
+    <rect x="40" y="0" width="1120" height="60" fill="#131920"/>
+    <text x="80" y="38" font-family="system-ui, sans-serif" font-size="16" font-weight="bold" fill="#94a3b8" text-anchor="middle">Direct API</text>
+    <text x="230" y="38" font-family="system-ui, sans-serif" font-size="20" fill="#ef4444" text-anchor="middle">✗</text>
+    <text x="380" y="38" font-family="system-ui, sans-serif" font-size="20" fill="#ef4444" text-anchor="middle">✗</text>
+    <text x="530" y="38" font-family="system-ui, sans-serif" font-size="20" fill="#ef4444" text-anchor="middle">✗</text>
+    <text x="680" y="38" font-family="system-ui, sans-serif" font-size="20" fill="#ef4444" text-anchor="middle">✗</text>
+    <text x="830" y="38" font-family="system-ui, sans-serif" font-size="12" fill="#64748b" text-anchor="middle">—</text>
+    <text x="980" y="38" font-family="system-ui, sans-serif" font-size="12" fill="#64748b" text-anchor="middle">—</text>
+    <text x="1100" y="38" font-family="system-ui, sans-serif" font-size="14" font-weight="bold" fill="#64748b" text-anchor="middle">1/7</text>
+  </g>
+  
+  <!-- Row 2: LiteLLM -->
+  <g transform="translate(0, 250)">
+    <rect x="40" y="0" width="1120" height="60" fill="#161b22"/>
+    <text x="80" y="38" font-family="system-ui, sans-serif" font-size="16" font-weight="bold" fill="#94a3b8" text-anchor="middle">LiteLLM</text>
+    <text x="230" y="38" font-family="system-ui, sans-serif" font-size="20" fill="#22c55e" text-anchor="middle">✓</text>
+    <circle cx="380" cy="33" r="12" fill="none" stroke="#f59e0b" stroke-width="2"/>
+    <text x="380" y="38" font-family="system-ui, sans-serif" font-size="10" fill="#f59e0b" text-anchor="middle">⚡</text>
+    <text x="530" y="38" font-family="system-ui, sans-serif" font-size="20" fill="#ef4444" text-anchor="middle">✗</text>
+    <text x="680" y="38" font-family="system-ui, sans-serif" font-size="12" fill="#22c55e" text-anchor="middle">✓ MIT</text>
+    <text x="830" y="38" font-family="system-ui, sans-serif" font-size="20" fill="#22c55e" text-anchor="middle">✓</text>
+    <circle cx="980" cy="33" r="12" fill="none" stroke="#f59e0b" stroke-width="2"/>
+    <text x="980" y="38" font-family="system-ui, sans-serif" font-size="10" fill="#f59e0b" text-anchor="middle">⚡</text>
+    <text x="1100" y="38" font-family="system-ui, sans-serif" font-size="14" font-weight="bold" fill="#94a3b8" text-anchor="middle">4/7</text>
+  </g>
+  
+  <!-- Row 3: OpenRouter -->
+  <g transform="translate(0, 310)">
+    <rect x="40" y="0" width="1120" height="60" fill="#131920"/>
+    <text x="80" y="38" font-family="system-ui, sans-serif" font-size="16" font-weight="bold" fill="#94a3b8" text-anchor="middle">OpenRouter</text>
+    <text x="230" y="38" font-family="system-ui, sans-serif" font-size="20" fill="#22c55e" text-anchor="middle">✓</text>
+    <text x="380" y="38" font-family="system-ui, sans-serif" font-size="20" fill="#ef4444" text-anchor="middle">✗</text>
+    <text x="530" y="38" font-family="system-ui, sans-serif" font-size="20" fill="#ef4444" text-anchor="middle">✗</text>
+    <text x="680" y="38" font-family="system-ui, sans-serif" font-size="12" fill="#ef4444" text-anchor="middle">✗</text>
+    <text x="830" y="38" font-family="system-ui, sans-serif" font-size="12" fill="#64748b" text-anchor="middle">Cloud</text>
+    <text x="980" y="38" font-family="system-ui, sans-serif" font-size="20" fill="#ef4444" text-anchor="middle">✗</text>
+    <text x="1100" y="38" font-family="system-ui, sans-serif" font-size="14" font-weight="bold" fill="#64748b" text-anchor="middle">2/7</text>
+  </g>
+  
+  <!-- Row 4: Portkey -->
+  <g transform="translate(0, 370)">
+    <rect x="40" y="0" width="1120" height="60" fill="#161b22"/>
+    <text x="80" y="38" font-family="system-ui, sans-serif" font-size="16" font-weight="bold" fill="#94a3b8" text-anchor="middle">Portkey</text>
+    <text x="230" y="38" font-family="system-ui, sans-serif" font-size="20" fill="#22c55e" text-anchor="middle">✓</text>
+    <circle cx="380" cy="33" r="12" fill="none" stroke="#f59e0b" stroke-width="2"/>
+    <text x="380" y="38" font-family="system-ui, sans-serif" font-size="10" fill="#f59e0b" text-anchor="middle">⚡</text>
+    <circle cx="530" cy="33" r="12" fill="none" stroke="#f59e0b" stroke-width="2"/>
+    <text x="530" y="38" font-family="system-ui, sans-serif" font-size="10" fill="#f59e0b" text-anchor="middle">⚡</text>
+    <circle cx="680" cy="33" r="12" fill="none" stroke="#f59e0b" stroke-width="2"/>
+    <text x="680" y="38" font-family="system-ui, sans-serif" font-size="10" fill="#f59e0b" text-anchor="middle">⚡</text>
+    <text x="830" y="38" font-family="system-ui, sans-serif" font-size="20" fill="#22c55e" text-anchor="middle">✓</text>
+    <circle cx="980" cy="33" r="12" fill="none" stroke="#f59e0b" stroke-width="2"/>
+    <text x="980" y="38" font-family="system-ui, sans-serif" font-size="10" fill="#f59e0b" text-anchor="middle">⚡</text>
+    <text x="1100" y="38" font-family="system-ui, sans-serif" font-size="14" font-weight="bold" fill="#94a3b8" text-anchor="middle">4/7</text>
+  </g>
+  
+  <!-- Row 5: AI Router Proxy (Highlighted) -->
+  <g transform="translate(0, 430)">
+    <rect x="40" y="0" width="1120" height="70" rx="8" ry="8" fill="#1e3a5f" stroke="#3b82f6" stroke-width="3"/>
+    <text x="80" y="42" font-family="system-ui, sans-serif" font-size="18" font-weight="bold" fill="#e6edf3" text-anchor="middle">AI Router Proxy</text>
+    
+    <!-- Checkmarks for full features -->
+    <circle cx="230" cy="35" r="14" fill="#22c55e"/>
+    <path d="M223 35 L228 40 L238 30" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <circle cx="380" cy="35" r="14" fill="#22c55e"/>
+    <path d="M373 35 L378 40 L388 30" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <circle cx="530" cy="35" r="14" fill="#22c55e"/>
+    <path d="M523 35 L528 40 L538 30" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <text x="680" y="42" font-family="system-ui, sans-serif" font-size="13" font-weight="bold" fill="#22c55e" text-anchor="middle">✓ MIT</text>
+    
+    <circle cx="830" cy="35" r="14" fill="#22c55e"/>
+    <path d="M823 35 L828 40 L838 30" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <circle cx="980" cy="35" r="14" fill="#22c55e"/>
+    <path d="M973 35 L978 40 L988 30" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <text x="1100" y="42" font-family="system-ui, sans-serif" font-size="16" font-weight="bold" fill="#22c55e" text-anchor="middle">7/7 ★</text>
+  </g>
+  
+  <!-- Legend -->
+  <g transform="translate(40, 530)" font-family="system-ui, sans-serif" font-size="12" fill="#94a3b8">
+    <circle cx="10" cy="8" r="8" fill="#22c55e"/>
+    <text x="25" y="12">Full Support</text>
+    
+    <circle cx="110" cy="8" r="8" fill="none" stroke="#f59e0b" stroke-width="2"/>
+    <text x="125" y="12">Partial/Limited</text>
+    
+    <circle cx="250" cy="8" r="8" fill="#ef4444"/>
+    <text x="265" y="12">Not Available</text>
+    
+    <text x="370" y="12">— Not Applicable</text>
+  </g>
+  
+  <!-- Footer -->
+  <line x1="40" y1="560" x2="1160" y2="560" stroke="#2d3748" stroke-width="1"/>
+  
+  <text x="600" y="600" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" fill="#94a3b8">
+    Self-hosted, MIT-licensed, focused on Claude Code
+  </text>
+  
+  <text x="600" y="625" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" fill="#3b82f6">
+    github.com/eroslifestyle/ai-router-proxy
+  </text>
+  
+  <!-- Decorative elements -->
+  <g opacity="0.1">
+    <circle cx="1150" cy="50" r="30" fill="#3b82f6"/>
+    <circle cx="50" cy="650" r="20" fill="#22c55e"/>
+  </g>
+  
+  <!-- Badge -->
+  <g transform="translate(1050, 580)">
+    <rect x="0" y="0" width="120" height="28" rx="14" fill="#22c55e"/>
+    <text x="60" y="18" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="bold" fill="#fff">100% Free</text>
+  </g>
+</svg>
