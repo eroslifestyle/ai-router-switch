@@ -44,6 +44,32 @@ LOG_FILE = Path.home() / ".claude" / "logs" / "ai-router.log"
 # status code che in 'mixed' fanno scattare il fallback a MiniMax
 FALLBACK_STATUSES = {429, 500, 502, 503, 504, 529}
 
+# Circuit breaker (D15): dopo N fail un backend va in cooldown e viene saltato.
+BREAKER_FAIL_MAX = 3
+BREAKER_COOLDOWN = 120  # secondi
+_breaker = {"anthropic": {"fails": 0, "open_until": 0},
+            "minimax": {"fails": 0, "open_until": 0}}
+
+
+def breaker_is_open(backend: str) -> bool:
+    """True se il backend è in cooldown (da saltare)."""
+    return time.time() < _breaker.get(backend, {}).get("open_until", 0)
+
+
+def breaker_fail(backend: str):
+    b = _breaker.setdefault(backend, {"fails": 0, "open_until": 0})
+    b["fails"] += 1
+    if b["fails"] >= BREAKER_FAIL_MAX:
+        b["open_until"] = time.time() + BREAKER_COOLDOWN
+        b["fails"] = 0
+        log(f"breaker OPEN {backend} per {BREAKER_COOLDOWN}s")
+
+
+def breaker_ok(backend: str):
+    b = _breaker.setdefault(backend, {"fails": 0, "open_until": 0})
+    b["fails"] = 0
+    b["open_until"] = 0
+
 _minimax_key_cache = {"key": None, "ts": 0}
 
 
@@ -563,19 +589,32 @@ async def handle(request):
         primary = "anthropic"
     secondary = "minimax" if primary == "anthropic" else "anthropic"
 
+    # Circuit breaker (D15): se il primario è in cooldown, prova prima il secondario.
+    order = [primary, secondary]
+    if breaker_is_open(primary) and not breaker_is_open(secondary):
+        order = [secondary, primary]
+        log(f"mixed: {primary} in cooldown -> provo prima {secondary}")
+
     last_err = None
-    for stage, name in enumerate((primary, secondary)):
+    for stage, name in enumerate(order):
         tag = "primary" if stage == 0 else "FALLBACK"
+        if breaker_is_open(name) and stage == 0:
+            log(f"mixed: {name} OPEN, salto al fallback")
+            continue
         try:
             up = await forwarders[name](request, body, session)
         except Exception as e:
             last_err = str(e)
+            breaker_fail(name)
             log(f"mixed {tag} {name} EXC {request.path}: {e}")
             continue  # eccezione -> prova l'altro
         if up.status in FALLBACK_STATUSES and stage == 0:
-            log(f"mixed {tag} {name} {up.status} -> switch a {secondary} {request.path}")
+            breaker_fail(name)
+            log(f"mixed {tag} {name} {up.status} -> switch a {order[1]} {request.path}")
             await up.release()
             continue  # errore retryable sul primario -> switch al secondario
+        if up.status < 400:
+            breaker_ok(name)
         log(f"mixed {tag} {name} {up.status} {request.path}")
         return await relay(up)
 
