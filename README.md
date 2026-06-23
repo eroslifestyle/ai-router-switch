@@ -99,9 +99,11 @@ Tested: `kill -9` on all services → fully restored in <10s.
 ## 🗺️ Roadmap
 
 - [x] **Phase 1** — deterministic per-port isolation (one mode per port)
-- [ ] **Phase 2** — per-chat independence via conversation fingerprint (no session-id needed)
-- [ ] **Phase 3** — in-chat commands (`!router minimax` + natural language)
-- [ ] **Phase 4** — circuit breaker with cooldown (bidirectional)
+- [x] **Phase 2** — per-chat independence via conversation fingerprint (no session-id needed)
+- [x] **Phase 3** — in-chat commands (`!router minimax` + natural language)
+- [x] **Phase 4** — circuit breaker with cooldown (bidirectional)
+
+**All phases complete & tested** ✅
 
 See [`docs/PIANO.md`](docs/PIANO.md) for the full design (44 decisions, technical notes).
 
