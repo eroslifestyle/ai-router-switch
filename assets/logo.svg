@@ -1,0 +1,72 @@
+<!--
+  AI Router Proxy - Logo
+  Self-contained SVG, no external dependencies.
+  Tested in: Chrome, Firefox, Safari, GitHub README.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" width="400" height="200" preserveAspectRatio="xMidYMid meet">
+  <title>AI Router Proxy Logo</title>
+  <desc>A router proxy logo showing App input connected to Claude and MiniMax backend nodes</desc>
+  
+  <defs>
+    <marker id="arrow-claude" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3b82f6"/>
+    </marker>
+    <marker id="arrow-minimax" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c3aed"/>
+    </marker>
+    <marker id="arrow-input" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+  
+  <!-- Connection Lines -->
+  <g fill="none" stroke-width="2.5" stroke-linecap="round">
+    <!-- App to Router -->
+    <path d="M 85 100 L 160 100" stroke="#64748b" marker-end="url(#arrow-input)"/>
+    <!-- Router to Claude -->
+    <path d="M 240 85 L 315 70" stroke="#3b82f6" marker-end="url(#arrow-claude)"/>
+    <!-- Router to MiniMax -->
+    <path d="M 240 115 L 315 130" stroke="#7c3aed" marker-end="url(#arrow-minimax)"/>
+  </g>
+  
+  <!-- Router Central (circle with switch icon) -->
+  <g transform="translate(200, 100)">
+    <circle r="40" fill="#1e293b" stroke="#3b82f6" stroke-width="3"/>
+    <g fill="none" stroke="#e2e8f0" stroke-width="2.5" stroke-linecap="round">
+      <!-- Switch icon: vertical line with horizontal branches -->
+      <line x1="0" y1="-20" x2="0" y2="20"/>
+      <line x1="-12" y1="-8" x2="-12" y2="8"/>
+      <line x1="12" y1="-8" x2="12" y2="8"/>
+      <circle cx="0" cy="-20" r="4" fill="#e2e8f0"/>
+      <circle cx="-12" cy="-8" r="3" fill="#3b82f6"/>
+      <circle cx="12" cy="-8" r="3" fill="#7c3aed"/>
+    </g>
+  </g>
+  
+  <!-- App Node (left) -->
+  <g transform="translate(60, 100)">
+    <circle r="25" fill="#64748b"/>
+    <g fill="#e2e8f0" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="10" text-anchor="middle">
+      <text x="0" y="4" font-weight="600">App</text>
+    </g>
+    <text x="60" y="145" fill="#64748b" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="12" text-anchor="middle" font-weight="500">Client</text>
+  </g>
+  
+  <!-- Claude Node (top-right) -->
+  <g transform="translate(340, 60)">
+    <circle r="25" fill="#3b82f6"/>
+    <g fill="#ffffff" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="9" text-anchor="middle">
+      <text x="0" y="4" font-weight="700">Claude</text>
+    </g>
+    <text x="340" y="105" fill="#3b82f6" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="11" text-anchor="middle" font-weight="500">Anthropic</text>
+  </g>
+  
+  <!-- MiniMax Node (bottom-right) -->
+  <g transform="translate(340, 140)">
+    <circle r="25" fill="#7c3aed"/>
+    <g fill="#ffffff" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="9" text-anchor="middle">
+      <text x="0" y="4" font-weight="700">MiniMax</text>
+    </g>
+    <text x="340" y="185" fill="#7c3aed" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="11" text-anchor="middle" font-weight="500">API</text>
+  </g>
+</svg>
