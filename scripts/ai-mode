@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# ai-mode — controlla il routing AI di Claude Code (proxy switcher porta 8789)
+# Uso: ai-mode [anthropic|minimax|mixed|status|start|stop|restart|log]
+set -euo pipefail
+
+MODE_FILE="$HOME/.claude/ai-router-mode"
+PROXY="$HOME/.claude/scripts/ai-router-proxy.py"
+PIDFILE="$HOME/.claude/locks/ai-router.pid"
+LOG="$HOME/.claude/logs/ai-router.log"
+PORT=8787
+PY="$(command -v python3)"
+
+mkdir -p "$(dirname "$PIDFILE")" "$(dirname "$LOG")"
+
+is_running(){ ss -ltn 2>/dev/null | grep -q ":$PORT "; }
+
+start(){
+  if is_running; then echo "già in esecuzione su :$PORT"; return; fi
+  nohup "$PY" "$PROXY" >>"$LOG" 2>&1 &
+  echo $! > "$PIDFILE"
+  sleep 1.5
+  is_running && echo "✓ avviato (pid $(cat "$PIDFILE")) su :$PORT" || { echo "✗ avvio fallito — vedi: ai-mode log"; exit 1; }
+}
+
+stop(){
+  if [ -f "$PIDFILE" ]; then kill "$(cat "$PIDFILE")" 2>/dev/null || true; rm -f "$PIDFILE"; fi
+  pkill -f "ai-router-proxy.py" 2>/dev/null || true
+  echo "fermato."
+}
+
+status(){
+  local m; m="$(cat "$MODE_FILE" 2>/dev/null || echo anthropic)"
+  echo "modalità : $m"
+  if is_running; then
+    echo "proxy    : ✓ attivo su 127.0.0.1:$PORT"
+    curl -s -m3 "http://127.0.0.1:$PORT/__router_health" 2>/dev/null \
+      | python3 -m json.tool 2>/dev/null || true
+  else
+    echo "proxy    : ✗ NON attivo  (avvia con: ai-mode start)"
+  fi
+}
+
+case "${1:-status}" in
+  anthropic|minimax|mixed|interactive)
+    echo "$1" > "$MODE_FILE"
+    echo "modalità → $1"
+    is_running || { echo "(proxy non attivo: avvio…)"; start; }
+    echo "Nota: il cambio è immediato per le NUOVE richieste."
+    ;;
+  status) status ;;
+  start)   start ;;
+  stop)    stop ;;
+  restart) stop; sleep 1; start ;;
+  log)     tail -n 40 "$LOG" 2>/dev/null || echo "(nessun log)";;
+  *) echo "uso: ai-mode [anthropic|minimax|mixed|interactive|status|start|stop|restart|log]"; exit 1;;
+esac

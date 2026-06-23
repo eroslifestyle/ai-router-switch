@@ -1,0 +1,19 @@
+[Unit]
+Description=AI Router Proxy (porta 8789) switcher anthropic/minimax/mixed/interactive — PROTETTO
+Documentation=file://$HOME/Obsidian/Memoria
+StartLimitIntervalSec=0
+After=headroom-proxy.service headroom-minimax.service
+
+[Service]
+Type=simple
+WorkingDirectory=$HOME
+Environment=AIROUTER_PORT=8787
+Environment=AIROUTER_ANTHROPIC_UPSTREAM=http://127.0.0.1:8791
+ExecStart=/usr/bin/python3 $HOME/.claude/scripts/ai-router-proxy.py
+Restart=always
+RestartSec=2
+OOMScoreAdjust=-900
+OOMPolicy=continue
+
+[Install]
+WantedBy=default.target
