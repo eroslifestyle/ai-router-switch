@@ -3,7 +3,7 @@ title: How I Built a Multi-Backend AI Router for Claude Code (and Saved My Workf
 published: false
 description: A self-hosted Python proxy that switches between Claude and MiniMax with automatic failover, context compression, and a smart cost-saving mode.
 tags: ai, python, opensource, devops, linux
-cover_image: https://raw.githubusercontent.com/eroslifestyle/ai-router-switch/main/assets/banner.svg
+cover_image: https://raw.githubusercontent.com/eroslifestyle/ai-router-switch/main/assets/banner.png
 canonical_url: https://github.com/eroslifestyle/ai-router-switch
 ---
 
