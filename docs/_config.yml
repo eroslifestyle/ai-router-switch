@@ -1,0 +1,19 @@
+title: AI Router Proxy
+description: Self-hosted proxy for Claude Code with multi-backend switching and automatic failover
+theme: jekyll-theme-minimal
+baseurl: /ai-router-switch
+url: https://eroslifestyle.github.io
+
+exclude:
+  - manual-it.html
+  - manual-en.html
+  - MANUAL.md
+  - MANUAL.en.md
+  - PIANO.md
+  - assets/
+  - "*.md"
+
+markdown: kramdown
+highlighter: rouge
+
+plugins: []
