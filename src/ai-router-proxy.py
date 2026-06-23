@@ -89,6 +89,79 @@ def get_mode(request=None) -> str:
     return get_file_mode()
 
 
+# ── Fingerprint conversazione (chat indipendenti, D3=B/D4) ───────────────
+# Identifica una chat senza session-id: hash(system + primo messaggio utente).
+# Stabile per tutta la conversazione, distinto tra chat diverse.
+import hashlib
+
+CHAT_STORE = Path.home() / ".claude" / "ai-router-chats.json"
+CHAT_TTL_DAYS = 7
+_chat_cache = {"data": None, "ts": 0}
+
+
+def conversation_fingerprint(data: dict) -> str:
+    system = data.get("system", "")
+    if isinstance(system, list):
+        system = " ".join(b.get("text", "") for b in system if isinstance(b, dict))
+    first_user = ""
+    for m in data.get("messages", []):
+        if m.get("role") == "user":
+            c = m.get("content", "")
+            first_user = c if isinstance(c, str) else " ".join(
+                b.get("text", "") for b in c if isinstance(b, dict))
+            break
+    return hashlib.sha256((str(system) + "||" + str(first_user)).encode()).hexdigest()[:12]
+
+
+def _load_chats() -> dict:
+    now = time.time()
+    if _chat_cache["data"] is not None and now - _chat_cache["ts"] < 5:
+        return _chat_cache["data"]
+    try:
+        d = json.loads(CHAT_STORE.read_text())
+    except Exception:
+        d = {}
+    # pulizia TTL (D26: 7 giorni)
+    cutoff = now - CHAT_TTL_DAYS * 86400
+    changed = False
+    for fp in list(d.keys()):
+        if d[fp].get("ts", 0) < cutoff:
+            del d[fp]; changed = True
+    if changed:
+        _save_chats(d)
+    _chat_cache["data"] = d
+    _chat_cache["ts"] = now
+    return d
+
+
+def _save_chats(d: dict):
+    try:
+        CHAT_STORE.write_text(json.dumps(d))
+        _chat_cache["data"] = d
+        _chat_cache["ts"] = time.time()
+    except Exception as e:
+        log(f"ERR save chats: {e}")
+
+
+def get_chat_mode(fp: str):
+    """Modalità marcata per una chat (o None)."""
+    return _load_chats().get(fp, {}).get("mode")
+
+
+def set_chat_mode(fp: str, mode: str):
+    d = _load_chats()
+    d[fp] = {"mode": mode, "ts": time.time()}
+    _save_chats(d)
+    log(f"chat {fp} -> mode {mode}")
+
+
+def clear_chat_mode(fp: str):
+    d = _load_chats()
+    if fp in d:
+        del d[fp]; _save_chats(d)
+        log(f"chat {fp} -> reset")
+
+
 # ── Classificatore criticità T2 (euristiche locali, zero latenza) ──────────
 T2_KEYWORDS = (
     "quant", "quando", "data", "prezzo", "costo", "percentual", "formula",
@@ -277,10 +350,10 @@ def _sse_from_message(j: dict, verified: str) -> bytes:
 async def handle(request):
     mode = get_mode(request)
     body = await request.read()
+    forced = request.app.get("forced_mode")
 
     # health locale
     if request.path == "/__router_health":
-        forced = request.app.get("forced_mode")
         return web.json_response({
             "service": "ai-router-proxy", "mode": mode,
             "port_role": forced or "dynamic",
@@ -288,6 +361,19 @@ async def handle(request):
             "minimax_upstream": MINIMAX_UPSTREAM,
             "minimax_key_present": bool(get_minimax_key()),
         })
+
+    # Marca-chat (solo porta dinamica :8787): se la chat è stata marcata con un
+    # comando in-chat, quella modalità vince sul default globale (D3=B/D5).
+    # Le porte fisse (forced) restano rigide e ignorano la marca.
+    if forced is None and request.path.endswith("/v1/messages"):
+        try:
+            _data = json.loads(body)
+            _fp = conversation_fingerprint(_data)
+            _cm = get_chat_mode(_fp)
+            if _cm in VALID_MODES:
+                mode = _cm
+        except Exception:
+            pass
 
     session = request.app["session"]
 
