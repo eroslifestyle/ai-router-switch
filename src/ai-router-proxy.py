@@ -664,6 +664,10 @@ async def _run_multiport():
             runners.append(runner)
         except Exception as e:
             log(f"ERR listen {port}: {e}")
+    if not runners:
+        log("no ports bound (already in use?) — exiting to avoid orphan instance")
+        await session.close()
+        return
     try:
         while True:
             await asyncio.sleep(3600)
