@@ -12,11 +12,9 @@ Lo stack è composto da 3 servizi systemd e un proxy aiohttp che si mette in asc
 [Applicazione] → http://127.0.0.1:8787  (porta dinamica)
         ↓
         [ai-router-proxy]
-        ├── → http://127.0.0.1:8791  (headroom-proxy)
         │   ↓ (compressione context)
         │   → https://api.anthropic.com
         │
-        └── → http://127.0.0.1:8790  (headroom-minimax)
             ↓ (compressione context)
             → https://api.minimax.io/anthropic
 ```
@@ -26,8 +24,6 @@ Le porte in ascolto su 127.0.0.1:
 | Porta | Servizio | Modalità |
 |-------|----------|----------|
 | 8787 | ai-router-proxy | Dinamica (legge file mode) |
-| 8791 | headroom-proxy | Forward ad Anthropic |
-| 8790 | headroom-minimax | Forward a MiniMax |
 | 8771 | ai-router-proxy | Forzata: anthropic |
 | 8772 | ai-router-proxy | Forzata: minimax |
 | 8773 | ai-router-proxy | Forzata: mixed |
@@ -37,13 +33,11 @@ Le porte in ascolto su 127.0.0.1:
 
 ### 1. Modalità Anthropic (Pura)
 
-Tutto il traffico viene inoltrato esclusivamente a Claude tramite headroom-proxy. Nessun fallback. Se Claude non risponde, la richiesta fallisce con errore.
 
 **Uso tipico**: sviluppo che richiede qualità massima, nessuna tolleranza per alternative.
 
 ### 2. Modalità MiniMax (Pura)
 
-Tutto il traffico viene inoltrato a MiniMax tramite headroom-minimax. Utilizza il modello M3 (Claude-compatibile). Nessun fallback.
 
 **Uso tipico**: task semplici, budget limitato, ambienti di test.
 
@@ -145,7 +139,6 @@ curl http://127.0.0.1:8787/__router_health
 # Output esempio:
 # {"service":"ai-router-proxy","mode":"mixed","port_role":"dynamic","version":"1.4.2"}
 
-# Headroom (formato Prometheus)
 curl http://127.0.0.1:8791/metrics
 curl http://127.0.0.1:8790/metrics
 
@@ -211,20 +204,16 @@ ai-mode interactive
 | Sintomo | Causa | Risoluzione |
 |---------|-------|-------------|
 | Tutte le risposte 401 | Chiave Anthropic scaduta/removal | Usa `mixed` mode o aggiorna secrets |
-| Latenza alta su 8772 | headroom#2 in cooldown | `systemctl --user restart headroom-minimax.service` |
 | Modalità non cambia | Cache connessioni (~2s) | Attendi 2 secondi, riprova |
 | /readyz troppi log | (risolto 2026-06-23) | Aggiorna ai-router-proxy |
 | mixed non fa fallback | Status non in FALLBACK_STATUSES | Verifica codice, probabilmente errore client |
 | Connessione rifiutata 8787 | Servizio non avviato | `systemctl --user start ai-router-proxy.service` |
-| Errori randomici | headroom in crash loop | `systemctl --user status headroom-proxy.service` |
 
 ### Comandi di Diagnostica
 
 ```bash
 # Status servizi
 systemctl --user status ai-router-proxy.service
-systemctl --user status headroom-proxy.service
-systemctl --user status headroom-minimax.service
 
 # Log recenti
 journalctl --user -u ai-router-proxy.service -n 50
@@ -233,7 +222,6 @@ journalctl --user -u ai-router-proxy.service -n 50
 ss -tlnp | grep -E '8787|8790|8791|877[1-4]'
 
 # Riavvio completo stack
-systemctl --user restart headroom-proxy.service headroom-minimax.service ai-router-proxy.service
 ```
 
 ## Hardening e Resilienza
@@ -277,18 +265,14 @@ systemctl --user restart headroom-proxy.service headroom-minimax.service ai-rout
 | `AIROUTER_MINIMAX_MODEL` | MiniMax-M3 | Modello MiniMax |
 | `AIROUTER_VERIFY_MODEL` | claude-opus-4-8 | Modello verifica interactive |
 
-### Headroom
 
 | Variabile | Servizio | Descrizione |
 |-----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | headroom-proxy | Chiave Anthropic |
-| `MINIMAX_API_KEY` | headroom-minimax | Chiave MiniMax |
 
 ## Requisiti di Sistema
 
 - Linux con systemd (user services)
 - Python 3.11+ con aiohttp
-- Headroom CLI installato e configurato
 - 3 unit file systemd in `~/.config/systemd/user/`
 - Script watchdog in `~/bin/` o in PATH
 
@@ -299,8 +283,6 @@ Struttura tipica:
 ```
 ~/.config/systemd/user/
   ├── ai-router-proxy.service
-  ├── headroom-proxy.service
-  └── headroom-minimax.service
 
 ~/.claude/
   └── ai-router-mode           # contiene: anthropic|minimax|mixed|interactive

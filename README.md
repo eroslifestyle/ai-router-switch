@@ -18,7 +18,6 @@ When your Claude usage limit runs out, Claude Code just **stops**. Existing rout
 |---|---|---|---|
 | Transparent to Claude Code | ✅ | ⚠️ | ✅ |
 | **Automatic failover** on 429 | ❌ (open issue) | ✅ | ✅ |
-| **Context compression** | ❌ | ❌ | ✅ (headroom) |
 | **Cross-model verification** | ❌ | ❌ | ✅ |
 | Per-project / per-chat isolation | partial | ❌ | ✅ |
 | Self-hosted, no cloud markup | ✅ | ✅ | ✅ |
@@ -32,8 +31,6 @@ App (VSCode/Claude Code, CLI, any Anthropic client)
         │  ANTHROPIC_BASE_URL = http://127.0.0.1:8787
         ▼
    ai-router (:8787)  ──► mode selects the backend
-        ├─ anthropic → headroom #1 (:8791) → api.anthropic.com
-        └─ minimax   → headroom #2 (:8790) → api.minimax.io/anthropic
 ```
 
 **Golden rule — Non-interference:** the router *only* picks the backend. It never
@@ -64,7 +61,6 @@ ai-mode log
 ## 🚀 Quick start
 
 1. **Requirements:** Python 3.12+, `aiohttp`, a running
-   [headroom](https://github.com/headroomlabs-ai/headroom) instance per backend
    (one per upstream), and API access to Claude and/or MiniMax.
 
 2. **Point your client at the router:**

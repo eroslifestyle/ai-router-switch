@@ -12,7 +12,7 @@ Quattro modalità (file ~/.claude/ai-router-mode):
 
 
 Claude Code punta qui: ANTHROPIC_BASE_URL=http://127.0.0.1:8787
-Gestisce streaming SSE. Backend diretto (nessun headroom/LiteLLM intermedio).
+Gestisce streaming SSE. Backend diretto (nessun proxy intermedio).
 """
 import asyncio
 import json
@@ -27,7 +27,7 @@ from aiohttp import web, ClientSession, ClientTimeout, TCPConnector
 # ── Config ────────────────────────────────────────────────────────────────
 LISTEN_HOST = "127.0.0.1"
 # Il router E' il punto unico su :8787 (dove tutte le app gia' puntano).
-# Backend DIRETTO alle API ufficiali (headroom rimosso 2026-06-29).
+# Backend DIRETTO alle API ufficiali (nessun proxy intermedio).
 LISTEN_PORT = int(os.environ.get("AIROUTER_PORT", "8787"))
 
 ANTHROPIC_UPSTREAM = os.environ.get("AIROUTER_ANTHROPIC_UPSTREAM", "https://api.anthropic.com")
@@ -454,7 +454,7 @@ MINIMAX_UNSUPPORTED_FIELDS = ("context_management", "mcp_servers", "thinking")
 # Anthropic public API: 'context_management' è beta-only gated da
 # 'anthropic-beta: context-management-2025-06-27'. Senza quel header,
 # api.anthropic.com restituisce 400 "Extra inputs are not permitted".
-# Lo strippiamo a monte per evitare il 400 (headroom/client possono inviarlo).
+# Lo strippiamo a monte per evitare il 400 (il client può inviarlo).
 ANTHROPIC_UNSUPPORTED_FIELDS = ("context_management",)
 
 
@@ -569,7 +569,7 @@ ANTHROPIC_OAUTH_TOKEN = os.environ.get("ANTHROPIC_OAUTH_TOKEN", "")  # Bearer da
 
 
 async def forward_anthropic_direct(request, body, session):
-    """Bypass totale di headroom: chiama api.anthropic.com con OAuth Bearer.
+    """Chiama api.anthropic.com diretto con OAuth Bearer.
     Usato dalle verify T2 in modalità inverse: il modello di verifica è
     Claude stesso (via login OAuth nativo di Claude Code)."""
     global ANTHROPIC_OAUTH_TOKEN  # FIX B3.2: refresh lazy del token
@@ -817,6 +817,23 @@ def _relay_collaborative(final_text, verified_flag, model_name, request):
     return web.json_response(final_json, headers={"x-ai-verified": verified_flag})
 
 
+# FIX bug 2026-06-29: _path_allowed era chiamata ma mai definita -> NameError -> 500 su ogni request.
+# Soft-whitelist coerente col commento sopra il call site (B3.1): ammette /v1/*, blocca path traversal.
+def _path_allowed(path: str) -> bool:
+    if not isinstance(path, str) or not path:
+        return False
+    # path traversal / double slash
+    if ".." in path or "//" in path:
+        return False
+    # endpoint locale del proxy
+    if path == "/__router_health":
+        return True
+    # API Anthropic-compatible: /v1/messages, /v1/messages/count_tokens,
+    # /v1/messages/batches, /v1/models, /v1/models/{id}, ecc.
+    if path.startswith("/v1/"):
+        return True
+    return False
+
 async def handle(request):
     mode = get_mode(request)
     # FIX B3.8: rifiuta esplicitamente multipart (non supportato dal routing).
@@ -842,6 +859,13 @@ async def handle(request):
     _HC = {"/", "/readyz", "/livez", "/health", "/stats", "/metrics", "/status"}
     if request.path in _HC:
         return web.Response(status=200, text="ok")
+
+    # FIX B3.1 (corretto): soft-whitelist sul path. Ammette /v1/* (incluso
+    # count_tokens/batches/models/{id}) e i path locali; blocca path traversal
+    # e probe arbitrari con 404. Sostituisce la route-literal '*' rotta.
+    if not _path_allowed(request.path):
+        log(f"path non consentito: {request.path}")
+        return web.Response(status=404, text="not found")
 
     # Comandi in-chat + marca-chat (solo porta dinamica :8787, solo /v1/messages).
     if forced is None and request.path.endswith("/v1/messages"):
@@ -937,7 +961,7 @@ async def handle(request):
 
     # ── MODALITÀ PURE: nessuno switch, mai. Si ritorna ciò che dà l'upstream ──
     if mode in ("anthropic", "minimax"):
-        # Health-check interni headroom (/readyz /livez /health /stats /metrics):
+        # Health-check interni (/readyz /livez /health /stats /metrics):
         # chiamate del watchdog, non traffico utente. Non loggare (rumore).
         if not request.path.endswith("/v1/messages"):
             up = await forwarders[mode](request, body, session)

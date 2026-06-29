@@ -14,9 +14,7 @@ da un proxy principale e due servizi di compressione context.
       v
   :8787 ai-router (proxy switcher, modalità dinamica)
       |
-      +---> :8791 headroom-proxy ---> api.anthropic.com
       |
-      +---> :8790 headroom-minimax ---> api.minimax.io/anthropic
 
 Porte fixed:
   :8771 ai-router (FORCED: anthropic)
@@ -35,7 +33,6 @@ di usare backend diversi in sessioni parallele.
 
 ### 1. Anthropic (Pura)
 
-Tutto il traffico viene inoltrato esclusivamente a `:8791` (headroom-proxy
 verso api.anthropic.com). Nessun fallback. Se il backend risponde con
 errore, l'errore viene restituito tale e quale al client.
 
@@ -43,7 +40,6 @@ errore, l'errore viene restituito tale e quale al client.
 
 ### 2. MiniMax (Pura)
 
-Tutto il traffico viene inoltrato esclusivamente a `:8790` (headroom-minimax
 verso api.minimax.io/anthropic, modello M3). Nessun fallback.
 
 **Uso consigliato**: task semplici dove il modello M3 è sufficiente.
@@ -156,7 +152,6 @@ Risposta esempio:
 }
 ```
 
-Le porte headroom (8790, 8791) espongono:
 
 - `GET /health`
 - `GET /readyz`
@@ -199,15 +194,11 @@ Le porte headroom (8790, 8791) espongono:
 
 I tre servizi sono installati in `~/.config/systemd/user/`:
 
-- `headroom-proxy.service` (porta 8791)
-- `headroom-minimax.service` (porta 8790)
 - `ai-router-proxy.service` (porte 8787, 8771-8774)
 
 Per riavviare manualmente:
 
 ```bash
-systemctl --user restart headroom-proxy.service
-systemctl --user restart headroom-minimax.service
 systemctl --user restart ai-router-proxy.service
 ```
 
@@ -265,27 +256,22 @@ Durante il giorno:
 | Sintomo | Causa Probabile | Fix |
 |---|---|---|
 | Tutte le risposte 401 | Chiave Anthropic scaduta/assente | Usa `mixed` mode o aggiorna secrets |
-| Latenza alta su :8772 | headroom#2 in cooldown | `systemctl --user restart headroom-minimax.service` |
 | Modalità non cambia | Cache connessioni (~2s) | Aspetta 2 secondi, riprova |
 | `/readyz` rumoroso in log | Baco risolto il 2026-06-23 | Aggiorna ai-router-proxy |
 | Mixed non fa fallback | Status non in FALLBACK_STATUSES | Verifica codice (status 400/404 esclusi) |
 | Proxy non risponde | Servizio crashato | `systemctl --user restart ai-router-proxy.service` |
-| Headroom connection refused | Headroom non avviato | `systemctl --user start headroom-proxy.service` |
 
 ### Debug Avanzato
 
 ```bash
 # Verifica stato servizi
 systemctl --user status ai-router-proxy.service
-systemctl --user status headroom-proxy.service
-systemctl --user status headroom-minimax.service
 
 # Verifica porte in ascolto
 ss -tlnp | grep -E '878[0-9]|877[1-4]'
 
 # Log recenti
 journalctl --user -u ai-router-proxy.service -n 50
-journalctl --user -u headroom-proxy.service -n 50
 
 # Test diretto health endpoint
 curl -v http://127.0.0.1:8787/__router_health
@@ -297,7 +283,6 @@ curl -v http://127.0.0.1:8787/__router_health
 
 - Linux con systemd (user services)
 - Python 3.11+ con aiohttp
-- Headroom CLI installato (compressione context)
 - 3 file unit systemd in `~/.config/systemd/user/`
 - Script watchdog in PATH o in `~/bin/`
 
@@ -316,12 +301,9 @@ curl -v http://127.0.0.1:8787/__router_health
 | `AIROUTER_VERIFY_MODEL` | claude-opus-4-8 | Modello verifica interactive |
 | `AIROUTER_MIXED_PRIMARY` | anthropic | Backend primario in mixed |
 
-### Headroom
 
 | Variabile | Servizio | Descrizione |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | headroom-proxy (:8791) | Chiave per api.anthropic.com |
-| `MINIMAX_API_KEY` | headroom-minimax (:8790) | Chiave per api.minimax.io |
 
 ### Client
 
@@ -334,8 +316,6 @@ curl -v http://127.0.0.1:8787/__router_health
 ## File Rilevanti
 
 - `src/ai-router-proxy.py` - Proxy principale
-- `src/headroom-proxy/` - Servizio compressione Anthropic
-- `src/headroom-minimax/` - Servizio compressione MiniMax
 - `docs/MANUAL.en.md` - Questo documento
 - `scripts/ai-mode` - Script helper cambio modalità
 - `scripts/ai-stack-guard.sh` - Watchdog

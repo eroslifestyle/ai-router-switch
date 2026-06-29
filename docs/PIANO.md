@@ -2,7 +2,6 @@
 tipo: progetto
 stato: pianificazione-completa
 creato: 2026-06-23
-tags: [ai-router, proxy, claude-code, minimax, headroom, piano]
 ---
 
 # AI Router v2 — Piano Definitivo
@@ -18,14 +17,12 @@ tags: [ai-router, proxy, claude-code, minimax, headroom, piano]
 > È solo un instradatore di backend. Precedenza su qualsiasi altra feature.
 
 **Il router PUÒ solo:** scegliere backend (modalità) · fallback/cooldown ·
-intercettare comandi `!router` espliciti · comprimere il TRASPORTO (headroom)
 **preservando byte-per-byte** system/tool/skill/agent/MCP.
 
 **Il router NON farà MAI:** ❌ alterare tool/skill/agent/MCP (no EXCLUDE_TOOLS) ·
 ❌ toccare il system prompt · ❌ modificare settings di alcuna app ·
 ❌ cambiare comportamento/decisioni del modello.
 
-**Tecnica:** headroom byte-faithful (no exclude-tools) · body inoltrato identico
 (tranne `model`→backend + header auth MiniMax) · verifica T2 = layer separato.
 
 ## 🎯 Differenziatori (da ricerca competitor)
@@ -84,8 +81,6 @@ App (VSCode/Pi/Antigravity/terminale) → :8787 (router, punto unico)
   ├─ verifica T2 (task delicati): Opus, o self-check MiniMax in solo-minimax
   ├─ circuit breaker + cooldown bidirezionale
   └─ backend:
-       ├─ headroom#1 :8791 → api.anthropic.com (compressione)
-       └─ headroom#2 :8790 → api.minimax.io/anthropic (compressione)
 ```
 
 ## 🔧 Soluzioni tecniche (da deep research SearXNG+MiniMax)
@@ -132,8 +127,6 @@ Backup della copia precedente: `/tmp/ai-router-proxy.py.backup-20260623`.
 ### Porte (audit 2026-06-23)
 Tutte le Description dei 3 servizi systemd ora indicano la porta reale:
 - `:8787` ai-router (punto unico, dinamico)
-- `:8790` headroom-minimax → MiniMax
-- `:8791` headroom-proxy → Anthropic
 Watchdog (`ai-stack-guard.sh`) copre crash/OOM ogni minuto, nohup come fallback.
 
 ## 📐 Fasi di build (ordine D19, aggiornato)
@@ -147,7 +140,6 @@ Watchdog (`ai-stack-guard.sh`) copre crash/OOM ogni minuto, nohup come fallback.
 > modello. Il proxy fa SOLO routing di MODELLO (quale backend).
 
 ## 🛡️ Conservato (già attivo)
-4 modalità · fallback bidirezionale · compressione headroom×2 · verifica T2 ·
 resilienza systemd+watchdog+linger · key vault cifrato.
 
 ## 🔧 Decisioni operative (round 11-14)

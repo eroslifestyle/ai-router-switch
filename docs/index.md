@@ -30,7 +30,6 @@ endpoint, zero restart IDE.
 - 3 servizi systemd + 1 proxy = 5 porte
 - Fallback automatico su errori retryable
 - Circuit breaker (3 fail -> 120s cooldown)
-- Context compression via headroom
 - Tripla difesa: systemd + cron + hook
 - Self-hosted, MIT, open source
 

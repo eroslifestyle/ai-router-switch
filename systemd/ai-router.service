@@ -1,15 +1,21 @@
 [Unit]
 Description=AI Router Proxy (porta 8787) switcher anthropic/minimax/mixed/interactive — PROTETTO
-Documentation=file://$HOME/Obsidian/Memoria
+Documentation=file:///home/mrxxx/Obsidian/Memoria
 StartLimitIntervalSec=0
-After=headroom-proxy.service headroom-minimax.service
 
 [Service]
 Type=simple
-WorkingDirectory=$HOME
+WorkingDirectory=/home/mrxxx
 Environment=AIROUTER_PORT=8787
-Environment=AIROUTER_ANTHROPIC_UPSTREAM=http://127.0.0.1:8791
-ExecStart=/usr/bin/python3 $HOME/.claude/scripts/ai-router-proxy.py
+Environment=AIROUTER_ANTHROPIC_UPSTREAM=https://api.anthropic.com
+# Sonnet-main: verifica critica interactive-T2 su Sonnet invece di Opus (taglio quota Opus)
+Environment=AIROUTER_VERIFY_MODEL=claude-sonnet-4-6
+# MiniMax DIRETTO su endpoint Anthropic-compat ufficiale (no proxy, no LiteLLM).
+Environment=AIROUTER_MINIMAX_UPSTREAM=https://api.minimaxi.chat/anthropic
+Environment=AIROUTER_MINIMAX_MODEL=MiniMax-M3
+# Key MiniMax vera (sk-cp-) dal secrets file — propaga MINIMAX_API_KEY al processo.
+EnvironmentFile=%h/.secrets/minimax.env
+ExecStart=/usr/bin/python3 /home/mrxxx/.claude/scripts/ai-router-proxy.py
 Restart=always
 RestartSec=2
 OOMScoreAdjust=-900
