@@ -88,10 +88,27 @@ def breaker_ok(backend: str):
     """DEPRECATO audit v4: mai chiamato."""
     pass
 
+_FAILS_GC_MAX = 5000  # FIX audit v5 #7: soglia oltre cui ripulire chat_fp stale
+
+
+def _gc_fail_dicts(fails: dict, ts: dict, cooldown: dict, now: float) -> None:
+    """FIX audit v5 #7: rimuove entry stale (no inc da >FAIL_RESET_SEC) quando i
+    dict crescono troppo. Da chiamare DENTRO _counter_lock. Evita crescita RAM
+    indefinita su proxy long-running con molti chat_fp unici (es. X-Session-ID)."""
+    if len(fails) <= _FAILS_GC_MAX:
+        return
+    stale = [fp for fp, t in ts.items() if now - t > FAIL_RESET_SEC]
+    for fp in stale:
+        fails.pop(fp, None)
+        ts.pop(fp, None)
+        cooldown.pop(fp, None)
+
+
 def inverse_fail_inc(chat_fp: str) -> int:
     """Incrementa contatore fallimenti MiniMax per chat. Ritorna nuovo valore."""
     with _counter_lock:  # FIX B1.1
         now = time.time()
+        _gc_fail_dicts(_inverse_fails, _inverse_fail_ts, _inverse_cooldown_until, now)
         # Reset automatico se ultimo fail > FAIL_RESET_SEC fa
         last_fail = _inverse_fail_ts.get(chat_fp, 0)
         if now - last_fail > FAIL_RESET_SEC:
@@ -104,9 +121,10 @@ def inverse_fail_inc(chat_fp: str) -> int:
 
 def inverse_fail_reset(chat_fp: str) -> None:
     """Azzera contatore (chiamata MiniMax riuscita)."""
-    _inverse_fails[chat_fp] = 0
-    _inverse_fail_ts.pop(chat_fp, None)
-    _inverse_cooldown_until.pop(chat_fp, None)
+    with _counter_lock:  # FIX audit v5 #2: simmetrico con inverse_fail_inc
+        _inverse_fails[chat_fp] = 0
+        _inverse_fail_ts.pop(chat_fp, None)
+        _inverse_cooldown_until.pop(chat_fp, None)
 
 
 def inverse_should_escalate(chat_fp: str) -> bool:
@@ -125,6 +143,7 @@ def inverse_should_escalate(chat_fp: str) -> bool:
 def mixed_fail_inc(chat_fp: str) -> int:
     with _counter_lock:  # FIX B1.1
         now = time.time()
+        _gc_fail_dicts(_mixed_fails, _mixed_fail_ts, _mixed_cooldown_until, now)
         # Reset automatico se ultimo fail > FAIL_RESET_SEC fa
         last_fail = _mixed_fail_ts.get(chat_fp, 0)
         if now - last_fail > FAIL_RESET_SEC:
@@ -136,9 +155,10 @@ def mixed_fail_inc(chat_fp: str) -> int:
 
 
 def mixed_fail_reset(chat_fp: str) -> None:
-    _mixed_fails.pop(chat_fp, None)
-    _mixed_fail_ts.pop(chat_fp, None)
-    _mixed_cooldown_until.pop(chat_fp, None)
+    with _counter_lock:  # FIX audit v5 #2: simmetrico con mixed_fail_inc
+        _mixed_fails.pop(chat_fp, None)
+        _mixed_fail_ts.pop(chat_fp, None)
+        _mixed_cooldown_until.pop(chat_fp, None)
 
 
 def mixed_anthropic_leads(chat_fp: str) -> bool:
@@ -542,9 +562,11 @@ async def forward_anthropic(request, body, session):
     auth = headers.get("Authorization", "") or headers.get("authorization", "")
     if auth.startswith("Bearer sk-ant-oat"):
         headers["anthropic-beta"] = "oauth-2025-04-20"
-    # Strip campi beta che api.anthropic.com rifiuta senza il beta header opportuno
+    # Strip campi beta che api.anthropic.com rifiuta senza il beta header opportuno.
+    # FIX audit v5 #4: copri anche /v1/messages/count_tokens (sub-path), non solo
+    # il path esatto, altrimenti context_management su count_tokens -> 400.
     safe_body = strip_unsupported_fields(body, ANTHROPIC_UNSUPPORTED_FIELDS) \
-        if request.path.endswith("/v1/messages") else body
+        if "/v1/messages" in request.path else body
     return await session.request(
         request.method, url, data=safe_body, headers=headers, allow_redirects=False
     )
@@ -590,7 +612,7 @@ async def forward_anthropic_direct(request, body, session):
     headers.setdefault("anthropic-version", "2023-06-01")
     # Strip campi beta che api.anthropic.com rifiuta senza il beta header opportuno
     safe_body = strip_unsupported_fields(body, ANTHROPIC_UNSUPPORTED_FIELDS) \
-        if request.path.endswith("/v1/messages") else body
+        if "/v1/messages" in request.path else body  # FIX audit v5 #4: copri count_tokens
     return await session.request(
         request.method, url, data=safe_body, headers=headers, allow_redirects=False
     )
@@ -1291,18 +1313,19 @@ def _make_app(session, forced_mode):
 
 
 async def _run_multiport():
-    # FIX B1.3: connector con limit espliciti per evitare starvation pool sotto carico
-    conn_anthropic = TCPConnector(limit=50, limit_per_host=20, ttl_dns_cache=300)
-    conn_minimax = TCPConnector(limit=50, limit_per_host=20, ttl_dns_cache=300)
+    # FIX audit v5 #6: una ClientSession ha UN solo connector (il "pool separato"
+    # del vecchio B1.3 era fittizio: _minimax_connector non veniva mai usato da
+    # session.request). Un unico pool con limit alto basta per un proxy locale.
+    # ponytail: limit=100 globale, alzare se servisse throughput multi-tenant.
+    connector = TCPConnector(limit=100, limit_per_host=40, ttl_dns_cache=300)
     # Una sola ClientSession condivisa da tutte le porte.
     session = ClientSession(
         # FIX: timeout granulari per streaming SSE - sock_read alto per first-token LLM
         timeout=ClientTimeout(total=600, connect=30, sock_read=120, sock_connect=15),
-        connector=conn_anthropic,  # default per anthropic; minimax userà conn dedicato
+        connector=connector,
         # FIX #7 CRITICAL: auto_decompress=False per passthrough brotli/gzip.
         auto_decompress=False,
     )
-    session._minimax_connector = conn_minimax  # FIX B1.3: pool separato per fallback
     # FIX audit v3: signal handler installato PRIMA del port loop.
     # Cosi' un SIGTERM early (subito dopo il boot) trova un handler graceful
     # invece del default kill-hard.
@@ -1330,8 +1353,7 @@ async def _run_multiport():
             log(f"ERR listen {port}: {e}")
     if not runners:
         log("no ports bound (already in use?) — exiting to avoid orphan instance")
-        await session.close()
-        await conn_minimax.close()  # FIX: chiusura esplicita del pool separato
+        await session.close()  # chiude anche il connector associato
         return
     # Signal handler gia' installato prima del port loop (FIX audit v3).
     try:
@@ -1340,8 +1362,7 @@ async def _run_multiport():
     finally:
         for r in runners:
             await r.cleanup()
-        await session.close()
-        await conn_minimax.close()  # FIX: chiusura pool separato
+        await session.close()  # chiude anche il connector associato
         log("shutdown complete")
 
 
