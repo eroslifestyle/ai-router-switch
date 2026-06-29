@@ -237,6 +237,7 @@ CHAT_STORE = Path.home() / ".claude" / "ai-router-chats.json"
 CHAT_TTL_DAYS = 7
 CHAT_MAX_ENTRIES = 10000  # FIX B2.4: cap duro anti-DoS
 _chat_cache = {"data": None, "ts": 0}
+_chat_lock = threading.Lock()  # FIX audit v3: TOCTOU read-modify-write protection
 
 
 def conversation_fingerprint(data: dict) -> str:
@@ -254,37 +255,39 @@ def conversation_fingerprint(data: dict) -> str:
 
 
 def _load_chats() -> dict:
-    now = time.time()
-    if _chat_cache["data"] is not None and now - _chat_cache["ts"] < 5:
-        return _chat_cache["data"]
-    try:
-        d = json.loads(CHAT_STORE.read_text())
-    except Exception:
-        d = {}
-    # pulizia TTL (D26: 7 giorni)
-    cutoff = now - CHAT_TTL_DAYS * 86400
-    changed = False
-    for fp in list(d.keys()):
-        if d[fp].get("ts", 0) < cutoff:
-            del d[fp]; changed = True
-    # FIX B2.4 residuo: bound hard su N entries (FIFO by timestamp asc)
-    if len(d) > CHAT_MAX_ENTRIES:
-        for fp in sorted(d, key=lambda k: d[k].get("ts", 0))[: len(d) - CHAT_MAX_ENTRIES]:
-            del d[fp]; changed = True
-    if changed:
-        _save_chats(d)
-    _chat_cache["data"] = d
-    _chat_cache["ts"] = now
+    with _chat_lock:  # FIX audit v3: protezione TOCTOU su file system
+        now = time.time()
+        if _chat_cache["data"] is not None and now - _chat_cache["ts"] < 5:
+            return _chat_cache["data"]
+        try:
+            d = json.loads(CHAT_STORE.read_text())
+        except Exception:
+            d = {}
+        # pulizia TTL (D26: 7 giorni)
+        cutoff = now - CHAT_TTL_DAYS * 86400
+        changed = False
+        for fp in list(d.keys()):
+            if d[fp].get("ts", 0) < cutoff:
+                del d[fp]; changed = True
+        # FIX B2.4 residuo: bound hard su N entries (FIFO by timestamp asc)
+        if len(d) > CHAT_MAX_ENTRIES:
+            for fp in sorted(d, key=lambda k: d[k].get("ts", 0))[: len(d) - CHAT_MAX_ENTRIES]:
+                del d[fp]; changed = True
+        if changed:
+            _save_chats(d)
+        _chat_cache["data"] = d
+        _chat_cache["ts"] = now
     return d
 
 
 def _save_chats(d: dict):
-    try:
-        CHAT_STORE.write_text(json.dumps(d))
-        _chat_cache["data"] = d
-        _chat_cache["ts"] = time.time()
-    except Exception as e:
-        log(f"ERR save chats: {e}")
+    with _chat_lock:  # FIX audit v3: lock simmetrico con _load_chats
+        try:
+            CHAT_STORE.write_text(json.dumps(d))
+            _chat_cache["data"] = d
+            _chat_cache["ts"] = time.time()
+        except Exception as e:
+            log(f"ERR save chats: {e}")
 
 
 def get_chat_mode(fp: str):
@@ -405,7 +408,7 @@ def classify_t2(body: bytes) -> bool:
     return False
 
 
-def get_minimax_key() -> str:
+async def get_minimax_key() -> str:
     """FIX: cache 60s + lock per evitare doppio subprocess in race + TOCTOU."""
     with _counter_lock:  # FIX B1.2 residuo: cache TTL check-then-act
         now = time.time()
@@ -415,11 +418,23 @@ def get_minimax_key() -> str:
         if not key:
             try:
                 import subprocess
-                # FIX: subprocess NON bloccante su event loop asyncio
-                key = subprocess.check_output(
-                    ["bash", str(KEY_FILE), "get", "minimax.api_key"],
-                    text=True, timeout=5,
-                ).strip()
+                # FIX: subprocess NON bloccante su event loop asyncio.
+                # asyncio.to_thread esegue il blocking call in un thread worker
+                # del default executor (gestito da asyncio, non blocca il loop).
+                try:
+                    loop = asyncio.get_running_loop()
+                    out = await asyncio.to_thread(
+                        subprocess.check_output,
+                        ["bash", str(KEY_FILE), "get", "minimax.api_key"],
+                        {"text": True, "timeout": 5},
+                    )
+                except RuntimeError:
+                    # no event loop: siamo in main() startup, esegui sync
+                    out = subprocess.check_output(
+                        ["bash", str(KEY_FILE), "get", "minimax.api_key"],
+                        text=True, timeout=5,
+                    )
+                key = out.strip() if isinstance(out, str) else out.decode().strip()
             except Exception as e:
                 log(f"ERR get key: {type(e).__name__}")  # mai leak str(e) per secret
                 key = ""
@@ -532,7 +547,7 @@ async def forward_anthropic(request, body, session):
 
 async def forward_minimax(request, body, session):
     url = MINIMAX_UPSTREAM + request.path_qs
-    key = get_minimax_key()
+    key = await get_minimax_key()
     headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS}
     # MiniMax vuole X-Api-Key; rimuovo auth Anthropic
     for h in list(headers):
@@ -813,7 +828,7 @@ async def handle(request):
             "port_role": forced or "dynamic",
             "anthropic_upstream": ANTHROPIC_UPSTREAM,
             "minimax_upstream": MINIMAX_UPSTREAM,
-            "minimax_key_present": bool(get_minimax_key()),
+            "minimax_key_present": bool(await get_minimax_key()),  # FIX: async dopo to_thread
         })
 
     # FIX #1: Health-check e probe watchdog interni: risposta locale 200.
@@ -1161,6 +1176,8 @@ async def handle(request):
             try:
                 up2 = await forwarders["anthropic"](request, body, session)
                 log(f"mixed T0/T1 rescue anthropic {up2.status} {request.path}")
+                if up2.status < 400:
+                    mixed_fail_reset(chat_fp)  # FIX audit v3: reset counter su rescue OK
                 return await relay(up2)
             except Exception as e2:
                 return web.json_response(
@@ -1253,8 +1270,20 @@ async def _run_multiport():
         auto_decompress=False,
     )
     session._minimax_connector = conn_minimax  # FIX B1.3: pool separato per fallback
+    # FIX audit v3: signal handler installato PRIMA del port loop.
+    # Cosi' un SIGTERM early (subito dopo il boot) trova un handler graceful
+    # invece del default kill-hard.
+    loop = asyncio.get_running_loop()
+    stop = asyncio.Event()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
     runners = []
     for port in LISTEN_PORTS:
+        # FIX: tra SIGTERM (stop.set) e l'attesa stop.wait(), uno shutdown puo'
+        # partire mentre stiamo ancora bind-ando le porte. Check esplicito.
+        if stop.is_set():
+            log("shutdown requested during bind, exiting early")
+            break
         forced = PORT_MODE.get(port)  # None per :8787 (dinamica)
         app = _make_app(session, forced)
         runner = web.AppRunner(app)
@@ -1271,11 +1300,7 @@ async def _run_multiport():
         await session.close()
         await conn_minimax.close()  # FIX: chiusura esplicita del pool separato
         return
-    # FIX: signal handler per shutdown pulito su SIGTERM/SIGINT
-    loop = asyncio.get_running_loop()
-    stop = asyncio.Event()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, stop.set)
+    # Signal handler gia' installato prima del port loop (FIX audit v3).
     try:
         await stop.wait()
         log("shutdown signal received, draining...")
