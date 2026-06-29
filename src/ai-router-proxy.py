@@ -416,14 +416,30 @@ def extract_last_user_text(data: dict) -> str:
     return ""
 
 
+def _body_has_tools(body: bytes) -> bool:
+    """True se il body JSON contiene 'tools' = richiesta agentica (Claude Code/VSCode).
+    MiniMax-M3 non emette blocchi tool_use: queste richieste vanno instradate ad
+    Anthropic (tool-capable), altrimenti l'agente non esegue nulla."""
+    try:
+        return bool(json.loads(body).get("tools"))
+    except Exception:
+        return False
+
+
 def classify_t2(body: bytes) -> bool:
     """True se la richiesta è 'critica' (T2) -> merita verifica Opus."""
-    if os.environ.get("AIROUTER_FORCE_T2") == "1":
-        return True
     try:
         data = json.loads(body)
     except Exception:
         return False
+    # Richieste agentiche (Claude Code/VSCode) contengono "tools" e si aspettano
+    # blocchi tool_use in risposta. La pipeline collaborativa T2 appiattisce la
+    # risposta a solo testo, distruggendo i tool_use -> l'agente non esegue nulla.
+    # Mai farle entrare in T2: vanno in passthrough rel() che preserva i tool.
+    if data.get("tools"):
+        return False
+    if os.environ.get("AIROUTER_FORCE_T2") == "1":
+        return True
     text = extract_last_user_text(data)
     low = text.lower()
     if any(k in low for k in T2_KEYWORDS):
@@ -1023,6 +1039,16 @@ async def handle(request):
 
         # solo /v1/messages è soggetto a verifica; altri path -> minimax passthrough
         if not is_t2:
+            # Agentico (tools): MiniMax-M3 non emette tool_use -> instrada ad
+            # Anthropic (tool-capable) in passthrough, altrimenti l'agente non esegue.
+            if is_messages and _body_has_tools(body):
+                log(f"inverse: agentic (tools) -> anthropic passthrough {request.path}")
+                try:
+                    return await relay(await forward_anthropic(request, body, session))
+                except Exception as e:
+                    return web.json_response(
+                        {"type": "error", "error": {"type": "router_error",
+                         "message": str(e)}}, status=502)
             # task non critico (o non-messages): MiniMax diretto, streaming preservato
             try:
                 up = await forward_minimax(request, body, session)
@@ -1155,6 +1181,17 @@ async def handle(request):
             orig = json.loads(body)
         except Exception:
             orig = {}
+        # Agentico (tools): la pipeline verify appiattirebbe la risposta a solo
+        # testo e distruggerebbe i tool_use. Relay diretto Anthropic = passthrough
+        # che preserva i blocchi tool_use richiesti dall'agente.
+        if orig.get("tools"):
+            log("mixed escalation: agentic (tools) -> relay anthropic passthrough")
+            try:
+                return await relay(await forward_anthropic(request, body, session))
+            except Exception as e:
+                return web.json_response(
+                    {"type": "error", "error": {"type": "router_error",
+                     "message": str(e)}}, status=502)
         question = extract_last_user_text(orig)
         wants_stream = bool(orig.get("stream"))
         # pipeline verify (T2-style): M3 draft -> Anthropic critique -> M3 revise
@@ -1204,6 +1241,16 @@ async def handle(request):
 
     # Path normale: T0/T1 -> M3 diretto; T2 -> pipeline verify gerarchica
     if not is_t2:
+        # Agentico (tools): MiniMax-M3 non emette tool_use -> instrada ad Anthropic
+        # (tool-capable) in passthrough, altrimenti l'agente VSCode non esegue nulla.
+        if is_messages and _body_has_tools(body):
+            log(f"mixed: agentic (tools) -> anthropic passthrough {request.path}")
+            try:
+                return await relay(await forward_anthropic(request, body, session))
+            except Exception as e:
+                return web.json_response(
+                    {"type": "error", "error": {"type": "router_error",
+                     "message": str(e)}}, status=502)
         # T0/T1: M3 diretto, streaming preservato
         try:
             up = await forwarders["minimax"](request, body, session)
