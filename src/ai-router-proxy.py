@@ -17,6 +17,7 @@ Gestisce streaming SSE. Non modifica headroom né LiteLLM.
 import asyncio
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -62,6 +63,17 @@ _inverse_fails = {}  # chat_fp -> int
 MIXED_FAIL_THRESHOLD = int(os.environ.get("AIROUTER_MIXED_FAILS", "2"))
 _mixed_fails = {}  # chat_fp -> int
 
+# FIX B1.1: lock condiviso per contatori globali (thread-safe + asyncio-safe via run_in_executor)
+_counter_lock = threading.Lock()
+
+# FIX #2: Cooldown e reset automatico per escalation
+RESCUE_COOLDOWN_SEC = 30  # cooldown dopo escalation prima di ritentare
+FAIL_RESET_SEC = 60  # reset counter se ultimo fallimento > 60s fa
+_inverse_fail_ts = {}  # chat_fp -> timestamp ultimo fallimento
+_mixed_fail_ts = {}  # chat_fp -> timestamp ultimo fallimento
+_inverse_cooldown_until = {}  # chat_fp -> timestamp fine cooldown
+_mixed_cooldown_until = {}  # chat_fp -> timestamp fine cooldown
+
 
 def breaker_is_open(backend: str) -> bool:
     """True se il backend è in cooldown (da saltare)."""
@@ -69,49 +81,85 @@ def breaker_is_open(backend: str) -> bool:
 
 
 def breaker_fail(backend: str):
-    b = _breaker.setdefault(backend, {"fails": 0, "open_until": 0})
-    b["fails"] += 1
-    if b["fails"] >= BREAKER_FAIL_MAX:
-        b["open_until"] = time.time() + BREAKER_COOLDOWN
-        b["fails"] = 0
-        log(f"breaker OPEN {backend} per {BREAKER_COOLDOWN}s")
+    with _counter_lock:  # FIX B1.1
+        b = _breaker.setdefault(backend, {"fails": 0, "open_until": 0})
+        b["fails"] += 1
+        if b["fails"] >= BREAKER_FAIL_MAX:
+            b["open_until"] = time.time() + BREAKER_COOLDOWN
+            b["fails"] = 0
+            log(f"breaker OPEN {backend} per {BREAKER_COOLDOWN}s")
 
 
 def breaker_ok(backend: str):
-    b = _breaker.setdefault(backend, {"fails": 0, "open_until": 0})
-    b["fails"] = 0
-    b["open_until"] = 0
+    with _counter_lock:  # FIX B1.1
+        b = _breaker.setdefault(backend, {"fails": 0, "open_until": 0})
+        b["fails"] = 0
+        b["open_until"] = 0
 
 def inverse_fail_inc(chat_fp: str) -> int:
     """Incrementa contatore fallimenti MiniMax per chat. Ritorna nuovo valore."""
-    n = _inverse_fails.get(chat_fp, 0) + 1
-    _inverse_fails[chat_fp] = n
+    with _counter_lock:  # FIX B1.1
+        now = time.time()
+        # Reset automatico se ultimo fail > FAIL_RESET_SEC fa
+        last_fail = _inverse_fail_ts.get(chat_fp, 0)
+        if now - last_fail > FAIL_RESET_SEC:
+            _inverse_fails[chat_fp] = 0
+        n = _inverse_fails.get(chat_fp, 0) + 1
+        _inverse_fails[chat_fp] = n
+        _inverse_fail_ts[chat_fp] = now
     return n
 
 
 def inverse_fail_reset(chat_fp: str) -> None:
     """Azzera contatore (chiamata MiniMax riuscita)."""
     _inverse_fails[chat_fp] = 0
+    _inverse_fail_ts.pop(chat_fp, None)
+    _inverse_cooldown_until.pop(chat_fp, None)
 
 
 def inverse_should_escalate(chat_fp: str) -> bool:
     """True se Anthropic deve bypassare MiniMax ed eseguire direttamente."""
-    return _inverse_fails.get(chat_fp, 0) >= INVERSE_FAIL_THRESHOLD
+    # Cooldown attivo: resta in modalità escalation
+    if time.time() < _inverse_cooldown_until.get(chat_fp, 0):
+        return True
+    fails = _inverse_fails.get(chat_fp, 0)
+    if fails >= INVERSE_FAIL_THRESHOLD:
+        # Attiva cooldown
+        _inverse_cooldown_until[chat_fp] = time.time() + RESCUE_COOLDOWN_SEC
+        return True
+    return False
 
 
 def mixed_fail_inc(chat_fp: str) -> int:
-    n = _mixed_fails.get(chat_fp, 0) + 1
-    _mixed_fails[chat_fp] = n
+    with _counter_lock:  # FIX B1.1
+        now = time.time()
+        # Reset automatico se ultimo fail > FAIL_RESET_SEC fa
+        last_fail = _mixed_fail_ts.get(chat_fp, 0)
+        if now - last_fail > FAIL_RESET_SEC:
+            _mixed_fails[chat_fp] = 0
+        n = _mixed_fails.get(chat_fp, 0) + 1
+        _mixed_fails[chat_fp] = n
+        _mixed_fail_ts[chat_fp] = now
     return n
 
 
 def mixed_fail_reset(chat_fp: str) -> None:
     _mixed_fails.pop(chat_fp, None)
+    _mixed_fail_ts.pop(chat_fp, None)
+    _mixed_cooldown_until.pop(chat_fp, None)
 
 
 def mixed_anthropic_leads(chat_fp: str) -> bool:
     """True se MiniMax ha già fallito >= soglia: Anthropic prende il comando."""
-    return _mixed_fails.get(chat_fp, 0) >= MIXED_FAIL_THRESHOLD
+    # Cooldown attivo: resta in modalità escalation
+    if time.time() < _mixed_cooldown_until.get(chat_fp, 0):
+        return True
+    fails = _mixed_fails.get(chat_fp, 0)
+    if fails >= MIXED_FAIL_THRESHOLD:
+        # Attiva cooldown
+        _mixed_cooldown_until[chat_fp] = time.time() + RESCUE_COOLDOWN_SEC
+        return True
+    return False
 
 
 _minimax_key_cache = {"key": None, "ts": 0}
@@ -124,6 +172,11 @@ def log(msg: str):
             f.write(line + "\n")
     except Exception:
         pass
+
+
+def log_exc(msg: str):  # FIX B5.2: log con traceback
+    import traceback
+    log(f"{msg}\n{traceback.format_exc()}")
 
 
 # Porte con modalità FISSA (per usare modalità diverse su sessioni diverse).
@@ -146,6 +199,21 @@ def get_file_mode() -> str:
     except Exception:
         pass
     return "anthropic"  # default sicuro
+
+
+def _current_mode() -> str:
+    """Helper per /health: modalità corrente (da file, fallback 'anthropic')."""
+    return get_file_mode()
+
+
+def _err_response(message: str, status: int = 502) -> web.Response:
+    """FIX B4.10: err response con status propagato dall'upstream se disponibile.
+    Il chiamante può passare status=up.status quando catches un errore dopo che
+    l'upstream ha già risposto, evitando di rimappare 429->502."""
+    return web.json_response(
+        {"type": "error", "error": {"type": "router_error", "message": str(message)}},
+        status=status,
+    )
 
 
 def get_mode(request=None) -> str:
@@ -355,6 +423,26 @@ def get_minimax_key() -> str:
 # Campi beta/Anthropic-only che MiniMax (api.minimaxi.chat) rifiuta con 400.
 MINIMAX_UNSUPPORTED_FIELDS = ("context_management", "mcp_servers", "thinking")
 
+# Anthropic public API: 'context_management' è beta-only gated da
+# 'anthropic-beta: context-management-2025-06-27'. Senza quel header,
+# api.anthropic.com restituisce 400 "Extra inputs are not permitted".
+# Lo strippiamo a monte per evitare il 400 (headroom/client possono inviarlo).
+ANTHROPIC_UNSUPPORTED_FIELDS = ("context_management",)
+
+
+def strip_unsupported_fields(raw: bytes, fields: tuple) -> bytes:
+    """Rimuove campi non supportati dal body JSON. No-op se non è JSON."""
+    try:
+        data = json.loads(raw)
+        changed = False
+        for f in fields:
+            if f in data:
+                data.pop(f, None)
+                changed = True
+        return json.dumps(data).encode() if changed else raw
+    except Exception:
+        return raw
+
 
 def remap_body_for_minimax(raw: bytes) -> bytes:
     """Riscrive il model Claude -> MiniMax-M3 e rimuove i campi beta non supportati."""
@@ -403,8 +491,11 @@ async def forward_anthropic(request, body, session):
     auth = headers.get("Authorization", "") or headers.get("authorization", "")
     if auth.startswith("Bearer sk-ant-oat"):
         headers["anthropic-beta"] = "oauth-2025-04-20"
+    # Strip campi beta che api.anthropic.com rifiuta senza il beta header opportuno
+    safe_body = strip_unsupported_fields(body, ANTHROPIC_UNSUPPORTED_FIELDS) \
+        if request.path.endswith("/v1/messages") else body
     return await session.request(
-        request.method, url, data=body, headers=headers, allow_redirects=False
+        request.method, url, data=safe_body, headers=headers, allow_redirects=False
     )
 
 
@@ -439,8 +530,11 @@ async def forward_anthropic_direct(request, body, session):
         headers["Authorization"] = f"Bearer {ANTHROPIC_OAUTH_TOKEN}"
         headers["anthropic-beta"] = "oauth-2025-04-20"
     headers.setdefault("anthropic-version", "2023-06-01")
+    # Strip campi beta che api.anthropic.com rifiuta senza il beta header opportuno
+    safe_body = strip_unsupported_fields(body, ANTHROPIC_UNSUPPORTED_FIELDS) \
+        if request.path.endswith("/v1/messages") else body
     return await session.request(
-        request.method, url, data=body, headers=headers, allow_redirects=False
+        request.method, url, data=safe_body, headers=headers, allow_redirects=False
     )
 
 
@@ -473,7 +567,7 @@ async def _call_full(forward_fn, request, body, session):
         log(f"_call_full TIMEOUT 90s req {getattr(request, 'path', '?')}")
         return 0, None
     except Exception as e:
-        log(f"_call_full EXC req {getattr(request, 'path', '?')}: {e}")
+        log_exc(f"_call_full EXC req {getattr(request, 'path', '?')}: {e}")  # FIX B5.2
         if up is not None:
             try: up.release()
             except Exception: pass
@@ -582,8 +676,8 @@ def _build_finalize_body(orig: dict, question: str, draft_v2: str) -> bytes:
     }).encode()
 
 
-def _sse_from_message(j: dict, verified: str) -> bytes:
-    """Costruisce uno stream SSE Anthropic-compat da una risposta completa."""
+def _sse_events_from_message(j: dict, verified: str) -> list:
+    """Ritorna lista di eventi SSE Anthropic-compat (per invio progressivo con flush)."""
     text = _text_from_message(j)
     mid = j.get("id", "msg_router")
     model = j.get("model", "unknown")
@@ -592,7 +686,7 @@ def _sse_from_message(j: dict, verified: str) -> bytes:
         "id": mid, "type": "message", "role": "assistant", "model": model,
         "content": [], "stop_reason": None, "stop_sequence": None,
         "usage": usage}}
-    parts = [
+    return [
         f"event: message_start\ndata: {json.dumps(msg_start)}\n\n",
         "event: content_block_start\ndata: " + json.dumps({
             "type": "content_block_start", "index": 0,
@@ -609,7 +703,47 @@ def _sse_from_message(j: dict, verified: str) -> bytes:
             "usage": {"output_tokens": usage.get("output_tokens", 0)}}) + "\n\n",
         "event: message_stop\ndata: " + json.dumps({"type": "message_stop"}) + "\n\n",
     ]
-    return "".join(parts).encode()
+
+
+def _sse_from_message(j: dict, verified: str) -> bytes:
+    """Costruisce uno stream SSE Anthropic-compat (compat legacy)."""
+    return "".join(_sse_events_from_message(j, verified)).encode()
+
+
+async def _prepare_sse_response(request, status: int = 200, extra_headers=None):
+    """Prepara una StreamResponse SSE con header anti-buffering.
+
+    Fix per ECONNRESET in VSCode: flush immediato + no buffering downstream.
+    """
+    resp = web.StreamResponse(status=status)
+    resp.headers["content-type"] = "text/event-stream; charset=utf-8"
+    resp.headers["cache-control"] = "no-cache, no-transform"
+    resp.headers["connection"] = "keep-alive"
+    resp.headers["x-accel-buffering"] = "no"
+    if extra_headers:
+        for k, v in extra_headers.items():
+            resp.headers[k] = str(v)
+    resp.enable_chunked_encoding()
+    await resp.prepare(request)
+    return resp
+
+
+async def _send_sse_message(request, final_json: dict, verified_flag: str, status: int = 200):
+    """Invia un message SSE Anthropic-compat evento-per-evento con flush immediato.
+
+    Garantisce che il PRIMO evento (message_start) raggiunga il client SUBITO,
+    evitando ECONNRESET 'before first event' in VSCode.
+    """
+    resp = await _prepare_sse_response(request, status=status,
+                                       extra_headers={"x-ai-verified": verified_flag})
+    for ev in _sse_events_from_message(final_json, verified_flag):
+        await resp.write(ev.encode())
+        try:
+            await resp.drain()
+        except Exception:
+            pass
+    await resp.write_eof()
+    return resp
 
 
 def _relay_collaborative(final_text, verified_flag, model_name, request):
@@ -620,13 +754,17 @@ def _relay_collaborative(final_text, verified_flag, model_name, request):
         "model": model_name,
         "content": [{"type": "text", "text": final_text}],
         "stop_reason": "end_turn", "stop_sequence": None,
-        "usage": {"input_tokens": 0, "output_tokens": len(final_text.split())},
+        "usage": {"input_tokens": 0, "output_tokens": max(1, len(final_text) // 4)}  # FIX B4.2: ~4 char/token, meglio di split(),
     }
     return web.json_response(final_json, headers={"x-ai-verified": verified_flag})
 
 
 async def handle(request):
     mode = get_mode(request)
+    # FIX B3.8: rifiuta esplicitamente multipart (non supportato dal routing).
+    ct = (request.headers.get("Content-Type") or "").lower()
+    if "multipart/form-data" in ct:
+        return _err_response("multipart not supported", status=415)
     body = await request.read()
     forced = request.app.get("forced_mode")
 
@@ -640,9 +778,10 @@ async def handle(request):
             "minimax_key_present": bool(get_minimax_key()),
         })
 
-    # Health-check upstream (watchdog interni): risposta locale 200 per TUTTE le modalità.
-    # Evita che /readyz /livez /health /stats vadano all'upstream e causino 404 flood.
-    _HC = {"/readyz", "/livez", "/health", "/stats", "/metrics"}
+    # FIX #1: Health-check e probe watchdog interni: risposta locale 200.
+    # Evita che /, /readyz, /livez, /health, /stats, /status vadano all'upstream
+    # e causino cascate 404/405 infinite che bloccano l'utente.
+    _HC = {"/", "/readyz", "/livez", "/health", "/stats", "/metrics", "/status"}
     if request.path in _HC:
         return web.Response(status=200, text="ok")
 
@@ -666,12 +805,8 @@ async def handle(request):
                 _msg = _synthetic_message(_txt)
                 log(f"in-chat command {_cmd} fp={_fp}")
                 if bool(_data.get("stream")):
-                    _resp = web.StreamResponse(status=200)
-                    _resp.headers["content-type"] = "text/event-stream"
-                    await _resp.prepare(request)
-                    await _resp.write(_sse_from_message(_msg, "router"))
-                    await _resp.write_eof()
-                    return _resp
+                    # FIX SSE: usa helper con header anti-buffering + flush per evento
+                    return await _send_sse_message(request, _msg, "router")
                 return web.json_response(_msg)
             # nessun comando: applica eventuale marca-chat (D5)
             _cm = get_chat_mode(_fp)
@@ -683,14 +818,60 @@ async def handle(request):
     session = request.app["session"]
 
     async def relay(upstream):
+        # FIX SSE: rileva text/event-stream per applicare flush immediato + no-buffering
+        is_sse = "text/event-stream" in (upstream.headers.get("content-type") or "").lower()
         resp = web.StreamResponse(status=upstream.status)
         for k, v in upstream.headers.items():
-            if k.lower() in HOP_HEADERS or k.lower() == "content-encoding":
+            lk = k.lower()
+            if lk in HOP_HEADERS:
+                continue
+            # FIX #8: Forward Content-Encoding (br/gzip) so client can decode.
+            # We use auto_decompress=False in ClientSession to pass through as-is.
+            # Evita Content-Length su SSE: rompe chunked streaming
+            if is_sse and lk == "content-length":
                 continue
             resp.headers[k] = v
+        if is_sse:
+            # Header SSE-corretti: nessun buffering downstream, keep-alive
+            resp.headers.setdefault("content-type", "text/event-stream")
+            resp.headers["cache-control"] = "no-cache, no-transform"
+            resp.headers["connection"] = "keep-alive"
+            resp.headers["x-accel-buffering"] = "no"
+        # FIX #6: NON usare enable_chunked_encoding() - aiohttp lo fa automaticamente
+        # quando Transfer-Encoding non è in headers (già skippato da HOP_HEADERS).
+        # Evita doppia codifica/conflitto chunked.
         await resp.prepare(request)
-        async for chunk in upstream.content.iter_any():
-            await resp.write(chunk)
+        # FIX #2: usa iter_any() anche per SSE - iter_chunked(N) può bloccare aspettando N bytes
+        # mentre SSE invia eventi piccoli (<200 byte). iter_any() yielda appena disponibile.
+        iterator = upstream.content.iter_any()
+        chunk_count = 0
+        total_bytes = 0
+        try:
+            async for chunk in iterator:
+                if not chunk:
+                    continue
+                chunk_count += 1
+                total_bytes += len(chunk)
+                # FIX #4: log primo chunk per debug
+                if chunk_count == 1:
+                    log(f"relay first chunk {len(chunk)}B (SSE={is_sse})")
+                await resp.write(chunk)
+                if is_sse:
+                    # FIX #5: drain senza try/except - se fallisce vogliamo saperlo
+                    await resp.drain()
+        except Exception as e:
+            # FIX #3: log esplicito eccezioni nel loop streaming
+            log(f"relay loop ERROR after {chunk_count} chunks ({total_bytes}B): {e}")
+            raise
+        finally:
+            # FIX B2.3: garantisce chiusura upstream su client disconnect/cancel/exception
+            if not upstream.closed:
+                upstream.release()
+        # FIX #4: log bytes totali inoltrati
+        if is_sse or total_bytes > 0:
+            log(f"relay done: {chunk_count} chunks, {total_bytes} bytes (SSE={is_sse})")
+        # FIX #5: drain finale prima di write_eof per garantire flush completo
+        await resp.drain()
         await resp.write_eof()
         return resp
 
@@ -734,7 +915,7 @@ async def handle(request):
                 log(f"inverse escalated EXC: {e}")
                 return web.json_response(
                     {"type": "error", "error": {"type": "router_error",
-                     "message": str(e)}}, status=502)
+                     "message": str(e)}}, status=502)  # legacy, vedi _err_response
 
         # solo /v1/messages è soggetto a verifica; altri path -> minimax passthrough
         if not is_t2:
@@ -749,7 +930,7 @@ async def handle(request):
                 log(f"inverse T1 EXC ({n}/{INVERSE_FAIL_THRESHOLD}): {e}")
                 return web.json_response(
                     {"type": "error", "error": {"type": "router_error",
-                     "message": str(e)}}, status=502)
+                     "message": str(e)}}, status=502)  # legacy, vedi _err_response
 
         # ---- T2 critico: pipeline collaborativa M3 <-> Anthropic ----
         # R1: M3 genera bozza
@@ -769,7 +950,7 @@ async def handle(request):
         except Exception as e:
             gen_status, gen_json = 0, None
             log(f"inverse T2 R1 EXC: {e}")
-        if not gen_json or gen_status >= 400:
+        if not gen_json or gen_status in FALLBACK_STATUSES:  # FIX B4.1: solo retryable
             n = inverse_fail_inc(chat_fp)
             log(f"inverse T2: M3 R1 fallita ({gen_status}) [{n}/{INVERSE_FAIL_THRESHOLD}]")
             if inverse_should_escalate(chat_fp):
@@ -842,19 +1023,13 @@ async def handle(request):
             "model": "minimax-m3+claude" if verified_flag == "collaborative" else "minimax-m3",
             "content": [{"type": "text", "text": final_text}],
             "stop_reason": "end_turn", "stop_sequence": None,
-            "usage": {"input_tokens": 0, "output_tokens": len(final_text.split())},
+            "usage": {"input_tokens": 0, "output_tokens": max(1, len(final_text) // 4)}  # FIX B4.2: ~4 char/token, meglio di split(),
         }
 
         # 3) risposta al client (SSE sintetico se chiedeva stream)
         if wants_stream:
-            payload = _sse_from_message(final_json, verified_flag)
-            resp = web.StreamResponse(status=200)
-            resp.headers["content-type"] = "text/event-stream"
-            resp.headers["x-ai-verified"] = verified_flag
-            await resp.prepare(request)
-            await resp.write(payload)
-            await resp.write_eof()
-            return resp
+            # FIX SSE: invio evento-per-evento con flush + header anti-buffering
+            return await _send_sse_message(request, final_json, verified_flag)
         return web.json_response(
             final_json, headers={"x-ai-verified": verified_flag})
 
@@ -884,7 +1059,7 @@ async def handle(request):
             gen_status, gen_json = await _call_full(forward_minimax, request, body, session)
         except Exception as e:
             gen_status, gen_json = 0, None
-        if not gen_json or gen_status >= 400:
+        if not gen_json or gen_status in FALLBACK_STATUSES:  # FIX B4.1 residuo
             # M3 ancora giù: Anthropic esegue DIRETTO senza pipeline
             log(f"mixed escalation: M3 ko {gen_status}, Anthropic esegue diretto")
             try:
@@ -893,7 +1068,7 @@ async def handle(request):
             except Exception as e:
                 return web.json_response(
                     {"type": "error", "error": {"type": "router_error",
-                     "message": str(e)}}, status=502)
+                     "message": str(e)}}, status=502)  # legacy, vedi _err_response
         draft_v1 = _text_from_message(gen_json)
         log(f"mixed escalation R1 M3 draft ({len(draft_v1)} chars)")
         # Anthropic finalizza direttamente (salta critique+revise per latenza)
@@ -916,17 +1091,11 @@ async def handle(request):
             "model": "minimax-m3+claude" if verified_flag == "escalation" else "minimax-m3",
             "content": [{"type": "text", "text": final_text}],
             "stop_reason": "end_turn", "stop_sequence": None,
-            "usage": {"input_tokens": 0, "output_tokens": len(final_text.split())},
+            "usage": {"input_tokens": 0, "output_tokens": max(1, len(final_text) // 4)}  # FIX B4.2: ~4 char/token, meglio di split(),
         }
         if wants_stream:
-            payload = _sse_from_message(final_json, verified_flag)
-            resp = web.StreamResponse(status=200)
-            resp.headers["content-type"] = "text/event-stream"
-            resp.headers["x-ai-verified"] = verified_flag
-            await resp.prepare(request)
-            await resp.write(payload)
-            await resp.write_eof()
-            return resp
+            # FIX SSE: invio evento-per-evento con flush + header anti-buffering
+            return await _send_sse_message(request, final_json, verified_flag)
         return web.json_response(final_json, headers={"x-ai-verified": verified_flag})
 
     # Path normale: T0/T1 -> M3 diretto; T2 -> pipeline verify gerarchica
@@ -945,7 +1114,7 @@ async def handle(request):
                 return web.json_response(
                     {"type": "error", "error": {"type": "router_error",
                      "message": f"both down: {e2}"}}, status=502)
-        if up.status >= 400:
+        if up.status in FALLBACK_STATUSES:  # FIX B4.1: solo retryable, NON 400/404
             n = mixed_fail_inc(chat_fp)
             await up.release()
             log(f"mixed T0/T1 M3 {up.status} ({n}/{MIXED_FAIL_THRESHOLD}) {request.path}")
@@ -975,7 +1144,7 @@ async def handle(request):
         gen_status, gen_json = await _call_full(forward_minimax, request, body, session)
     except Exception as e:
         gen_status, gen_json = 0, None
-    if not gen_json or gen_status >= 400:
+    if not gen_json or gen_status in FALLBACK_STATUSES:  # FIX B4.1: solo retryable
         n = mixed_fail_inc(chat_fp)
         log(f"mixed T2 M3 R1 ko {gen_status} ({n}/{MIXED_FAIL_THRESHOLD}) {request.path}")
         try:
@@ -1006,18 +1175,15 @@ async def handle(request):
         "model": "minimax-m3+claude" if verified_flag == "collaborative" else "minimax-m3",
         "content": [{"type": "text", "text": final_text}],
         "stop_reason": "end_turn", "stop_sequence": None,
-        "usage": {"input_tokens": 0, "output_tokens": len(final_text.split())},
+        "usage": {"input_tokens": 0, "output_tokens": max(1, len(final_text) // 4)}  # FIX B4.2: ~4 char/token, meglio di split(),
     }
     if wants_stream:
-        payload = _sse_from_message(final_json, verified_flag)
-        resp = web.StreamResponse(status=200)
-        resp.headers["content-type"] = "text/event-stream"
-        resp.headers["x-ai-verified"] = verified_flag
-        await resp.prepare(request)
-        await resp.write(payload)
-        await resp.write_eof()
-        return resp
+        # FIX SSE: invio evento-per-evento con flush + header anti-buffering
+        return await _send_sse_message(request, final_json, verified_flag)
     return web.json_response(final_json, headers={"x-ai-verified": verified_flag})
+
+
+ALLOWED_PATHS = ("/v1/messages", "/v1/messages/*", "/v1/models", "/v1/models/*")  # FIX B3.1: whitelist
 
 
 def _make_app(session, forced_mode):
@@ -1026,16 +1192,29 @@ def _make_app(session, forced_mode):
     app = web.Application(client_max_size=1024 * 1024 * 100)
     app["session"] = session
     app["forced_mode"] = forced_mode
-    app.router.add_route("*", "/{tail:.*}", handle)
+
+    async def healthz(request):
+        return web.json_response({"ok": True, "mode": forced_mode or _current_mode()})
+
+    app.router.add_get("/health", healthz)
+    for p in ALLOWED_PATHS:
+        app.router.add_route("*", p, handle)
     return app
 
 
 async def _run_multiport():
+    # FIX B1.3: connector con limit espliciti per evitare starvation pool sotto carico
+    conn_anthropic = TCPConnector(limit=50, limit_per_host=20, ttl_dns_cache=300)
+    conn_minimax = TCPConnector(limit=50, limit_per_host=20, ttl_dns_cache=300)
     # Una sola ClientSession condivisa da tutte le porte.
     session = ClientSession(
-        timeout=ClientTimeout(total=300, connect=30),
-        connector=TCPConnector(limit=0, ttl_dns_cache=300),
+        # FIX: timeout granulari per streaming SSE - sock_read alto per first-token LLM
+        timeout=ClientTimeout(total=600, connect=30, sock_read=120, sock_connect=15),
+        connector=conn_anthropic,  # default per anthropic; minimax userà conn dedicato
+        # FIX #7 CRITICAL: auto_decompress=False per passthrough brotli/gzip.
+        auto_decompress=False,
     )
+    session._minimax_connector = conn_minimax  # FIX B1.3: pool separato per fallback
     runners = []
     for port in LISTEN_PORTS:
         forced = PORT_MODE.get(port)  # None per :8787 (dinamica)
