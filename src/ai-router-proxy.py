@@ -468,19 +468,38 @@ def remap_body_for_minimax(raw: bytes) -> bytes:
         return raw
 
 
+def _read_oauth_from_file() -> str:
+    """Legge il token OAuth dal file di credenziali Claude Code (zero IO se errore)."""
+    try:
+        with open(Path.home() / ".claude" / ".credentials.json") as f:
+            return json.load(f).get("claudeAiOauth", {}).get("accessToken", "")
+    except Exception:
+        return ""
+
+
 def _load_oauth_token():
     """Carica il token OAuth Anthropic da ~/.claude/.credentials.json se non
     è già in env. Usato da forward_anthropic_direct (verify T2 in modalità inverse)."""
     if os.environ.get("ANTHROPIC_OAUTH_TOKEN"):
         return
-    try:
-        with open(Path.home() / ".claude" / ".credentials.json") as f:
-            d = json.load(f)
-        tok = d.get("claudeAiOauth", {}).get("accessToken", "")
-        if tok:
-            os.environ["ANTHROPIC_OAUTH_TOKEN"] = tok
-    except Exception as e:
-        log(f"ERR load oauth: {e}")
+    tok = _read_oauth_from_file()
+    if tok:
+        os.environ["ANTHROPIC_OAUTH_TOKEN"] = tok
+
+
+def _reload_oauth_token() -> bool:
+    """FIX B3.2 (lazy): ricarica il token da .credentials.json.
+    Claude Code aggiorna quel file indipendentemente a ogni refresh OAuth;
+    non serve implementare un client OAuth (client_id/secret/refresh endpoint).
+    Ritorna True se ha popolato ANTHROPIC_OAUTH_TOKEN."""
+    tok = _read_oauth_from_file()
+    if tok:
+        cur = os.environ.get("ANTHROPIC_OAUTH_TOKEN", "")
+        if tok != cur:  # evita log inutile se token invariato
+            log(f"oauth token reload: {'changed' if cur else 'initial'}")
+        os.environ["ANTHROPIC_OAUTH_TOKEN"] = tok
+        return True
+    return False
 
 _load_oauth_token()  # eseguita dopo le def
 
@@ -533,6 +552,13 @@ async def forward_anthropic_direct(request, body, session):
     """Bypass totale di headroom: chiama api.anthropic.com con OAuth Bearer.
     Usato dalle verify T2 in modalità inverse: il modello di verifica è
     Claude stesso (via login OAuth nativo di Claude Code)."""
+    global ANTHROPIC_OAUTH_TOKEN  # FIX B3.2: refresh lazy del token
+    if not ANTHROPIC_OAUTH_TOKEN:
+        # primo utilizzo / cache cold: carica dal file delle credenziali
+        _load_oauth_token()
+    # ogni chiamata: rileggi il file (Claude Code può aver refreshato il token)
+    if _reload_oauth_token():
+        ANTHROPIC_OAUTH_TOKEN = os.environ["ANTHROPIC_OAUTH_TOKEN"]
     url = ANTHROPIC_DIRECT_URL + request.path_qs
     headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS}
     for h in list(headers):
