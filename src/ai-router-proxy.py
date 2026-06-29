@@ -17,6 +17,7 @@ Gestisce streaming SSE. Non modifica headroom né LiteLLM.
 import asyncio
 import json
 import os
+import signal
 import threading
 import time
 from pathlib import Path
@@ -1242,14 +1243,22 @@ async def _run_multiport():
     if not runners:
         log("no ports bound (already in use?) — exiting to avoid orphan instance")
         await session.close()
+        await conn_minimax.close()  # FIX: chiusura esplicita del pool separato
         return
+    # FIX: signal handler per shutdown pulito su SIGTERM/SIGINT
+    loop = asyncio.get_running_loop()
+    stop = asyncio.Event()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
     try:
-        while True:
-            await asyncio.sleep(3600)
+        await stop.wait()
+        log("shutdown signal received, draining...")
     finally:
         for r in runners:
             await r.cleanup()
         await session.close()
+        await conn_minimax.close()  # FIX: chiusura pool separato
+        log("shutdown complete")
 
 
 def main():
