@@ -3,16 +3,16 @@
 AI Router Proxy — switcher davanti a Claude Code.
 
 Quattro modalità (file ~/.claude/ai-router-mode):
-  - anthropic   : tutto verso headroom#1 (8787 -> api.anthropic.com)
-  - minimax     : tutto verso headroom#2 (8790 -> api.minimax.io/anthropic)
+  - anthropic   : tutto diretto a api.anthropic.com
+  - minimax     : tutto diretto a api.minimaxi.chat/anthropic
   - mixed       : Anthropic primario; su 429/5xx/errore -> fallback MiniMax (bidir)
   - inverse     : MiniMax orchestra + esegue. Anthropic verifica (T2) i task critici.
                   Anthropic interviene direttamente come esecutore dopo 2 fallimenti
                   (resilienza). Task non-critici -> MiniMax diretto (streaming).
 
 
-Claude Code punta qui: ANTHROPIC_BASE_URL=http://127.0.0.1:8789
-Gestisce streaming SSE. Non modifica headroom né LiteLLM.
+Claude Code punta qui: ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+Gestisce streaming SSE. Backend diretto (nessun headroom/LiteLLM intermedio).
 """
 import asyncio
 import json
@@ -27,13 +27,12 @@ from aiohttp import web, ClientSession, ClientTimeout, TCPConnector
 # ── Config ────────────────────────────────────────────────────────────────
 LISTEN_HOST = "127.0.0.1"
 # Il router E' il punto unico su :8787 (dove tutte le app gia' puntano).
-# headroom#1 (Anthropic) si sposta su :8791 come backend interno.
+# Backend DIRETTO alle API ufficiali (headroom rimosso 2026-06-29).
 LISTEN_PORT = int(os.environ.get("AIROUTER_PORT", "8787"))
 
-ANTHROPIC_UPSTREAM = os.environ.get("AIROUTER_ANTHROPIC_UPSTREAM", "http://127.0.0.1:8791")
-# MiniMax passa attraverso headroom #2 (compressione context attiva anche qui).
-# headroom #2 (:8790) inoltra a https://api.minimax.io/anthropic via ANTHROPIC_TARGET_API_URL.
-MINIMAX_UPSTREAM = os.environ.get("AIROUTER_MINIMAX_UPSTREAM", "http://127.0.0.1:8790")
+ANTHROPIC_UPSTREAM = os.environ.get("AIROUTER_ANTHROPIC_UPSTREAM", "https://api.anthropic.com")
+# MiniMax: endpoint Anthropic-compat ufficiale, diretto.
+MINIMAX_UPSTREAM = os.environ.get("AIROUTER_MINIMAX_UPSTREAM", "https://api.minimaxi.chat/anthropic")
 MINIMAX_MODEL = os.environ.get("AIROUTER_MINIMAX_MODEL", "MiniMax-M3")
 # Modello giudice per la verifica T2 in modalità interactive (Claude Opus).
 VERIFY_MODEL = os.environ.get("AIROUTER_VERIFY_MODEL", "claude-opus-4-8")
@@ -1244,9 +1243,11 @@ async def handle(request):
     return web.json_response(final_json, headers={"x-ai-verified": verified_flag})
 
 
-ALLOWED_PATHS = ("/v1/messages", "/v1/messages/*", "/v1/models", "/v1/models/*")  # FIX B3.1: whitelist
-
-
+# LEZIONE B3.1 (NON reintrodurre una whitelist di path): aiohttp NON interpreta
+# '*' come glob. Una route literal "/v1/messages/*" NON matcha
+# "/v1/messages/count_tokens" -> 404 su count_tokens/batches/models/{id} ->
+# Claude Code/VSCode si bloccano. Il routing path-level lo fa SOLO il catch-all
+# "/{tail:.*}"; i path inesistenti tornano 404 dal backend upstream, corretto.
 def _make_app(session, forced_mode):
     """Crea una web.Application con la modalità cablata (deterministica).
     forced_mode=None -> porta dinamica (:8787) che segue il file ai-router-mode."""
@@ -1258,8 +1259,10 @@ def _make_app(session, forced_mode):
         return web.json_response({"ok": True, "mode": forced_mode or _current_mode()})
 
     app.router.add_get("/health", healthz)
-    for p in ALLOWED_PATHS:
-        app.router.add_route("*", p, handle)
+    # catch-all: tutto il routing path-level passa da handle().
+    # NB: route literal con '*' NON funziona in aiohttp; il catch-all e'
+    # l'unico modo per coprire i sub-path legittimi (count_tokens, batches, ...).
+    app.router.add_route("*", "/{tail:.*}", handle)
     return app
 
 
