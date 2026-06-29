@@ -50,10 +50,9 @@ LOG_FILE = Path.home() / ".claude" / "logs" / "ai-router.log"
 FALLBACK_STATUSES = {401, 403, 408, 409, 413, 429, 500, 502, 503, 504, 529}
 
 # Circuit breaker (D15): dopo N fail un backend va in cooldown e viene saltato.
-BREAKER_FAIL_MAX = 3
-BREAKER_COOLDOWN = 120  # secondi
-_breaker = {"anthropic": {"fails": 0, "open_until": 0},
-            "minimax": {"fails": 0, "open_until": 0}}
+# FIX audit v4: BREAKER_* removed (dead code - mai chiamato nel flusso;
+# la logica di escalation usa _inverse_fails / _mixed_fails per-chat).
+# Se serve circuit-breaker globale, va reintrodotto con test.
 
 # Contatore per-chat dei fallimenti MiniMax (modalità inverse).
 # Dopo N fail consecutivi: Anthropic esegue direttamente (bypass MiniMax).
@@ -77,25 +76,18 @@ _mixed_cooldown_until = {}  # chat_fp -> timestamp fine cooldown
 
 
 def breaker_is_open(backend: str) -> bool:
-    """True se il backend è in cooldown (da saltare)."""
-    return time.time() < _breaker.get(backend, {}).get("open_until", 0)
+    """DEPRECATO audit v4: mai chiamato nel flusso principale (dead code)."""
+    return False
 
 
 def breaker_fail(backend: str):
-    with _counter_lock:  # FIX B1.1
-        b = _breaker.setdefault(backend, {"fails": 0, "open_until": 0})
-        b["fails"] += 1
-        if b["fails"] >= BREAKER_FAIL_MAX:
-            b["open_until"] = time.time() + BREAKER_COOLDOWN
-            b["fails"] = 0
-            log(f"breaker OPEN {backend} per {BREAKER_COOLDOWN}s")
+    """DEPRECATO audit v4: mai chiamato."""
+    pass
 
 
 def breaker_ok(backend: str):
-    with _counter_lock:  # FIX B1.1
-        b = _breaker.setdefault(backend, {"fails": 0, "open_until": 0})
-        b["fails"] = 0
-        b["open_until"] = 0
+    """DEPRECATO audit v4: mai chiamato."""
+    pass
 
 def inverse_fail_inc(chat_fp: str) -> int:
     """Incrementa contatore fallimenti MiniMax per chat. Ritorna nuovo valore."""
@@ -253,6 +245,20 @@ def conversation_fingerprint(data: dict) -> str:
             break
     return hashlib.sha256((str(system) + "||" + str(first_user)).encode()).hexdigest()[:12]
 
+
+def _resolve_chat_fingerprint(request) -> str:
+    """FIX audit v4: chat_fp NAT-friendly.
+
+    Priorita':
+    1. Header esplicito X-Session-ID se presente (clients possono coabitare su stesso NAT).
+    2. request.remote (IP:port) come fallback operativo - accettabile per setup locale single-user.
+    3. "default" se neanche quello.
+
+    NB: in setup multi-utente dietro NAT stesso, abilitare X-Session-ID via client."""
+    sid = request.headers.get("X-Session-ID") or request.headers.get("x-session-id")
+    if sid:
+        return f"sid:{sid[:64]}"  # bound size anti-abuse
+    return request.remote or "default"
 
 def _load_chats() -> dict:
     with _chat_lock:  # FIX audit v3: protezione TOCTOU su file system
@@ -953,7 +959,7 @@ async def handle(request):
     # Anthropic verifica i T2; dopo N fail consecutivi (default 2) Anthropic
     # esegue direttamente, bypassando MiniMax. Il contatore è per-chat.
     if mode == "inverse":
-        chat_fp = request.remote or "default"
+        chat_fp = _resolve_chat_fingerprint(request)  # FIX audit v4: NAT-safe
         is_messages = request.path.endswith("/v1/messages")
         is_t2 = is_messages and classify_t2(body)
 
@@ -1093,7 +1099,7 @@ async def handle(request):
     #   - T2 (complesse): pipeline verify M3→Anthropic→M3→Anthropic
     #   - Se MiniMax fallisce 2 volte sulla stessa chat: Anthropic prende il
     #     comando ed esegue con la sua orchestrazione gerarchica (= pipeline verify).
-    chat_fp = request.remote or "default"
+    chat_fp = _resolve_chat_fingerprint(request)  # FIX audit v4: NAT-safe
     anthropic_leads = mixed_anthropic_leads(chat_fp)
     is_messages = request.path.endswith("/v1/messages")
     is_t2 = is_messages and classify_t2(body)
