@@ -418,8 +418,10 @@ def extract_last_user_text(data: dict) -> str:
 
 def _body_has_tools(body: bytes) -> bool:
     """True se il body JSON contiene 'tools' = richiesta agentica (Claude Code/VSCode).
-    MiniMax-M3 non emette blocchi tool_use: queste richieste vanno instradate ad
-    Anthropic (tool-capable), altrimenti l'agente non esegue nulla."""
+    NB: MiniMax-M3 È agentico ed emette tool_use nativamente (verificato 2026-06-29:
+    non-stream + SSE streaming + multi-turn tool_result su api.minimaxi.chat/anthropic).
+    Le richieste agentiche vanno quindi a MiniMax in passthrough, con fallback Anthropic
+    su 429/5xx per resilienza sotto carico (es. 100 agenti paralleli)."""
     try:
         return bool(json.loads(body).get("tools"))
     except Exception:
@@ -1039,28 +1041,36 @@ async def handle(request):
 
         # solo /v1/messages è soggetto a verifica; altri path -> minimax passthrough
         if not is_t2:
-            # Agentico (tools): MiniMax-M3 non emette tool_use -> instrada ad
-            # Anthropic (tool-capable) in passthrough, altrimenti l'agente non esegue.
-            if is_messages and _body_has_tools(body):
-                log(f"inverse: agentic (tools) -> anthropic passthrough {request.path}")
-                try:
-                    return await relay(await forward_anthropic(request, body, session))
-                except Exception as e:
-                    return web.json_response(
-                        {"type": "error", "error": {"type": "router_error",
-                         "message": str(e)}}, status=502)
-            # task non critico (o non-messages): MiniMax diretto, streaming preservato
+            # T0/T1 (incluso agentico con tools): MiniMax esegue. M3 è agentico ed
+            # emette tool_use nativamente (verificato 2026-06-29). Su 429/5xx -> rescue
+            # Anthropic, così sotto carico (100 agenti) nessuno si blocca sul rate-limit.
             try:
                 up = await forward_minimax(request, body, session)
-                inverse_fail_reset(chat_fp)
-                log(f"inverse T0/T1 -> minimax {up.status} {request.path}")
-                return await relay(up)
             except Exception as e:
                 n = inverse_fail_inc(chat_fp)
-                log(f"inverse T1 EXC ({n}/{INVERSE_FAIL_THRESHOLD}): {e}")
-                return web.json_response(
-                    {"type": "error", "error": {"type": "router_error",
-                     "message": str(e)}}, status=502)  # legacy, vedi _err_response
+                log(f"inverse T1 M3 EXC ({n}/{INVERSE_FAIL_THRESHOLD}): {e}")
+                try:
+                    return await relay(await forward_anthropic(request, body, session))
+                except Exception as e2:
+                    return web.json_response(
+                        {"type": "error", "error": {"type": "router_error",
+                         "message": f"both down: {e2}"}}, status=502)
+            if up.status in FALLBACK_STATUSES:
+                n = inverse_fail_inc(chat_fp)
+                await up.release()
+                log(f"inverse T1 M3 {up.status} ({n}/{INVERSE_FAIL_THRESHOLD}) -> anthropic rescue")
+                try:
+                    up2 = await forward_anthropic(request, body, session)
+                    if up2.status < 400:
+                        inverse_fail_reset(chat_fp)
+                    return await relay(up2)
+                except Exception as e2:
+                    return web.json_response(
+                        {"type": "error", "error": {"type": "router_error",
+                         "message": f"rescue ko: {e2}"}}, status=502)
+            inverse_fail_reset(chat_fp)
+            log(f"inverse T0/T1 -> minimax {up.status} {request.path}")
+            return await relay(up)
 
         # ---- T2 critico: pipeline collaborativa M3 <-> Anthropic ----
         # R1: M3 genera bozza
@@ -1241,17 +1251,10 @@ async def handle(request):
 
     # Path normale: T0/T1 -> M3 diretto; T2 -> pipeline verify gerarchica
     if not is_t2:
-        # Agentico (tools): MiniMax-M3 non emette tool_use -> instrada ad Anthropic
-        # (tool-capable) in passthrough, altrimenti l'agente VSCode non esegue nulla.
-        if is_messages and _body_has_tools(body):
-            log(f"mixed: agentic (tools) -> anthropic passthrough {request.path}")
-            try:
-                return await relay(await forward_anthropic(request, body, session))
-            except Exception as e:
-                return web.json_response(
-                    {"type": "error", "error": {"type": "router_error",
-                     "message": str(e)}}, status=502)
-        # T0/T1: M3 diretto, streaming preservato
+        # T0/T1 (incluso agentico con tools): M3 esegue diretto, streaming preservato.
+        # MiniMax-M3 emette tool_use nativamente (verificato 2026-06-29) -> i task
+        # agentici girano su MiniMax. Su 429/5xx il ramo sotto fa fallback Anthropic
+        # (rescue), così 100 agenti paralleli non si bloccano sul rate-limit M3.
         try:
             up = await forwarders["minimax"](request, body, session)
         except Exception as e:
