@@ -234,6 +234,7 @@ import hashlib
 
 CHAT_STORE = Path.home() / ".claude" / "ai-router-chats.json"
 CHAT_TTL_DAYS = 7
+CHAT_MAX_ENTRIES = 10000  # FIX B2.4: cap duro anti-DoS
 _chat_cache = {"data": None, "ts": 0}
 
 
@@ -264,6 +265,10 @@ def _load_chats() -> dict:
     changed = False
     for fp in list(d.keys()):
         if d[fp].get("ts", 0) < cutoff:
+            del d[fp]; changed = True
+    # FIX B2.4 residuo: bound hard su N entries (FIFO by timestamp asc)
+    if len(d) > CHAT_MAX_ENTRIES:
+        for fp in sorted(d, key=lambda k: d[k].get("ts", 0))[: len(d) - CHAT_MAX_ENTRIES]:
             del d[fp]; changed = True
     if changed:
         _save_chats(d)
@@ -400,23 +405,25 @@ def classify_t2(body: bytes) -> bool:
 
 
 def get_minimax_key() -> str:
-    # cache 60s
-    now = time.time()
-    if _minimax_key_cache["key"] and now - _minimax_key_cache["ts"] < 60:
-        return _minimax_key_cache["key"]
-    key = os.environ.get("MINIMAX_API_KEY", "")
-    if not key:
-        try:
-            import subprocess
-            key = subprocess.check_output(
-                ["bash", str(KEY_FILE), "get", "minimax.api_key"],
-                text=True, timeout=5,
-            ).strip()
-        except Exception as e:
-            log(f"ERR get key: {e}")
-            key = ""
-    _minimax_key_cache["key"] = key
-    _minimax_key_cache["ts"] = now
+    """FIX: cache 60s + lock per evitare doppio subprocess in race + TOCTOU."""
+    with _counter_lock:  # FIX B1.2 residuo: cache TTL check-then-act
+        now = time.time()
+        if _minimax_key_cache["key"] and now - _minimax_key_cache["ts"] < 60:
+            return _minimax_key_cache["key"]
+        key = os.environ.get("MINIMAX_API_KEY", "")
+        if not key:
+            try:
+                import subprocess
+                # FIX: subprocess NON bloccante su event loop asyncio
+                key = subprocess.check_output(
+                    ["bash", str(KEY_FILE), "get", "minimax.api_key"],
+                    text=True, timeout=5,
+                ).strip()
+            except Exception as e:
+                log(f"ERR get key: {type(e).__name__}")  # mai leak str(e) per secret
+                key = ""
+        _minimax_key_cache["key"] = key
+        _minimax_key_cache["ts"] = now
     return key
 
 
@@ -456,6 +463,7 @@ def remap_body_for_minimax(raw: bytes) -> bytes:
             data.pop(f, None)
         return json.dumps(data).encode()
     except Exception:
+        log("remap_body: json parse fail, passthrough")  # FIX B5.1 residuo: log silenzioso
         return raw
 
 
@@ -481,6 +489,9 @@ HOP_HEADERS = {
     "host", "content-length", "connection", "keep-alive",
     "proxy-authenticate", "proxy-authorization", "te", "trailers",
     "transfer-encoding", "upgrade",
+    # FIX: strippa X-Forwarded-* per evitare che il client forgia IP/host percepiti dall'upstream
+    "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-port",
+    "x-real-ip", "via", "forwarded",
 }
 
 
