@@ -41,6 +41,8 @@ VALID_MODES = ("anthropic", "minimax", "mixed", "inverse")
 MODE_FILE = Path.home() / ".claude" / "ai-router-mode"
 KEY_FILE = Path.home() / ".claude" / "secrets" / "secrets.sh"
 LOG_FILE = Path.home() / ".claude" / "logs" / "ai-router.log"
+SIDECAR = Path.home() / ".claude" / "logs" / "router-model-map.jsonl"
+USAGE_SIDECAR = Path.home() / ".claude" / "logs" / "router-usage.jsonl"
 
 # status code che in 'mixed' fanno scattare il fallback a MiniMax
 # Fallback attivo su: 5xx/529 (server/overload) + 4xx eccetto 400/404 (client error puro).
@@ -57,6 +59,11 @@ FALLBACK_STATUSES = {401, 403, 408, 409, 413, 429, 500, 502, 503, 504, 529}
 # Dopo N fail consecutivi: Anthropic esegue direttamente (bypass MiniMax).
 INVERSE_FAIL_THRESHOLD = int(os.environ.get("AIROUTER_INVERSE_FAILS", "2"))
 _inverse_fails = {}  # chat_fp -> int
+
+# FIX E: mappa chat_fp -> modello originale richiesto dal client, usata dal relay
+# per riscrivere il campo 'model' nella SSE response (così il jsonl di Claude Code
+# riceve il modello reale, non "MiniMax-M3" rimappato dall'upstream).
+_request_orig_model = {}  # chat_fp -> orig_model (es. "claude-sonnet-4-6")
 
 # MIXED: MiniMax esegue tutto; dopo N fail consecutivi Anthropic prende il comando.
 MIXED_FAIL_THRESHOLD = int(os.environ.get("AIROUTER_MIXED_FAILS", "2"))
@@ -510,12 +517,77 @@ def strip_unsupported_fields(raw: bytes, fields: tuple) -> bytes:
         return raw
 
 
-def remap_body_for_minimax(raw: bytes) -> bytes:
-    """Riscrive il model Claude -> MiniMax-M3 e rimuove i campi beta non supportati."""
+def _log_original_model(orig: str, final: str, chat_id: str) -> None:
+    """FIX A: Log modello originale prima del remap a MiniMax.
+
+    Scrive in SIDECAR (router-model-map.jsonl) una riga JSON per tracciare
+    il modello originale richiesto vs il modello finale remappato.
+    Fallback silenzioso su errore IO (non rompe il flusso di richiesta).
+    """
+    try:
+        SIDECAR.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "ts": int(time.time()),
+            "chat": chat_id,
+            "orig": orig,
+            "final": final
+        }
+        with open(SIDECAR, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass  # silent fallback, never break the request
+
+
+def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
+                     mode: str, client: str = "?", status: int = 200):
+    """FIX F: log per-request usage su USAGE_SIDECAR (router-usage.jsonl).
+
+    Cattura OGNI richiesta che passa dal router, indipendentemente dal client
+    (Claude Code, m3-code, m3-web, m3x, local-llm, agenti remoti). Questo
+    è il single source of truth per i tool che non scrivono JSONL.
+
+    Schema: ts, chat, orig, final, mode, client, status,
+            input_tokens, output_tokens, cache_read, cache_creation
+    """
+    try:
+        USAGE_SIDECAR.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "ts": int(time.time()),
+            "chat": chat_id,
+            "orig": orig or "?",
+            "final": final or "?",
+            "mode": mode,
+            "client": client,
+            "status": status,
+            "input_tokens": int(usage.get("input_tokens", 0) or 0),
+            "output_tokens": int(usage.get("output_tokens", 0) or 0),
+            "cache_read": int(usage.get("cache_read_input_tokens", 0) or 0),
+            "cache_creation": int(usage.get("cache_creation_input_tokens", 0) or 0),
+        }
+        with open(USAGE_SIDECAR, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass  # silent fallback
+
+
+def remap_body_for_minimax(raw: bytes, request=None) -> bytes:
+    """Riscrive il model Claude -> MiniMax-M3 e rimuove i campi beta non supportati.
+
+    FIX A: Se request è fornito, estrae chat_fp e loga il modello originale.
+    FIX E: salva anche in _request_orig_model[chat_fp] il modello originale,
+    così il relay SSE può riscrivere il campo 'model' nella risposta upstream
+    e il jsonl di Claude Code riceve il modello realmente richiesto (no leak di MiniMax-M3).
+    """
     try:
         data = json.loads(raw)
         orig = data.get("model", "")
         if orig and not orig.startswith("MiniMax"):
+            chat_id = "?"
+            if request:
+                chat_id = _resolve_chat_fingerprint(request)
+                _log_original_model(orig, MINIMAX_MODEL, chat_id)
+            # FIX E: ricorda per riscrittura SSE — consumato dal relay()
+            _request_orig_model[chat_id] = orig
             data["model"] = MINIMAX_MODEL
         # Strip campi che MiniMax non accetta (causano 400 "Extra inputs not permitted")
         for f in MINIMAX_UNSUPPORTED_FIELDS:
@@ -599,7 +671,7 @@ async def forward_minimax(request, body, session):
         if h.lower() in ("authorization", "x-api-key"):
             headers.pop(h)
     headers["X-Api-Key"] = key
-    new_body = remap_body_for_minimax(body)
+    new_body = remap_body_for_minimax(body, request=request)  # FIX A: pass request per modello log
     return await session.request(
         request.method, url, data=new_body, headers=headers, allow_redirects=False
     )
@@ -939,7 +1011,14 @@ async def handle(request):
 
     session = request.app["session"]
 
-    async def relay(upstream):
+    async def relay(upstream, chat_fp_for_rewrite: str = "default"):
+        # FIX E: leggi e rimuovi orig_model da riscrivere nello SSE/non-stream
+        # NB: i call site passano spesso chat_fp sbagliato (es 'default' vs IP reale).
+        # Soluzione: prova la chiave esplicita; se manca e c'è esattamente UN orig
+        # pending in _request_orig_model, usa quello (single-user loopback tipico).
+        orig_model = _request_orig_model.pop(chat_fp_for_rewrite, None)
+        if orig_model is None and len(_request_orig_model) == 1:
+            orig_model = _request_orig_model.pop(next(iter(_request_orig_model)))
         # FIX SSE: rileva text/event-stream per applicare flush immediato + no-buffering
         is_sse = "text/event-stream" in (upstream.headers.get("content-type") or "").lower()
         resp = web.StreamResponse(status=upstream.status)
@@ -968,6 +1047,13 @@ async def handle(request):
         iterator = upstream.content.iter_any()
         chunk_count = 0
         total_bytes = 0
+        model_rewrite_done = orig_model is None  # se non c'è orig_model, skip subito
+        # FIX F: accumula chunks per estrarre usage reale dai record SSE/JSON
+        _acc_buf = bytearray()
+        _acc_limit = 16384  # massimo 16KB per evitare OOM su risposte enormi
+        # Precompila pattern per SSE message_start rewrite
+        import re as _re
+        sse_model_pat = _re.compile(rb'"model":"[^"]*"')
         try:
             async for chunk in iterator:
                 if not chunk:
@@ -977,6 +1063,31 @@ async def handle(request):
                 # FIX #4: log primo chunk per debug
                 if chunk_count == 1:
                     log(f"relay first chunk {len(chunk)}B (SSE={is_sse})")
+                # FIX E: riscrivi il campo 'model' nello stream SSE (solo primo chunk rilevante)
+                if not model_rewrite_done and orig_model:
+                    if is_sse:
+                        # cerca il pattern "model":"<qualsiasi>" e sostituisci SOLO nel primo evento message_start
+                        new_chunk = sse_model_pat.sub(
+                            f'"model":"{orig_model}"'.encode(), chunk, count=1
+                        )
+                        if new_chunk != chunk:
+                            log(f"FIX E: SSE model rewritten to '{orig_model}'")
+                            chunk = new_chunk
+                            model_rewrite_done = True
+                    else:
+                        # non-streaming JSON response: parsifica e riscrivi
+                        try:
+                            j = json.loads(chunk)
+                            if isinstance(j, dict) and "model" in j:
+                                j["model"] = orig_model
+                                chunk = json.dumps(j).encode()
+                                log(f"FIX E: JSON model rewritten to '{orig_model}'")
+                            model_rewrite_done = True
+                        except Exception:
+                            pass  # non-JSON body, skip
+                # FIX F: accumulazione parziale per usage extraction
+                if len(_acc_buf) < _acc_limit:
+                    _acc_buf.extend(chunk[:(_acc_limit - len(_acc_buf))])
                 await resp.write(chunk)
                 if is_sse:
                     # FIX #5: drain senza try/except - se fallisce vogliamo saperlo
@@ -989,6 +1100,72 @@ async def handle(request):
             # FIX B2.3: garantisce chiusura upstream su client disconnect/cancel/exception
             if not upstream.closed:
                 upstream.release()
+            # FIX F: log per-request usage. Estrai token reali da _acc_buf.
+            try:
+                _usage = {"input_tokens": 0, "output_tokens": 0,
+                          "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+                _buf_str = _acc_buf.decode("utf-8", errors="replace")
+                if is_sse:
+                    # Cerca message_start (input) e message_delta (output) nei chunk SSE
+                    import re as _re2
+                    for _data in _re2.findall(r"^data: (.+)$", _buf_str, _re2.MULTILINE):
+                        try:
+                            _ev = json.loads(_data)
+                            if _ev.get("type") == "message_start":
+                                _u = (_ev.get("message") or {}).get("usage") or {}
+                                _usage["input_tokens"] = int(_u.get("input_tokens", 0) or 0)
+                                _usage["cache_read_input_tokens"] = int(_u.get("cache_read_input_tokens", 0) or 0)
+                                _usage["cache_creation_input_tokens"] = int(_u.get("cache_creation_input_tokens", 0) or 0)
+                            elif _ev.get("type") == "message_delta":
+                                _u = _ev.get("usage") or {}
+                                _usage["output_tokens"] = int(_u.get("output_tokens", 0) or 0)
+                        except Exception:
+                            pass
+                    if _usage["output_tokens"] == 0:
+                        _usage["output_tokens"] = max(1, total_bytes // 4)
+                else:
+                    try:
+                        _j = json.loads(_buf_str)
+                        if isinstance(_j, dict):
+                            _u = _j.get("usage") or {}
+                            _usage["input_tokens"] = int(_u.get("input_tokens", 0) or 0)
+                            _usage["output_tokens"] = int(_u.get("output_tokens", 0) or 0)
+                            _usage["cache_read_input_tokens"] = int(_u.get("cache_read_input_tokens", 0) or 0)
+                            _usage["cache_creation_input_tokens"] = int(_u.get("cache_creation_input_tokens", 0) or 0)
+                    except Exception:
+                        _usage["output_tokens"] = max(1, total_bytes // 4)
+                # Input: estrai dal body richiesta (non compresso) se non già noto.
+                # È una stima sicura perché il body request è sempre in chiaro.
+                if _usage["input_tokens"] == 0:
+                    try:
+                        _req_j = json.loads(body.decode("utf-8", errors="replace"))
+                        # Stima da prompt: somma len(c["content"]) per tutti i messaggi
+                        _chars = 0
+                        for _m in (_req_j.get("messages") or []):
+                            c = _m.get("content", "")
+                            if isinstance(c, str):
+                                _chars += len(c)
+                            elif isinstance(c, list):
+                                for _b in c:
+                                    if isinstance(_b, dict) and isinstance(_b.get("text"), str):
+                                        _chars += len(_b["text"])
+                        _sys = _req_j.get("system", "")
+                        if isinstance(_sys, str):
+                            _chars += len(_sys)
+                        _usage["input_tokens"] = max(1, _chars // 4)
+                    except Exception:
+                        _usage["input_tokens"] = max(1, len(body) // 4)
+                log_router_usage(
+                    chat_id=chat_fp_for_rewrite,
+                    orig=orig_model or "?",
+                    final="?",
+                    usage=_usage,
+                    mode=mode,
+                    client=request.headers.get("User-Agent", "?")[:40] or "?",
+                    status=upstream.status,
+                )
+            except Exception:
+                pass
         # FIX #4: log bytes totali inoltrati
         if is_sse or total_bytes > 0:
             log(f"relay done: {chunk_count} chunks, {total_bytes} bytes (SSE={is_sse})")
@@ -1418,6 +1595,7 @@ async def _run_multiport():
 
 def main():
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SIDECAR.parent.mkdir(parents=True, exist_ok=True)  # FIX A: ensure log dir
     if not MODE_FILE.exists():
         MODE_FILE.write_text("anthropic\n")
     log(f"START ai-router-proxy multi-port {LISTEN_PORTS}")
