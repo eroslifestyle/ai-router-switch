@@ -50,6 +50,12 @@ USAGE_SIDECAR = Path.home() / ".claude" / "logs" / "router-usage.jsonl"
 # 429 (rate limit) -> fallback per non aspettare.
 FALLBACK_STATUSES = {401, 403, 408, 409, 413, 429, 500, 502, 503, 504, 529}
 
+# FIX regola utente 2026-06-30: 429 = escalation IMMEDIATA in mixed (non aspetta 2 fail).
+# Teniamo traccia per-chat di quando l'ultimo 429 è stato visto; finché il cooldown
+# non scade, Anthropic esegue diretto. Resetta al primo success M3.
+_RATE_LIMIT_STATUSES = {429}
+_mixed_429_until = {}  # chat_fp -> timestamp fine cooldown post-429
+
 # Circuit breaker (D15): dopo N fail un backend va in cooldown e viene saltato.
 # FIX audit v4: BREAKER_* removed (dead code - mai chiamato nel flusso;
 # la logica di escalation usa _inverse_fails / _mixed_fails per-chat).
@@ -169,8 +175,13 @@ def mixed_fail_reset(chat_fp: str) -> None:
 
 
 def mixed_anthropic_leads(chat_fp: str) -> bool:
-    """True se MiniMax ha già fallito >= soglia: Anthropic prende il comando."""
-    # Cooldown attivo: resta in modalità escalation
+    """True se MiniMax ha già fallito >= soglia OPPURE se ha appena preso un 429.
+    Regola utente 2026-06-30: 429 = escalation immediata, non aspetta 2 fail.
+    """
+    # Cooldown post-429 (regola 4): resta in escalation finché non scade
+    if time.time() < _mixed_429_until.get(chat_fp, 0):
+        return True
+    # Cooldown post-fail: resta in escalation finché non scade
     if time.time() < _mixed_cooldown_until.get(chat_fp, 0):
         return True
     fails = _mixed_fails.get(chat_fp, 0)
@@ -179,6 +190,17 @@ def mixed_anthropic_leads(chat_fp: str) -> bool:
         _mixed_cooldown_until[chat_fp] = time.time() + RESCUE_COOLDOWN_SEC
         return True
     return False
+
+
+def mixed_mark_rate_limited(chat_fp: str, status: int) -> None:
+    """Regola utente 2026-06-30: 429 = escalation immediata per RESCUE_COOLDOWN_SEC."""
+    if status in _RATE_LIMIT_STATUSES:
+        _mixed_429_until[chat_fp] = time.time() + RESCUE_COOLDOWN_SEC
+
+
+def mixed_mark_recovered(chat_fp: str) -> None:
+    """M3 ha risposto <400: clear cooldown 429 (ma non i fail counter, che hanno logica propria)."""
+    _mixed_429_until.pop(chat_fp, None)
 
 
 _minimax_key_cache = {"key": None, "ts": 0}
@@ -1365,12 +1387,18 @@ async def handle(request):
             final_json, headers={"x-ai-verified": verified_flag})
 
     # ── MODALITÀ MIXED: Anthropic orchestra SEMPRE + MiniMax esegue SEMPRE ──
-    # Pipeline gerarchica:
-    #   - T2-classifier (locale, zero-token) marca le richieste 'complesse'
-    #   - T0/T1 (semplici): MiniMax esegue diretto
-    #   - T2 (complesse): pipeline verify M3→Anthropic→M3→Anthropic
-    #   - Se MiniMax fallisce 2 volte sulla stessa chat: Anthropic prende il
-    #     comando ed esegue con la sua orchestrazione gerarchica (= pipeline verify).
+    # GERARCHIA MIXED (regola utente 2026-06-30, blocco di ferro):
+    #   1) Anthropic (Opus/Sonnet) = UNICO orchestratore. Decide/classifica/pianifica.
+    #   2) MiniMax code (m2.7-hs / M3) = UNICO esecutore per la produzione.
+    #   3) Se M3 fallisce 2 volte sulla stessa chat -> Anthropic prende il comando
+    #      ed esegue diretto (haiku/sonnet/opus secondo disponibilità).
+    #   4) Se M3 va in rate-limit (429) -> Anthropic esegue SUBITO, senza aspettare
+    #      il 2° fail (escalation immediata). Cooldown RESCUE_COOLDOWN_SEC prima di
+    #      ritentare M3.
+    #
+    # Pipeline T2 (richieste classificate 'complesse'):
+    #   - M3 draft -> Anthropic critique -> M3 revise -> Anthropic finalize.
+    # T0/T1 (semplici): M3 esegue diretto, streaming preservato.
     chat_fp = _resolve_chat_fingerprint(request)  # FIX audit v4: NAT-safe
     anthropic_leads = mixed_anthropic_leads(chat_fp)
     is_messages = request.path.endswith("/v1/messages")
@@ -1463,6 +1491,10 @@ async def handle(request):
             n = mixed_fail_inc(chat_fp)
             await up.release()
             log(f"mixed T0/T1 M3 {up.status} ({n}/{MIXED_FAIL_THRESHOLD}) {request.path}")
+            # Regola utente 2026-06-30 #4: 429 = escalation immediata (non aspetta 2 fail)
+            if up.status == 429:
+                mixed_mark_rate_limited(chat_fp, 429)
+                log(f"mixed RATE-LIMIT 429: escalation immediata -> Anthropic esegue (cooldown {RESCUE_COOLDOWN_SEC}s)")
             if n >= MIXED_FAIL_THRESHOLD:
                 log(f"mixed escalation: M3 ha fallito {n}x -> Anthropic prende comando")
             try:
@@ -1491,6 +1523,7 @@ async def handle(request):
                      "message": f"rescue ko: {e2}"}}, status=502)
         if up.status < 400:
             mixed_fail_reset(chat_fp)
+            mixed_mark_recovered(chat_fp)  # regola utente 2026-06-30: clear 429 cooldown
         log(f"mixed T0/T1 executor M3 {up.status} {request.path}")
         return await relay(up)
 
@@ -1508,6 +1541,10 @@ async def handle(request):
     if not gen_json or gen_status in FALLBACK_STATUSES:  # FIX B4.1: solo retryable
         n = mixed_fail_inc(chat_fp)
         log(f"mixed T2 M3 R1 ko {gen_status} ({n}/{MIXED_FAIL_THRESHOLD}) {request.path}")
+        # Regola utente 2026-06-30 #4: 429 = escalation immediata (non aspetta 2 fail)
+        if gen_status == 429:
+            mixed_mark_rate_limited(chat_fp, 429)
+            log(f"mixed T2 RATE-LIMIT 429: escalation immediata -> Anthropic esegue")
         try:
             up = await forward_anthropic(request, body, session)
             log(f"mixed T2 fallback anthropic {up.status} {request.path}")
@@ -1517,6 +1554,7 @@ async def handle(request):
                 {"type": "error", "error": {"type": "router_error",
                  "message": str(e)}}, status=502)
     mixed_fail_reset(chat_fp)
+    mixed_mark_recovered(chat_fp)  # regola utente 2026-06-30: clear 429 cooldown
     draft_v1 = _text_from_message(gen_json)
     log(f"mixed T2 R1 M3 draft ({len(draft_v1)} chars)")
     # Anthropic finalize (gerarchia: decide se la bozza è ok o la riscrive)
