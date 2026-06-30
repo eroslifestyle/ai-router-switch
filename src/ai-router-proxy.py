@@ -539,14 +539,15 @@ def _log_original_model(orig: str, final: str, chat_id: str) -> None:
 
 
 def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
-                     mode: str, client: str = "?", status: int = 200):
+                     mode: str, client: str = "?", status: int = 200,
+                     tag: str = ""):
     """FIX F: log per-request usage su USAGE_SIDECAR (router-usage.jsonl).
 
     Cattura OGNI richiesta che passa dal router, indipendentemente dal client
     (Claude Code, m3-code, m3-web, m3x, local-llm, agenti remoti). Questo
     è il single source of truth per i tool che non scrivono JSONL.
 
-    Schema: ts, chat, orig, final, mode, client, status,
+    Schema: ts, chat, orig, final, mode, client, status, tag,
             input_tokens, output_tokens, cache_read, cache_creation
     """
     try:
@@ -559,6 +560,7 @@ def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
             "mode": mode,
             "client": client,
             "status": status,
+            "tag": tag,
             "input_tokens": int(usage.get("input_tokens", 0) or 0),
             "output_tokens": int(usage.get("output_tokens", 0) or 0),
             "cache_read": int(usage.get("cache_read_input_tokens", 0) or 0),
@@ -1011,11 +1013,17 @@ async def handle(request):
 
     session = request.app["session"]
 
-    async def relay(upstream, chat_fp_for_rewrite: str = "default"):
+    async def relay(upstream, chat_fp_for_rewrite: str = "", tag: str = ""):
         # FIX E: leggi e rimuovi orig_model da riscrivere nello SSE/non-stream
-        # NB: i call site passano spesso chat_fp sbagliato (es 'default' vs IP reale).
-        # Soluzione: prova la chiave esplicita; se manca e c'è esattamente UN orig
-        # pending in _request_orig_model, usa quello (single-user loopback tipico).
+        # NB: i call site storicamente passavano "default" come chiave. La chiave
+        # reale è _resolve_chat_fingerprint(request) (es. IP client). Cerchiamo
+        # quella chiave per prima; se mancante e c'è esattamente UN orig pending,
+        # usalo (single-user loopback tipico).
+        if not chat_fp_for_rewrite:
+            try:
+                chat_fp_for_rewrite = _resolve_chat_fingerprint(request)
+            except Exception:
+                chat_fp_for_rewrite = ""
         orig_model = _request_orig_model.pop(chat_fp_for_rewrite, None)
         if orig_model is None and len(_request_orig_model) == 1:
             orig_model = _request_orig_model.pop(next(iter(_request_orig_model)))
@@ -1163,6 +1171,7 @@ async def handle(request):
                     mode=mode,
                     client=request.headers.get("User-Agent", "?")[:40] or "?",
                     status=upstream.status,
+                    tag=tag,
                 )
             except Exception:
                 pass
@@ -1186,6 +1195,11 @@ async def handle(request):
         try:
             up = await forwarders[mode](request, body, session)
             log(f"{mode} (pure) -> {up.status} {request.path}")
+            if mode == "minimax" and up.status in FALLBACK_STATUSES:
+                await up.release()
+                log(f"minimax (pure) {up.status} -> fallback anthropic")
+                up = await forward_anthropic(request, body, session)
+                log(f"minimax (pure) fallback anthropic -> {up.status} {request.path}")
             return await relay(up)
         except Exception as e:
             log(f"ERR {mode} (pure) {request.path}: {e}")
@@ -1455,7 +1469,21 @@ async def handle(request):
                 up2 = await forwarders["anthropic"](request, body, session)
                 log(f"mixed T0/T1 rescue anthropic {up2.status} {request.path}")
                 if up2.status < 400:
-                    mixed_fail_reset(chat_fp)  # FIX audit v3: reset counter su rescue OK
+                    mixed_fail_reset(chat_fp)
+                    return await relay(up2)
+                if up2.status in FALLBACK_STATUSES:
+                    await up2.release()
+                    log(f"mixed T0/T1 rescue anthropic {up2.status} -> haiku")
+                    try:
+                        haiku_body = json.loads(body)
+                    except Exception:
+                        haiku_body = {}
+                    haiku_body["model"] = "claude-haiku-4-5"
+                    up3 = await forwarders["anthropic"](request, json.dumps(haiku_body).encode(), session)
+                    log(f"mixed T0/T1 haiku {up3.status} {request.path}")
+                    if up3.status < 400:
+                        mixed_fail_reset(chat_fp)
+                    return await relay(up3, tag="haiku_rescue")
                 return await relay(up2)
             except Exception as e2:
                 return web.json_response(
