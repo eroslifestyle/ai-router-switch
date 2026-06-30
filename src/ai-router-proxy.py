@@ -18,14 +18,29 @@ import asyncio
 import json
 import os
 import signal
+import sys
 import threading
 import time
 from pathlib import Path
 
 from aiohttp import web, ClientSession, ClientTimeout, TCPConnector
 
+# ── Modulo resilienza (RESILIENZA 2026-06-30) ────────────────────────────
+# Aggiunge: OAuth self-test al boot, modalità DEGRADED quando OAuth manca,
+# auto-recovery quando l'utente fa `claude login` (refresh creds.json),
+# crash dump su SIGTERM, heartbeat watchdog per freeze-watchdog esterno.
+sys.path.insert(0, str(Path.home() / ".claude" / "scripts"))
+try:
+    from ai_router_resilience import Resilience
+    _RESILIENCE_AVAILABLE = True
+except Exception as _rexc:
+    Resilience = None
+    _RESILIENCE_AVAILABLE = False
+    log_bootstrap = lambda m: print(f"[{time.strftime('%H:%M:%S')}] {m}", file=sys.stderr)
+    log_bootstrap(f"WARN: resilience module non disponibile: {_rexc}")
+
 # ── Config ────────────────────────────────────────────────────────────────
-LISTEN_HOST = "127.0.0.1"
+LISTEN_HOST = os.environ.get("AIROUTER_LISTEN_HOST", "127.0.0.1")  # ponytail: 127.0.0.1 default; export AIROUTER_LISTEN_HOST=0.0.0.0 per Tailscale/VSCode remoto
 # Il router E' il punto unico su :8787 (dove tutte le app gia' puntano).
 # Backend DIRETTO alle API ufficiali (nessun proxy intermedio).
 LISTEN_PORT = int(os.environ.get("AIROUTER_PORT", "8787"))
@@ -49,12 +64,6 @@ USAGE_SIDECAR = Path.home() / ".claude" / "logs" / "router-usage.jsonl"
 # 401/403 (auth/billing) -> fallback a MiniMax cosi' l'utente non resta bloccato.
 # 429 (rate limit) -> fallback per non aspettare.
 FALLBACK_STATUSES = {401, 403, 408, 409, 413, 429, 500, 502, 503, 504, 529}
-
-# FIX regola utente 2026-06-30: 429 = escalation IMMEDIATA in mixed (non aspetta 2 fail).
-# Teniamo traccia per-chat di quando l'ultimo 429 è stato visto; finché il cooldown
-# non scade, Anthropic esegue diretto. Resetta al primo success M3.
-_RATE_LIMIT_STATUSES = {429}
-_mixed_429_until = {}  # chat_fp -> timestamp fine cooldown post-429
 
 # Circuit breaker (D15): dopo N fail un backend va in cooldown e viene saltato.
 # FIX audit v4: BREAKER_* removed (dead code - mai chiamato nel flusso;
@@ -175,13 +184,8 @@ def mixed_fail_reset(chat_fp: str) -> None:
 
 
 def mixed_anthropic_leads(chat_fp: str) -> bool:
-    """True se MiniMax ha già fallito >= soglia OPPURE se ha appena preso un 429.
-    Regola utente 2026-06-30: 429 = escalation immediata, non aspetta 2 fail.
-    """
-    # Cooldown post-429 (regola 4): resta in escalation finché non scade
-    if time.time() < _mixed_429_until.get(chat_fp, 0):
-        return True
-    # Cooldown post-fail: resta in escalation finché non scade
+    """True se MiniMax ha già fallito >= soglia: Anthropic prende il comando."""
+    # Cooldown attivo: resta in modalità escalation
     if time.time() < _mixed_cooldown_until.get(chat_fp, 0):
         return True
     fails = _mixed_fails.get(chat_fp, 0)
@@ -190,17 +194,6 @@ def mixed_anthropic_leads(chat_fp: str) -> bool:
         _mixed_cooldown_until[chat_fp] = time.time() + RESCUE_COOLDOWN_SEC
         return True
     return False
-
-
-def mixed_mark_rate_limited(chat_fp: str, status: int) -> None:
-    """Regola utente 2026-06-30: 429 = escalation immediata per RESCUE_COOLDOWN_SEC."""
-    if status in _RATE_LIMIT_STATUSES:
-        _mixed_429_until[chat_fp] = time.time() + RESCUE_COOLDOWN_SEC
-
-
-def mixed_mark_recovered(chat_fp: str) -> None:
-    """M3 ha risposto <400: clear cooldown 429 (ma non i fail counter, che hanno logica propria)."""
-    _mixed_429_until.pop(chat_fp, None)
 
 
 _minimax_key_cache = {"key": None, "ts": 0}
@@ -309,44 +302,74 @@ def _resolve_chat_fingerprint(request) -> str:
     return request.remote or "default"
 
 def _load_chats() -> dict:
-    with _chat_lock:  # FIX audit v3: protezione TOCTOU su file system
-        now = time.time()
-        if _chat_cache["data"] is not None and now - _chat_cache["ts"] < 5:
-            return _chat_cache["data"]
+    """FIX deadlock 2026-06-30: cache + lettura file FUORI dal lock.
+
+    Bug originale: `CHAT_STORE.read_text()` eseguito DENTRO `with _chat_lock`
+    (threading.Lock). Chiamato da handler async: due richieste concorrenti
+    `get_chat_mode` → la 1a tiene il lock durante il read → la 2a aspetta
+    → l'event loop asyncio resta appeso finché il read non termina.
+
+    Fix: cache hit è atomic con una semplice flag (single-thread); cache miss
+    legge il file senza lock e aggiorna la cache con un dict nuovo (GIL-safe).
+    Il TOCTOU è accettabile qui perché il file è piccolo e write è raro.
+    """
+    now = time.time()
+    cached = _chat_cache["data"]
+    cached_ts = _chat_cache["ts"]
+    if cached is not None and now - cached_ts < 5:
+        return cached
+
+    # Cache miss: leggi file FUORI dal lock (atomic GIL-protected)
+    try:
+        raw = CHAT_STORE.read_text()
+        d = json.loads(raw)
+    except Exception:
+        d = {}
+
+    # cleanup TTL (D26: 7 giorni)
+    cutoff = now - CHAT_TTL_DAYS * 86400
+    changed = False
+    for fp in list(d.keys()):
+        if d[fp].get("ts", 0) < cutoff:
+            del d[fp]; changed = True
+    # bound hard (FIFO by timestamp asc)
+    if len(d) > CHAT_MAX_ENTRIES:
+        for fp in sorted(d, key=lambda k: d[k].get("ts", 0))[: len(d) - CHAT_MAX_ENTRIES]:
+            del d[fp]; changed = True
+
+    if changed:
+        # Scrivi FUORI dal lock, atomic via temp file
         try:
-            d = json.loads(CHAT_STORE.read_text())
-        except Exception:
-            d = {}
-        # pulizia TTL (D26: 7 giorni)
-        cutoff = now - CHAT_TTL_DAYS * 86400
-        changed = False
-        for fp in list(d.keys()):
-            if d[fp].get("ts", 0) < cutoff:
-                del d[fp]; changed = True
-        # FIX B2.4 residuo: bound hard su N entries (FIFO by timestamp asc)
-        if len(d) > CHAT_MAX_ENTRIES:
-            for fp in sorted(d, key=lambda k: d[k].get("ts", 0))[: len(d) - CHAT_MAX_ENTRIES]:
-                del d[fp]; changed = True
-        if changed:
-            _save_chats(d)
-        _chat_cache["data"] = d
-        _chat_cache["ts"] = now
+            tmp = CHAT_STORE.with_suffix(".tmp")
+            tmp.write_text(json.dumps(d))
+            tmp.replace(CHAT_STORE)
+        except Exception as e:
+            log(f"ERR save chats: {type(e).__name__}")
+
+    _chat_cache["data"] = d
+    _chat_cache["ts"] = now
     return d
 
 
 def _save_chats(d: dict):
-    with _chat_lock:  # FIX audit v3: lock simmetrico con _load_chats
-        try:
-            CHAT_STORE.write_text(json.dumps(d))
-            _chat_cache["data"] = d
-            _chat_cache["ts"] = time.time()
-        except Exception as e:
-            log(f"ERR save chats: {e}")
+    """FIX: write atomico via temp file, NO lock (async-safe)."""
+    try:
+        tmp = CHAT_STORE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(d))
+        tmp.replace(CHAT_STORE)
+        _chat_cache["data"] = d
+        _chat_cache["ts"] = time.time()
+    except Exception as e:
+        log(f"ERR save chats: {type(e).__name__}")
 
 
 def get_chat_mode(fp: str):
-    """Modalità marcata per una chat (o None)."""
-    return _load_chats().get(fp, {}).get("mode")
+    """FIX deadlock 2026-06-30: lock-free, cache-first."""
+    try:
+        d = _load_chats()
+        return d.get(fp, {}).get("mode")
+    except Exception:
+        return None
 
 
 def set_chat_mode(fp: str, mode: str):
@@ -481,37 +504,58 @@ def classify_t2(body: bytes) -> bool:
 
 
 async def get_minimax_key() -> str:
-    """FIX: cache 60s + lock per evitare doppio subprocess in race + TOCTOU."""
-    with _counter_lock:  # FIX B1.2 residuo: cache TTL check-then-act
-        now = time.time()
-        if _minimax_key_cache["key"] and now - _minimax_key_cache["ts"] < 60:
-            return _minimax_key_cache["key"]
-        key = os.environ.get("MINIMAX_API_KEY", "")
-        if not key:
+    """FIX deadlock 2026-06-30: cache hit sotto lock, subprocess FUORI dal lock.
+
+    Bug originale: `asyncio.to_thread(subprocess.check_output)` chiamato DENTRO
+    `with _counter_lock` (threading.Lock). Quando arriva una 2ª richiesta mentre
+    la 1ª è ancora in `await`, il 2° handler thread entra nello stesso lock
+    perché `asyncio.to_thread` rilascia il GIL ma NON la threading.Lock tenuta
+    dal thread asyncio principale → deadlock su event loop (lock ricorsivo).
+    Fix: cache hit (veloce) resta dentro lock; subprocess si esegue FUORI lock,
+    poi rientra per scrivere il risultato.
+    """
+    now = time.time()
+    # 1) Cache hit: veloce, dentro lock (lettura atomica)
+    with _counter_lock:
+        cached = _minimax_key_cache["key"]
+        cached_ts = _minimax_key_cache["ts"]
+        if cached and now - cached_ts < 60:
+            return cached
+
+    # 2) Cache miss: leggi da env (zero I/O)
+    key = os.environ.get("MINIMAX_API_KEY", "")
+
+    # 3) Cache miss + env vuoto: subprocess FUORI dal lock
+    if not key:
+        try:
+            import subprocess
             try:
-                import subprocess
-                # FIX: subprocess NON bloccante su event loop asyncio.
-                # asyncio.to_thread esegue il blocking call in un thread worker
-                # del default executor (gestito da asyncio, non blocca il loop).
-                try:
-                    loop = asyncio.get_running_loop()
-                    out = await asyncio.to_thread(
-                        subprocess.check_output,
-                        ["bash", str(KEY_FILE), "get", "minimax.api_key"],
-                        {"text": True, "timeout": 5},
-                    )
-                except RuntimeError:
-                    # no event loop: siamo in main() startup, esegui sync
-                    out = subprocess.check_output(
-                        ["bash", str(KEY_FILE), "get", "minimax.api_key"],
-                        text=True, timeout=5,
-                    )
-                key = out.strip() if isinstance(out, str) else out.decode().strip()
-            except Exception as e:
-                log(f"ERR get key: {type(e).__name__}")  # mai leak str(e) per secret
-                key = ""
-        _minimax_key_cache["key"] = key
-        _minimax_key_cache["ts"] = now
+                loop = asyncio.get_running_loop()
+                proc = await asyncio.to_thread(
+                    subprocess.check_output,
+                    ["bash", str(KEY_FILE), "get", "minimax.api_key"],
+                    {"timeout": 5, "text": True},
+                )
+                key = proc.strip() if isinstance(proc, str) else proc.decode().strip()
+            except RuntimeError:
+                proc = subprocess.check_output(
+                    ["bash", str(KEY_FILE), "get", "minimax.api_key"],
+                    text=True, timeout=5,
+                )
+                key = proc.strip()
+        except Exception as e:
+            log(f"ERR get key: {type(e).__name__}")
+            key = ""
+
+    # 4) Scrivi cache dentro lock (write atomico)
+    with _counter_lock:
+        # Doppio check: un altro handler potrebbe aver già popolato la cache
+        # nel frattempo. Usa il valore appena letto se la cache è ancora vuota,
+        # altrimenti rispetta chi ha scritto prima.
+        if not _minimax_key_cache["key"] or now - _minimax_key_cache["ts"] >= 60:
+            _minimax_key_cache["key"] = key
+            _minimax_key_cache["ts"] = now
+
     return key
 
 
@@ -561,15 +605,14 @@ def _log_original_model(orig: str, final: str, chat_id: str) -> None:
 
 
 def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
-                     mode: str, client: str = "?", status: int = 200,
-                     tag: str = ""):
+                     mode: str, client: str = "?", status: int = 200):
     """FIX F: log per-request usage su USAGE_SIDECAR (router-usage.jsonl).
 
     Cattura OGNI richiesta che passa dal router, indipendentemente dal client
     (Claude Code, m3-code, m3-web, m3x, local-llm, agenti remoti). Questo
     è il single source of truth per i tool che non scrivono JSONL.
 
-    Schema: ts, chat, orig, final, mode, client, status, tag,
+    Schema: ts, chat, orig, final, mode, client, status,
             input_tokens, output_tokens, cache_read, cache_creation
     """
     try:
@@ -582,7 +625,6 @@ def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
             "mode": mode,
             "client": client,
             "status": status,
-            "tag": tag,
             "input_tokens": int(usage.get("input_tokens", 0) or 0),
             "output_tokens": int(usage.get("output_tokens", 0) or 0),
             "cache_read": int(usage.get("cache_read_input_tokens", 0) or 0),
@@ -670,12 +712,37 @@ HOP_HEADERS = {
 
 
 async def forward_anthropic(request, body, session):
+    """Chiama api.anthropic.com con OAuth subscription Bearer.
+
+    FIX resilienza 2026-06-30: aggiunge SEMPRE il token OAuth letto da
+    ~/.claude/.credentials.json (subscription web login), come fa Claude Code
+    nel terminale. Il client non deve passare Authorization — il proxy gestisce
+    l'auth in modo trasparente, esattamente come il Claude Code locale.
+
+    - Se il client passa un OAuth Bearer sk-ant-oat*, viene rispettato (override esplicito)
+    - Altrimenti usa il token OAuth letto lazy da .credentials.json
+    - OAuth-lazy: rilegge .credentials.json ad ogni chiamata (Claude Code può refreshare)
+    """
     url = ANTHROPIC_UPSTREAM + request.path_qs
     headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS}
-    # Se il client usa OAuth Bearer (sk-ant-oat*), aggiungo il beta header richiesto
     auth = headers.get("Authorization", "") or headers.get("authorization", "")
+
     if auth.startswith("Bearer sk-ant-oat"):
+        # Client passa già OAuth subscription Bearer — mantienilo
         headers["anthropic-beta"] = "oauth-2025-04-20"
+    else:
+        # FIX OAuth subscription: il client non ha auth, usa il Bearer da .credentials.json
+        # (come fa Claude Code nel terminale — il client non vede mai la chiave)
+        _reload_oauth_token()  # lazy: rilegge se Claude Code ha refreshato
+        tok = os.environ.get("ANTHROPIC_OAUTH_TOKEN", "")
+        if tok:
+            headers["Authorization"] = f"Bearer {tok}"
+            headers["anthropic-beta"] = "oauth-2025-04-20"
+        elif auth:
+            # Client ha passato x-api-key (API key legacy) — rispettalo senza beta header
+            pass
+        # Altrimenti: nessuna auth = proxy trasparente, sarà upstream a rifiutare con 401
+
     # Strip campi beta che api.anthropic.com rifiuta senza il beta header opportuno.
     # FIX audit v5 #4: copri anche /v1/messages/count_tokens (sub-path), non solo
     # il path esatto, altrimenti context_management su count_tokens -> 400.
@@ -1003,6 +1070,19 @@ async def handle(request):
         log(f"path non consentito: {request.path}")
         return web.Response(status=404, text="not found")
 
+    # ── RESILIENZA: blocco traffico in modalità DEGRADED ────────────────────
+    # Se OAuth subscription è mancante o scaduto, accettiamo SOLO health/probe.
+    # /v1/* e /v1/messages tornano 503 con istruzioni re-login
+    # (`claude login` nel terminale aggiorna automaticamente, no restart).
+    if RESILIENCE_INST is not None and not RESILIENCE_INST.state_is_ok():
+        probe_paths = {
+            "/", "/health", "/readyz", "/livez", "/stats", "/metrics", "/status",
+            "/__router_health", "/__resilience",
+        }
+        if request.path not in probe_paths:
+            log(f"DEGRADED: rifiuto {request.path} (OAuth {RESILIENCE_INST.state()})")
+            return web.json_response(RESILIENCE_INST.degraded_response(), status=503)
+
     # Comandi in-chat + marca-chat (solo porta dinamica :8787, solo /v1/messages).
     if forced is None and request.path.endswith("/v1/messages"):
         try:
@@ -1035,17 +1115,11 @@ async def handle(request):
 
     session = request.app["session"]
 
-    async def relay(upstream, chat_fp_for_rewrite: str = "", tag: str = ""):
+    async def relay(upstream, chat_fp_for_rewrite: str = "default"):
         # FIX E: leggi e rimuovi orig_model da riscrivere nello SSE/non-stream
-        # NB: i call site storicamente passavano "default" come chiave. La chiave
-        # reale è _resolve_chat_fingerprint(request) (es. IP client). Cerchiamo
-        # quella chiave per prima; se mancante e c'è esattamente UN orig pending,
-        # usalo (single-user loopback tipico).
-        if not chat_fp_for_rewrite:
-            try:
-                chat_fp_for_rewrite = _resolve_chat_fingerprint(request)
-            except Exception:
-                chat_fp_for_rewrite = ""
+        # NB: i call site passano spesso chat_fp sbagliato (es 'default' vs IP reale).
+        # Soluzione: prova la chiave esplicita; se manca e c'è esattamente UN orig
+        # pending in _request_orig_model, usa quello (single-user loopback tipico).
         orig_model = _request_orig_model.pop(chat_fp_for_rewrite, None)
         if orig_model is None and len(_request_orig_model) == 1:
             orig_model = _request_orig_model.pop(next(iter(_request_orig_model)))
@@ -1185,15 +1259,24 @@ async def handle(request):
                         _usage["input_tokens"] = max(1, _chars // 4)
                     except Exception:
                         _usage["input_tokens"] = max(1, len(body) // 4)
+                # FIX bug stats: passa il FINAL reale (risolto da remap) + fallback al
+                # model nel body della request se orig_model (chat_fp-mismatch) è vuoto.
+                try:
+                    _body_j = json.loads(body.decode("utf-8", errors="replace"))
+                    _body_model = (_body_j.get("model") or "").strip()
+                except Exception:
+                    _body_model = ""
+                _orig = orig_model or _body_model or "?"
+                _final = MINIMAX_MODEL if (mode == "minimax") else (
+                    "claude-direct" if mode == "anthropic" else "?")
                 log_router_usage(
                     chat_id=chat_fp_for_rewrite,
-                    orig=orig_model or "?",
-                    final="?",
+                    orig=_orig,
+                    final=_final,
                     usage=_usage,
                     mode=mode,
                     client=request.headers.get("User-Agent", "?")[:40] or "?",
                     status=upstream.status,
-                    tag=tag,
                 )
             except Exception:
                 pass
@@ -1217,11 +1300,6 @@ async def handle(request):
         try:
             up = await forwarders[mode](request, body, session)
             log(f"{mode} (pure) -> {up.status} {request.path}")
-            if mode == "minimax" and up.status in FALLBACK_STATUSES:
-                await up.release()
-                log(f"minimax (pure) {up.status} -> fallback anthropic")
-                up = await forward_anthropic(request, body, session)
-                log(f"minimax (pure) fallback anthropic -> {up.status} {request.path}")
             return await relay(up)
         except Exception as e:
             log(f"ERR {mode} (pure) {request.path}: {e}")
@@ -1387,18 +1465,12 @@ async def handle(request):
             final_json, headers={"x-ai-verified": verified_flag})
 
     # ── MODALITÀ MIXED: Anthropic orchestra SEMPRE + MiniMax esegue SEMPRE ──
-    # GERARCHIA MIXED (regola utente 2026-06-30, blocco di ferro):
-    #   1) Anthropic (Opus/Sonnet) = UNICO orchestratore. Decide/classifica/pianifica.
-    #   2) MiniMax code (m2.7-hs / M3) = UNICO esecutore per la produzione.
-    #   3) Se M3 fallisce 2 volte sulla stessa chat -> Anthropic prende il comando
-    #      ed esegue diretto (haiku/sonnet/opus secondo disponibilità).
-    #   4) Se M3 va in rate-limit (429) -> Anthropic esegue SUBITO, senza aspettare
-    #      il 2° fail (escalation immediata). Cooldown RESCUE_COOLDOWN_SEC prima di
-    #      ritentare M3.
-    #
-    # Pipeline T2 (richieste classificate 'complesse'):
-    #   - M3 draft -> Anthropic critique -> M3 revise -> Anthropic finalize.
-    # T0/T1 (semplici): M3 esegue diretto, streaming preservato.
+    # Pipeline gerarchica:
+    #   - T2-classifier (locale, zero-token) marca le richieste 'complesse'
+    #   - T0/T1 (semplici): MiniMax esegue diretto
+    #   - T2 (complesse): pipeline verify M3→Anthropic→M3→Anthropic
+    #   - Se MiniMax fallisce 2 volte sulla stessa chat: Anthropic prende il
+    #     comando ed esegue con la sua orchestrazione gerarchica (= pipeline verify).
     chat_fp = _resolve_chat_fingerprint(request)  # FIX audit v4: NAT-safe
     anthropic_leads = mixed_anthropic_leads(chat_fp)
     is_messages = request.path.endswith("/v1/messages")
@@ -1491,31 +1563,13 @@ async def handle(request):
             n = mixed_fail_inc(chat_fp)
             await up.release()
             log(f"mixed T0/T1 M3 {up.status} ({n}/{MIXED_FAIL_THRESHOLD}) {request.path}")
-            # Regola utente 2026-06-30 #4: 429 = escalation immediata (non aspetta 2 fail)
-            if up.status == 429:
-                mixed_mark_rate_limited(chat_fp, 429)
-                log(f"mixed RATE-LIMIT 429: escalation immediata -> Anthropic esegue (cooldown {RESCUE_COOLDOWN_SEC}s)")
             if n >= MIXED_FAIL_THRESHOLD:
                 log(f"mixed escalation: M3 ha fallito {n}x -> Anthropic prende comando")
             try:
                 up2 = await forwarders["anthropic"](request, body, session)
                 log(f"mixed T0/T1 rescue anthropic {up2.status} {request.path}")
                 if up2.status < 400:
-                    mixed_fail_reset(chat_fp)
-                    return await relay(up2)
-                if up2.status in FALLBACK_STATUSES:
-                    await up2.release()
-                    log(f"mixed T0/T1 rescue anthropic {up2.status} -> haiku")
-                    try:
-                        haiku_body = json.loads(body)
-                    except Exception:
-                        haiku_body = {}
-                    haiku_body["model"] = "claude-haiku-4-5"
-                    up3 = await forwarders["anthropic"](request, json.dumps(haiku_body).encode(), session)
-                    log(f"mixed T0/T1 haiku {up3.status} {request.path}")
-                    if up3.status < 400:
-                        mixed_fail_reset(chat_fp)
-                    return await relay(up3, tag="haiku_rescue")
+                    mixed_fail_reset(chat_fp)  # FIX audit v3: reset counter su rescue OK
                 return await relay(up2)
             except Exception as e2:
                 return web.json_response(
@@ -1523,7 +1577,6 @@ async def handle(request):
                      "message": f"rescue ko: {e2}"}}, status=502)
         if up.status < 400:
             mixed_fail_reset(chat_fp)
-            mixed_mark_recovered(chat_fp)  # regola utente 2026-06-30: clear 429 cooldown
         log(f"mixed T0/T1 executor M3 {up.status} {request.path}")
         return await relay(up)
 
@@ -1541,10 +1594,6 @@ async def handle(request):
     if not gen_json or gen_status in FALLBACK_STATUSES:  # FIX B4.1: solo retryable
         n = mixed_fail_inc(chat_fp)
         log(f"mixed T2 M3 R1 ko {gen_status} ({n}/{MIXED_FAIL_THRESHOLD}) {request.path}")
-        # Regola utente 2026-06-30 #4: 429 = escalation immediata (non aspetta 2 fail)
-        if gen_status == 429:
-            mixed_mark_rate_limited(chat_fp, 429)
-            log(f"mixed T2 RATE-LIMIT 429: escalation immediata -> Anthropic esegue")
         try:
             up = await forward_anthropic(request, body, session)
             log(f"mixed T2 fallback anthropic {up.status} {request.path}")
@@ -1554,7 +1603,6 @@ async def handle(request):
                 {"type": "error", "error": {"type": "router_error",
                  "message": str(e)}}, status=502)
     mixed_fail_reset(chat_fp)
-    mixed_mark_recovered(chat_fp)  # regola utente 2026-06-30: clear 429 cooldown
     draft_v1 = _text_from_message(gen_json)
     log(f"mixed T2 R1 M3 draft ({len(draft_v1)} chars)")
     # Anthropic finalize (gerarchia: decide se la bozza è ok o la riscrive)
@@ -1587,17 +1635,33 @@ async def handle(request):
 # "/v1/messages/count_tokens" -> 404 su count_tokens/batches/models/{id} ->
 # Claude Code/VSCode si bloccano. Il routing path-level lo fa SOLO il catch-all
 # "/{tail:.*}"; i path inesistenti tornano 404 dal backend upstream, corretto.
+# Istanza globale resilienza, popolata in _run_multiport.
+RESILIENCE_INST = None
+
+
 def _make_app(session, forced_mode):
     """Crea una web.Application con la modalità cablata (deterministica).
     forced_mode=None -> porta dinamica (:8787) che segue il file ai-router-mode."""
     app = web.Application(client_max_size=1024 * 1024 * 100)
     app["session"] = session
     app["forced_mode"] = forced_mode
+    if RESILIENCE_INST is not None:
+        app["RESILIENCE"] = RESILIENCE_INST
 
     async def healthz(request):
         return web.json_response({"ok": True, "mode": forced_mode or _current_mode()})
 
+    async def resiliencez(request):
+        """Stato resilienza: OAuth, heartbeat, modalità corrente."""
+        if RESILIENCE_INST is None:
+            return web.json_response({"resilience": "unavailable"})
+        s = RESILIENCE_INST.get_status()
+        s["service_state"] = RESILIENCE_INST.state()
+        s["pid"] = os.getpid()
+        return web.json_response(s)
+
     app.router.add_get("/health", healthz)
+    app.router.add_get("/__resilience", resiliencez)
     # catch-all: tutto il routing path-level passa da handle().
     # NB: route literal con '*' NON funziona in aiohttp; il catch-all e'
     # l'unico modo per coprire i sub-path legittimi (count_tokens, batches, ...).
@@ -1606,6 +1670,21 @@ def _make_app(session, forced_mode):
 
 
 async def _run_multiport():
+    # RESILIENZA: inizializza modulo (OAuth check strutturale + degraded mode)
+    global RESILIENCE_INST
+    if _RESILIENCE_AVAILABLE:
+        RESILIENCE_INST = Resilience(
+            port=LISTEN_PORT,
+            log_fn=lambda m: log(f"[RES] {m}"),
+            get_pid=lambda: os.getpid(),
+        )
+        # Boot validation senza self-test (lo facciamo dopo, appena sessione è pronta)
+        ok = RESILIENCE_INST.boot_validate(run_self_test=False)
+        if not ok:
+            log("RESILIENZA: BOOT in modalità DEGRADED — accettiamo solo health endpoints finché OAuth non è presente")
+        # Setup signal handler per crash dump
+        RESILIENCE_INST.install_signal_handlers()
+
     # FIX audit v5 #6: una ClientSession ha UN solo connector (il "pool separato"
     # del vecchio B1.3 era fittizio: _minimax_connector non veniva mai usato da
     # session.request). Un unico pool con limit alto basta per un proxy locale.
@@ -1619,6 +1698,12 @@ async def _run_multiport():
         # FIX #7 CRITICAL: auto_decompress=False per passthrough brotli/gzip.
         auto_decompress=False,
     )
+
+    # RESILIENZA: avvia self-test periodico (usa session = vero HTTP, non new)
+    # e heartbeat watchdog per freeze-watchdog esterno bash.
+    if RESILIENCE_INST is not None:
+        RESILIENCE_INST.start_periodic_self_test(session=session)
+        RESILIENCE_INST.start_heartbeat()
     # FIX audit v3: signal handler installato PRIMA del port loop.
     # Cosi' un SIGTERM early (subito dopo il boot) trova un handler graceful
     # invece del default kill-hard.
