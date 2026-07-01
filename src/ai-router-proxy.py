@@ -49,6 +49,12 @@ ANTHROPIC_UPSTREAM = os.environ.get("AIROUTER_ANTHROPIC_UPSTREAM", "https://api.
 # MiniMax: endpoint Anthropic-compat ufficiale, diretto.
 MINIMAX_UPSTREAM = os.environ.get("AIROUTER_MINIMAX_UPSTREAM", "https://api.minimaxi.chat/anthropic")
 MINIMAX_MODEL = os.environ.get("AIROUTER_MINIMAX_MODEL", "MiniMax-M3")
+# Feature flag redesign 4 modalità 2026-07-01: se =1 (default), mixed/inverse
+# usano le NUOVE pipeline gerarchiche (Anthropic THINK+CONTROLLA+M3 ACT / M3 THINK
+# + Opus OPPOSE + M3 ACT) per TUTTE le /v1/messages — abroga la distinzione T0/T1/T2
+# che escludeva le richieste agentiche. =0 fallback al comportamento legacy T2-only.
+NEW_PIPELINE = os.environ.get("AIROUTER_NEW_PIPELINE", "1") == "1"
+INVERSE_REVIEW_MAX_ITER = int(os.environ.get("AIROUTER_INVERSE_REVIEW_MAX_ITER", "2"))
 # Modello giudice per la verifica T2 in modalità interactive (Claude Opus).
 VERIFY_MODEL = os.environ.get("AIROUTER_VERIFY_MODEL", "claude-opus-4-8")
 VALID_MODES = ("anthropic", "minimax", "mixed", "inverse")
@@ -937,7 +943,339 @@ def _build_finalize_body(orig: dict, question: str, draft_v2: str) -> bytes:
     }).encode()
 
 
-def _sse_events_from_message(j: dict, verified: str) -> list:
+def _build_think_body(orig: dict) -> bytes:
+    """Redesign 2026-07-01 mixed: Anthropic PENSA + fa self-review.
+    Deve produrre SOLO JSON: {plan, tools_to_call, self_review_ok, self_review_notes}.
+    Niente testo fuori dal JSON (forza output pulito)."""
+    sys_msg = (
+        "Sei un orchestratore esperto. Ricevi una richiesta utente (con possibili tools). "
+        "Il tuo compito: produrre un PIANO D'AZIONE ragionato, scegliere quali tool chiamare, "
+        "e fare AUTO-REVIEW interno. Rispondi SOLO con JSON valido, nessun testo fuori.\n\n"
+        "Schema esatto:\n"
+        '{"plan": "<chain-of-thought in italiano, max 800 char>",'
+        ' "tools_to_call": [{"name": "<tool_name>", "input": <object>}, ...],'
+        ' "self_review_ok": <bool>,'
+        ' "self_review_notes": ["<criticita risolta>", ...]}\n\n'
+        "Regole self_review: il piano è completo? edge case coperti? tool scelti corretti? "
+        "Se trovi debolezze, correggile nel campo 'plan' PRIMA di emettere JSON, "
+        "poi metti self_review_ok=true. self_review_ok=false SOLO se dopo la revisione "
+        "il piano resta vuoto o incoerente (in quel caso tools_to_call=[]). "
+        "Se tools_to_call è vuoto perché la richiesta non richiede tool (es. domanda "
+        "di conoscenza), metti comunque self_review_ok=true con plan che spiega perché."
+    )
+    body = dict(orig)
+    body["system"] = sys_msg
+    body["stream"] = False
+    # max_tokens basta per un JSON da ~1500 char
+    body["max_tokens"] = max(int(orig.get("max_tokens", 2048)), 2048)
+    return json.dumps(body).encode()
+
+
+def _parse_think_json(text: str) -> dict | None:
+    """Parsifica il JSON emesso da Anthropic in fase THINK. Tollerante a markdown ```json."""
+    if not text:
+        return None
+    t = text.strip()
+    # Strip code-fence se presente
+    if t.startswith("```"):
+        nl = t.find("\n")
+        if nl > 0:
+            t = t[nl + 1:]
+        if t.endswith("```"):
+            t = t[:-3]
+    # Trova il primo { ... bilanciato
+    start = t.find("{")
+    end = t.rfind("}")
+    if start < 0 or end < 0 or end <= start:
+        return None
+    try:
+        j = json.loads(t[start:end + 1])
+    except Exception:
+        return None
+    if not isinstance(j, dict):
+        return None
+    if "plan" not in j or "self_review_ok" not in j:
+        return None
+    j.setdefault("tools_to_call", [])
+    j.setdefault("self_review_notes", [])
+    return j
+
+
+def _build_act_body(orig: dict, plan: str, tools_to_call: list) -> bytes:
+    """Redesign 2026-07-01 mixed: M3 ESEGUE il piano prodotto da Anthropic.
+    Passa a M3 i tools_to_call decisi da Anthropic come tool_use espliciti."""
+    tools = orig.get("tools") or []
+    sys_msg = (
+        "Sei M3, l'esecutore. Hai ricevuto un PIANO da un orchestratore Anthropic. "
+        "Il tuo compito: eseguilo usando i tool elencati in tools_to_call. "
+        "Rispondi come faresti normalmente all'utente, eseguendo i tool nell'ordine "
+        "indicato dal piano. Se il piano è una domanda senza tool, rispondi direttamente.\n\n"
+        f"PIANO:\n{plan}\n\n"
+        f"TOOLS DA USARE (decisi dall'orchestratore):\n{json.dumps(tools_to_call, ensure_ascii=False)}"
+    )
+    body = dict(orig)
+    body["system"] = sys_msg
+    body["stream"] = bool(orig.get("stream"))  # preserva stream se client lo chiedeva
+    return json.dumps(body).encode()
+
+
+async def _pipeline_think_act(request, body, session, orig: dict) -> web.Response:
+    """Redesign 2026-07-01 mixed: Anthropic THINK+self-review → M3 ACT.
+    Scatta per TUTTE le /v1/messages (incluso agentico con tools)."""
+    chat_fp = _resolve_chat_fingerprint(request)
+    wants_stream = bool(orig.get("stream"))
+
+    # THINK: Anthropic produce piano self-reviewed (JSON puro, no streaming)
+    think_body = _build_think_body(orig)
+    try:
+        t_status, t_json = await _call_full(forward_anthropic, request, think_body, session)
+    except Exception as e:
+        log(f"mixed-new THINK EXC: {e} → fallback M3 diretto")
+        try:
+            return await relay(await forward_minimax(request, body, session))
+        except Exception as e2:
+            return web.json_response({"type": "error", "error": {"type": "router_error",
+                "message": f"think+fallback ko: {e2}"}}, status=502)
+    if not t_json or t_status in FALLBACK_STATUSES:
+        log(f"mixed-new THINK ko {t_status} → fallback M3 diretto")
+        try:
+            return await relay(await forward_minimax(request, body, session))
+        except Exception as e:
+            return web.json_response({"type": "error", "error": {"type": "router_error",
+                "message": f"think ko + fallback ko: {e}"}}, status=502)
+    raw_text = _text_from_message(t_json)
+    plan_json = _parse_think_json(raw_text)
+    if not plan_json:
+        log(f"mixed-new THINK: parse JSON fallito ({len(raw_text)}c) → fallback M3 diretto")
+        try:
+            return await relay(await forward_minimax(request, body, session))
+        except Exception as e:
+            return web.json_response({"type": "error", "error": {"type": "router_error",
+                "message": f"parse ko + fallback ko: {e}"}}, status=502)
+    if not plan_json.get("self_review_ok", False):
+        log(f"mixed-new THINK: self_review_ok=false ({plan_json.get('self_review_notes')}) → fallback M3 diretto")
+        try:
+            return await relay(await forward_minimax(request, body, session))
+        except Exception as e:
+            return web.json_response({"type": "error", "error": {"type": "router_error",
+                "message": f"self_review false + fallback ko: {e}"}}, status=502)
+    plan = plan_json.get("plan", "")
+    tools_to_call = plan_json.get("tools_to_call", []) or []
+    log(f"mixed-new THINK OK plan={len(plan)}c tools={len(tools_to_call)} notes={len(plan_json.get('self_review_notes', []))} fp={chat_fp}")
+
+    # ACT: M3 esegue il piano. Preserve stream se client lo chiedeva.
+    act_body = _build_act_body(orig, plan, tools_to_call)
+    try:
+        up = await forward_minimax(request, act_body, session)
+    except Exception as e:
+        log(f"mixed-new ACT EXC: {e} → Anthropic rescue diretto (senza pipeline)")
+        try:
+            return await relay(await forward_anthropic(request, body, session))
+        except Exception as e2:
+            return web.json_response({"type": "error", "error": {"type": "router_error",
+                "message": f"act+rescue ko: {e2}"}}, status=502)
+    if up.status in FALLBACK_STATUSES:
+        log(f"mixed-new ACT M3 {up.status} → Anthropic rescue")
+        try:
+            await up.release()
+        except Exception:
+            pass
+        try:
+            up2 = await forward_anthropic(request, body, session)
+            return await relay(up2)
+        except Exception as e:
+            return web.json_response({"type": "error", "error": {"type": "router_error",
+                "message": f"act fallback ko: {e}"}}, status=502)
+    log(f"mixed-new ACT M3 {up.status} {request.path} fp={chat_fp}")
+    # Header distinctivo: gate attivo, M3 ha eseguito piano Anthropic
+    return await relay(up, extra_headers={"x-ai-verified": "anthropic-think+m3-act"})
+
+
+# ── INVERSE redesign 2026-07-01: M3 THINK → Opus OPPOSE → M3 ACT (loop max 2) ──
+
+INVERSE_OPPOSE_MODEL = "claude-opus-4-8"
+
+
+def _build_inverse_think_body(orig: dict) -> bytes:
+    """Inverse THINK: M3 genera un piano d'azione (testo libero, no JSON)."""
+    sys_msg = (
+        "Sei M3, l'orchestratore economico. Ricevi una richiesta utente (con possibili tools). "
+        "Il tuo compito: produrre un PIANO D'AZIONE dettagliato in italiano. "
+        "Elenca: (1) obiettivo, (2) passi da eseguire in ordine, (3) tool da chiamare "
+        "con i parametri previsti, (4) edge case da considerare, (5) rischi. "
+        "Rispondi SOLO con il piano, niente JSON obbligatorio, niente meta-commenti."
+    )
+    body = dict(orig)
+    body["system"] = sys_msg
+    body["stream"] = False
+    body["max_tokens"] = max(int(orig.get("max_tokens", 2048)), 2048)
+    return json.dumps(body).encode()
+
+
+def _build_inverse_oppose_body(orig: dict, plan: str) -> bytes:
+    """Inverse OPPOSE: Opus esamina il piano M3 e decide approved/reject.
+    Risponde JSON: {approved: bool, fixes: [...], warnings: [...]}"""
+    sys_msg = (
+        f"Sei Opus, un critico severo (modello {INVERSE_OPPOSE_MODEL}). "
+        "Ricevi un PIANO prodotto da M3. Il tuo compito è bocciare piani deboli, "
+        "rischiosi, incompleti o inefficienti. NON eseguire il piano: solo reviewer.\n\n"
+        "Schema JSON esatto (SOLO JSON, niente testo fuori):\n"
+        '{"approved": <bool>, "fixes": ["<correzione>", ...], "warnings": ["<rischio>", ...]}\n\n'
+        "Regole: approved=true SOLO se il piano è eseguibile senza modifiche rilevanti "
+        "E non ha rischi operativi. Altrimenti approved=false con fixes/warnings azionabili. "
+        "Sii severo: meglio un rifiuto in più che un piano fragile."
+    )
+    user_msg = f"PIANO M3:\n{plan}\n\nDecidi: approved? Se no, quali fix?"
+    return json.dumps({
+        "model": INVERSE_OPPOSE_MODEL,
+        "max_tokens": 1024,
+        "system": sys_msg,
+        "messages": [{"role": "user", "content": user_msg}],
+        "stream": False,
+    }).encode()
+
+
+def _build_inverse_revise_body(orig: dict, plan: str, fixes: list, warnings: list) -> bytes:
+    """Inverse REVISE: M3 corregge il piano sulla base delle critiche Opus."""
+    sys_msg = (
+        "Sei M3. Hai prodotto un piano, Opus l'ha criticato. Rivedilo applicando le "
+        "correzioni richieste e mitigando i warnings. Rispondi SOLO con il piano rivisto, "
+        "stesso formato dell'originale (obiettivo, passi, tool, edge case, rischi)."
+    )
+    user_msg = (
+        f"PIANO ORIGINALE:\n{plan}\n\n"
+        f"FIXES RICHIESTI:\n{json.dumps(fixes, ensure_ascii=False)}\n\n"
+        f"WARNINGS:\n{json.dumps(warnings, ensure_ascii=False)}\n\n"
+        "Restituisci il piano rivisto."
+    )
+    body = dict(orig)
+    body["system"] = sys_msg
+    body["messages"] = [{"role": "user", "content": user_msg}]
+    body["stream"] = False
+    body["max_tokens"] = max(int(orig.get("max_tokens", 2048)), 2048)
+    return json.dumps(body).encode()
+
+
+def _build_inverse_act_body(orig: dict, plan: str) -> bytes:
+    """Inverse ACT: M3 esegue il piano approvato (con tool_use)."""
+    sys_msg = (
+        "Sei M3, l'esecutore. Hai prodotto e iterato un piano. Ora eseguilo. "
+        "Usa i tool come da piano e rispondi all'utente con i risultati. "
+        "Se il piano è una domanda senza tool, rispondi direttamente.\n\n"
+        f"PIANO APPROVATO:\n{plan}"
+    )
+    body = dict(orig)
+    body["system"] = sys_msg
+    body["stream"] = bool(orig.get("stream"))
+    return json.dumps(body).encode()
+
+
+def _parse_oppose_json(text: str) -> dict | None:
+    """Parsifica JSON emesso da Opus in fase OPPOSE. Schema: {approved, fixes, warnings}."""
+    if not text:
+        return None
+    t = text.strip()
+    if t.startswith("```"):
+        nl = t.find("\n")
+        if nl > 0:
+            t = t[nl + 1:]
+        if t.endswith("```"):
+            t = t[:-3]
+    start = t.find("{")
+    end = t.rfind("}")
+    if start < 0 or end < 0 or end <= start:
+        return None
+    try:
+        j = json.loads(t[start:end + 1])
+    except Exception:
+        return None
+    if not isinstance(j, dict) or "approved" not in j or not isinstance(j["approved"], bool):
+        return None
+    j.setdefault("fixes", [])
+    j.setdefault("warnings", [])
+    return j
+
+
+async def _pipeline_think_oppose_act(request, body, session, orig: dict) -> web.Response:
+    """Redesign 2026-07-01 inverse: M3 THINK → Opus OPPOSE → loop max 2 → M3 ACT."""
+    chat_fp = _resolve_chat_fingerprint(request)
+
+    # THINK: M3 genera piano
+    try:
+        plan = await _m3_think_iter(request, session, orig, None)
+    except Exception as e:
+        log(f"inverse-new THINK EXC: {e} → fallback Anthropic diretto")
+        return await _inverse_rescue_anthropic(request, body, session)
+
+    # OPPOSE/REVISE loop (max INVERSE_REVIEW_MAX_ITER volte)
+    for i in range(INVERSE_REVIEW_MAX_ITER):
+        op_body = _build_inverse_oppose_body(orig, plan)
+        try:
+            o_status, o_json = await _call_full(forward_anthropic_direct, request, op_body, session)
+        except Exception as e:
+            log(f"inverse-new OPPOSE iter{i} EXC: {e} → ACT con piano attuale")
+            break
+        if not o_json or o_status in FALLBACK_STATUSES:
+            log(f"inverse-new OPPOSE iter{i} ko {o_status} → ACT con piano attuale")
+            break
+        op_text = _text_from_message(o_json)
+        op = _parse_oppose_json(op_text)
+        if not op:
+            log(f"inverse-new OPPOSE iter{i} parse fail ({len(op_text)}c) → ACT con piano attuale")
+            break
+        log(f"inverse-new OPPOSE iter{i}: approved={op['approved']} fixes={len(op['fixes'])} warnings={len(op['warnings'])}")
+        if op["approved"]:
+            break  # piano ok
+        # M3 revisa
+        try:
+            plan = await _m3_think_iter(request, session, orig, plan, op["fixes"], op["warnings"])
+        except Exception as e:
+            log(f"inverse-new REVISE iter{i} EXC: {e} → ACT con piano non rivisto")
+            break
+    else:
+        log(f"inverse-new: max iter ({INVERSE_REVIEW_MAX_ITER}) raggiunto, ACT con piano finale")
+
+    # ACT: M3 esegue il piano
+    act_body = _build_inverse_act_body(orig, plan)
+    try:
+        up = await forward_minimax(request, act_body, session)
+    except Exception as e:
+        log(f"inverse-new ACT EXC: {e} → rescue Anthropic")
+        return await _inverse_rescue_anthropic(request, body, session)
+    if up.status in FALLBACK_STATUSES:
+        log(f"inverse-new ACT M3 {up.status} → rescue Anthropic")
+        try:
+            await up.release()
+        except Exception:
+            pass
+        return await _inverse_rescue_anthropic(request, body, session)
+    log(f"inverse-new ACT M3 {up.status} {request.path} fp={chat_fp}")
+    return await relay(up, extra_headers={"x-ai-verified": "m3-think+opus-oppose+m3-act"})
+
+
+async def _m3_think_iter(request, session, orig, prev_plan, fixes=None, warnings=None) -> str:
+    """Helper: una iter M3 THINK (o REVISE se prev_plan+fixes). Ritorna testo piano."""
+    if prev_plan is None:
+        body = _build_inverse_think_body(orig)
+    else:
+        body = _build_inverse_revise_body(orig, prev_plan, fixes or [], warnings or [])
+    s, j = await _call_full(forward_minimax, request, body, session)
+    if not j or s in FALLBACK_STATUSES:
+        raise RuntimeError(f"M3 think iter ko {s}")
+    plan = _text_from_message(j).strip()
+    if not plan:
+        raise RuntimeError("M3 think iter vuoto")
+    return plan
+
+
+async def _inverse_rescue_anthropic(request, body, session) -> web.Response:
+    """Fallback finale: Anthropic esegue la richiesta originale senza pipeline."""
+    try:
+        up = await forward_anthropic(request, body, session)
+        return await relay(up, extra_headers={"x-ai-verified": "inverse-rescue-anthropic"})
+    except Exception as e:
+        return web.json_response({"type": "error", "error": {"type": "router_error",
+            "message": f"inverse rescue ko: {e}"}}, status=502)
     """Ritorna lista di eventi SSE Anthropic-compat (per invio progressivo con flush)."""
     text = _text_from_message(j)
     mid = j.get("id", "msg_router")
@@ -1115,7 +1453,7 @@ async def handle(request):
 
     session = request.app["session"]
 
-    async def relay(upstream, chat_fp_for_rewrite: str = "default"):
+    async def relay(upstream, chat_fp_for_rewrite: str = "default", extra_headers: dict | None = None):
         # FIX E: leggi e rimuovi orig_model da riscrivere nello SSE/non-stream
         # NB: i call site passano spesso chat_fp sbagliato (es 'default' vs IP reale).
         # Soluzione: prova la chiave esplicita; se manca e c'è esattamente UN orig
@@ -1136,6 +1474,11 @@ async def handle(request):
             if is_sse and lk == "content-length":
                 continue
             resp.headers[k] = v
+        # FIX redesign 2026-07-01: header extra iniettati dal caller (es x-ai-verified).
+        # Evidenzia la pipeline gerarchica mixed/inverse per audit downstream.
+        if extra_headers:
+            for k, v in extra_headers.items():
+                resp.headers[k] = v
         if is_sse:
             # Header SSE-corretti: nessun buffering downstream, keep-alive
             resp.headers.setdefault("content-type", "text/event-stream")
@@ -1345,6 +1688,18 @@ async def handle(request):
         chat_fp = _resolve_chat_fingerprint(request)  # FIX audit v4: NAT-safe
         is_messages = request.path.endswith("/v1/messages")
         is_t2 = is_messages and classify_t2(body)
+
+        # NEW PIPELINE redesign 2026-07-01: M3 THINK + Opus OPPOSE + M3 ACT.
+        # Scatta per TUTTE le /v1/messages in mode=inverse (incluso agentico con tools).
+        # Abroga la distinzione T0/T1/T2 che escludeva le richieste agentiche.
+        # ESCALATION ha priorità: se M3 ha già fallito N volte, salta a Anthropic diretto.
+        if NEW_PIPELINE and is_messages and not inverse_should_escalate(chat_fp):
+            try:
+                orig = json.loads(body)
+            except Exception:
+                orig = {}
+            log(f"inverse-new pipeline attivata fp={chat_fp} tools={bool(orig.get('tools'))}")
+            return await _pipeline_think_oppose_act(request, body, session, orig)
 
         # ESCALATION: dopo N fail consecutivi su questa chat, Anthropic esegue
         if inverse_should_escalate(chat_fp):
@@ -1568,6 +1923,17 @@ async def handle(request):
             # FIX SSE: invio evento-per-evento con flush + header anti-buffering
             return await _send_sse_message(request, final_json, verified_flag)
         return web.json_response(final_json, headers={"x-ai-verified": verified_flag})
+
+    # NEW PIPELINE redesign 2026-07-01: Anthropic THINK + self-review + M3 ACT.
+    # Scatta per TUTTE le /v1/messages in mode=mixed (incluso agentico con tools),
+    # tranne quando M3 è in escalation (anthropic_leads). Abroga T0/T1/T2.
+    if NEW_PIPELINE and is_messages and not anthropic_leads:
+        try:
+            orig = json.loads(body)
+        except Exception:
+            orig = {}
+        log(f"mixed-new pipeline attivata fp={chat_fp} tools={bool(orig.get('tools'))}")
+        return await _pipeline_think_act(request, body, session, orig)
 
     # Path normale: T0/T1 -> M3 diretto; T2 -> pipeline verify gerarchica
     if not is_t2:
