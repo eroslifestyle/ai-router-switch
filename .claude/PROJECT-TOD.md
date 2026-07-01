@@ -7,10 +7,14 @@ updated: 2026-06-29
 
 # Project Global TOD — ai-router-switch
 
-**Main HEAD**: 1730b3b · **Branch**: main · **Updated**: 2026-06-30 14:50
+**Main HEAD**: ea3fb1f · **Branch**: main · **Updated**: 2026-07-02 01:28
 
 ## ✅ Done (recenti, evidence-gated)
 
+- [x] **D36** — Parser JSON OPPOSE/THINK irrobustito per preamboli + code-fence + oggetti multipli · `ea3fb1f` (2026-07-02 01:28, all 6 parser tests green)
+- [x] **D36a** — Inverse M3 orchestra + Opus critica + M2.7 code esegue (alias MINIMAX_ORCHESTRATOR_MODEL forzato) · `ea3fb1f` + fix commit
+- [x] **D35** — Minimax mode redesign: M3 orchestra (mai esegue) → executor inferiore ACT · commit pushato (M2 sceglie dinamicamente)
+- [x] **D34** — OAuth marker Claude Code fix (sk-ant-oat01 richiede marker esatto nel system, fasi THINK/OPPOSE non lo avevano) · `a4d9a77` + refactor etichette
 - [x] **D34** — Gerarchia mixed 4 regole bloccanti + 429 escalation immediata · `1730b3b` (pushed) + `ed24e2d` (fix SSE rewrite)
 - [x] **D30** — Stress test 4 modalità in carico reale — OK su sessione 2026-06-30 (mixed T0/T1 live, M3 esegue, no blocchi)
 - [x] **D33** — Fix tool_use agentici mixed/inverse: `classify_t2` bypassa pipeline su `tools` + routing agentico → Anthropic (MiniMax-M3 non fa tool_use) · `9892a84` (live :8773/:8774 = 429 firma Anthropic)
@@ -20,12 +24,12 @@ updated: 2026-06-29
 
 ## ⬜ Backlog
 
-- [ ] **D35** — Monitoring `/__router_health` arricchito con `_mixed_429_until` + `mixed_anthropic_leads` per debug live escalation
-      Comando: editare handler `__router_health` in `ai-router-proxy.py` per includere `mixed_429_count`, `mixed_429_active`, `mixed_fails_per_chat`
-      Done when: `curl http://127.0.0.1:8787/__router_health | jq` mostra i nuovi campi
-- [ ] **D31** — Monitoring esposto: `/__router_health` arricchito con breaker state + inverse/mixed fail counters
-      Comando: `curl http://127.0.0.1:8787/__router_health | jq` dopo aver aggiunto `_breaker` e `_inverse_fails` al JSON
-      Done when: response JSON include `breaker_state`, `inverse_fails_per_chat`, `mixed_anthropic_leads`
+- [ ] **D37** — E2E live inverse completo (M3 THINK → Opus OPPOSE → M2.7 ACT) su task complesso
+      Comando: `echo "inverse" > ~/.claude/ai-router-mode && curl -X POST http://localhost:8787/v1/messages -H "Content-Type: application/json" -H "anthropic-version: 2023-06-01" -d '{"model":"claude-opus-4-8","max_tokens":300,"messages":[{"role":"user","content":"Implementa Redis queue con worker pool e test."}]}'`
+      Done when: header `x-ai-verified: minimax-m3-think+opus-oppose+minimax-m2.7-act`, log mostra `OPPOSE iter0: approved=... fixes=...` (critica applicata), esecutore ACT=MiniMax-M2.7
+- [ ] **D38** — Mode switch + re-test (mixed vs minimax vs inverse vs anthropic puri) su 4 task diversi (leggero/medio/pesante/agentico)
+      Comando: script bash che testa tutte e 4 le porte (8787=dynamic/8771=anthropic/8772=minimax/8773=mixed/8774=inverse) in sequenza
+      Done when: tutti gli header x-ai-verified corretti, tutti gli esecutori i modelli attesi (Anthropic/M3 orchestra→executor/M2.7)
 
 ## 🚫 Deferred / Blocked
 
