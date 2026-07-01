@@ -1267,8 +1267,37 @@ async def handle(request):
                 except Exception:
                     _body_model = ""
                 _orig = orig_model or _body_model or "?"
-                _final = MINIMAX_MODEL if (mode == "minimax") else (
-                    "claude-direct" if mode == "anthropic" else "?")
+                # FIX bug 2026-07-01: per mode=mixed il final NON è "?" — è il modello
+                # rimappato (MiniMax-M3 se orig è nel remap index) oppure "claude-direct"
+                # se mixed è caduto in fallback Anthropic.
+                if mode == "minimax":
+                    _final = MINIMAX_MODEL
+                elif mode == "anthropic":
+                    _final = "claude-direct"
+                elif mode == "mixed":
+                    try:
+                        _remap_idx = _request_orig_model.get("__remap__") or {}
+                        if not _remap_idx:
+                            # costruisci al volo dal sidecar (cache 60s gia' presente altrove)
+                            import json as _json
+                            _idx = {}
+                            try:
+                                with open(SIDECAR, "r") as _sf:
+                                    for _sl in _sf:
+                                        _so = _json.loads(_sl) if _sl.strip() else None
+                                        if _so and _so.get("orig") and _so.get("final"):
+                                            _so_o = _so["orig"]
+                                            if _so_o not in _idx:
+                                                _idx[_so_o] = _so["final"]
+                            except Exception:
+                                pass
+                            _request_orig_model["__remap__"] = _idx
+                            _remap_idx = _idx
+                        _final = _remap_idx.get(_orig, "claude-direct") if _orig != "?" else "?"
+                    except Exception:
+                        _final = "?"
+                else:
+                    _final = "?"
                 log_router_usage(
                     chat_id=chat_fp_for_rewrite,
                     orig=_orig,
