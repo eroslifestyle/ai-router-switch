@@ -611,23 +611,30 @@ def _log_original_model(orig: str, final: str, chat_id: str) -> None:
 
 
 def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
-                     mode: str, client: str = "?", status: int = 200):
+                     mode: str, client: str = "?", status: int = 200, path: str = ""):
     """FIX F: log per-request usage su USAGE_SIDECAR (router-usage.jsonl).
 
     Cattura OGNI richiesta che passa dal router, indipendentemente dal client
     (Claude Code, m3-code, m3-web, m3x, local-llm, agenti remoti). Questo
     è il single source of truth per i tool che non scrivono JSONL.
 
+    FIX 2026-07-01: root-cause `?` final — quando final non è risolto
+    (es. path interni /v1/models, /health, /metrics; mode non mappato),
+    marca final come 'router-internal' invece di '?' così il ledger sa
+    che il record è rumore non fatturabile ma distingue da upstream 200.
+
     Schema: ts, chat, orig, final, mode, client, status,
             input_tokens, output_tokens, cache_read, cache_creation
     """
+    if not final or final == "?":
+        final = "router-internal"
     try:
         USAGE_SIDECAR.parent.mkdir(parents=True, exist_ok=True)
         entry = {
             "ts": int(time.time()),
             "chat": chat_id,
             "orig": orig or "?",
-            "final": final or "?",
+            "final": final,
             "mode": mode,
             "client": client,
             "status": status,
@@ -754,6 +761,12 @@ async def forward_anthropic(request, body, session):
     # il path esatto, altrimenti context_management su count_tokens -> 400.
     safe_body = strip_unsupported_fields(body, ANTHROPIC_UNSUPPORTED_FIELDS) \
         if "/v1/messages" in request.path else body
+    # FIX 2026-07-01: anthropic-version obbligatorio per /v1/messages (Anthropic
+    # restituisce 400 "anthropic-version: header is required" se mancante). Se il
+    # client non lo passa (es. curl di test, proxy custom), il router lo aggiunge
+    # da solo per non rompere.
+    if "/v1/messages" in request.path:
+        headers.setdefault("anthropic-version", "2023-06-01")
     return await session.request(
         request.method, url, data=safe_body, headers=headers, allow_redirects=False
     )
@@ -1019,7 +1032,7 @@ def _build_act_body(orig: dict, plan: str, tools_to_call: list) -> bytes:
     return json.dumps(body).encode()
 
 
-async def _pipeline_think_act(request, body, session, orig: dict) -> web.Response:
+async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.Response:
     """Redesign 2026-07-01 mixed: Anthropic THINK+self-review → M3 ACT.
     Scatta per TUTTE le /v1/messages (incluso agentico con tools)."""
     chat_fp = _resolve_chat_fingerprint(request)
@@ -1196,7 +1209,7 @@ def _parse_oppose_json(text: str) -> dict | None:
     return j
 
 
-async def _pipeline_think_oppose_act(request, body, session, orig: dict) -> web.Response:
+async def _pipeline_think_oppose_act(request, body, session, orig: dict, relay) -> web.Response:
     """Redesign 2026-07-01 inverse: M3 THINK → Opus OPPOSE → loop max 2 → M3 ACT."""
     chat_fp = _resolve_chat_fingerprint(request)
 
@@ -1205,7 +1218,7 @@ async def _pipeline_think_oppose_act(request, body, session, orig: dict) -> web.
         plan = await _m3_think_iter(request, session, orig, None)
     except Exception as e:
         log(f"inverse-new THINK EXC: {e} → fallback Anthropic diretto")
-        return await _inverse_rescue_anthropic(request, body, session)
+        return await _inverse_rescue_anthropic(request, body, session, relay)
 
     # OPPOSE/REVISE loop (max INVERSE_REVIEW_MAX_ITER volte)
     for i in range(INVERSE_REVIEW_MAX_ITER):
@@ -1240,15 +1253,17 @@ async def _pipeline_think_oppose_act(request, body, session, orig: dict) -> web.
     try:
         up = await forward_minimax(request, act_body, session)
     except Exception as e:
-        log(f"inverse-new ACT EXC: {e} → rescue Anthropic")
-        return await _inverse_rescue_anthropic(request, body, session)
+        n = inverse_fail_inc(chat_fp)
+        log(f"inverse-new ACT EXC ({n}/{INVERSE_FAIL_THRESHOLD}): {e} → rescue Anthropic")
+        return await _inverse_rescue_anthropic(request, body, session, relay)
     if up.status in FALLBACK_STATUSES:
-        log(f"inverse-new ACT M3 {up.status} → rescue Anthropic")
+        n = inverse_fail_inc(chat_fp)
+        log(f"inverse-new ACT M3 {up.status} ({n}/{INVERSE_FAIL_THRESHOLD}) → rescue Anthropic")
         try:
             await up.release()
         except Exception:
             pass
-        return await _inverse_rescue_anthropic(request, body, session)
+        return await _inverse_rescue_anthropic(request, body, session, relay)
     log(f"inverse-new ACT M3 {up.status} {request.path} fp={chat_fp}")
     return await relay(up, extra_headers={"x-ai-verified": "m3-think+opus-oppose+m3-act"})
 
@@ -1268,7 +1283,7 @@ async def _m3_think_iter(request, session, orig, prev_plan, fixes=None, warnings
     return plan
 
 
-async def _inverse_rescue_anthropic(request, body, session) -> web.Response:
+async def _inverse_rescue_anthropic(request, body, session, relay) -> web.Response:
     """Fallback finale: Anthropic esegue la richiesta originale senza pipeline."""
     try:
         up = await forward_anthropic(request, body, session)
@@ -1649,6 +1664,7 @@ async def handle(request):
                     mode=mode,
                     client=request.headers.get("User-Agent", "?")[:40] or "?",
                     status=upstream.status,
+                    path=request.path,
                 )
             except Exception:
                 pass
@@ -1699,7 +1715,7 @@ async def handle(request):
             except Exception:
                 orig = {}
             log(f"inverse-new pipeline attivata fp={chat_fp} tools={bool(orig.get('tools'))}")
-            return await _pipeline_think_oppose_act(request, body, session, orig)
+            return await _pipeline_think_oppose_act(request, body, session, orig, relay)
 
         # ESCALATION: dopo N fail consecutivi su questa chat, Anthropic esegue
         if inverse_should_escalate(chat_fp):
@@ -1933,7 +1949,7 @@ async def handle(request):
         except Exception:
             orig = {}
         log(f"mixed-new pipeline attivata fp={chat_fp} tools={bool(orig.get('tools'))}")
-        return await _pipeline_think_act(request, body, session, orig)
+        return await _pipeline_think_act(request, body, session, orig, relay)
 
     # Path normale: T0/T1 -> M3 diretto; T2 -> pipeline verify gerarchica
     if not is_t2:
