@@ -863,6 +863,32 @@ async def _call_full(forward_fn, request, body, session):
     try:
         up.release()
     except Exception: pass
+    # FIX 2026-07-01: decomprimi Content-Encoding se attivo. La session ha
+    # auto_decompress=False per fare passthrough gzip/brotli al client relay,
+    # ma le pipeline interne (THINK/REVISE/ACT/finalize) parsa il body con
+    # json.loads: se il body è compresso, parse fallisce silenziosamente →
+    # t_json=None → fallback spurio (mixed_new THINK ko 200 / inverse THINK
+    # EXC). Decomprimiamo qui per essere robusti a proxy intermedi (Cloudflare).
+    ce = (up.headers.get("Content-Encoding") or "").lower().strip()
+    if ce and raw:
+        try:
+            if "gzip" in ce:
+                import gzip
+                raw = gzip.decompress(raw)
+            elif "br" in ce or "brotli" in ce:
+                try:
+                    import brotli
+                    raw = brotli.decompress(raw)
+                except Exception:
+                    log(f"_call_full: brotli module mancante, body {len(raw)}B non decompresso")
+            elif "deflate" in ce:
+                import zlib
+                try:
+                    raw = zlib.decompress(raw, -zlib.MAX_WBITS)
+                except Exception:
+                    raw = zlib.decompress(raw)
+        except Exception as e:
+            log(f"_call_full: decompress {ce} fail: {e} (raw={len(raw)}B)")
     try:
         return status, json.loads(raw)
     except Exception:
