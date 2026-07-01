@@ -49,6 +49,14 @@ ANTHROPIC_UPSTREAM = os.environ.get("AIROUTER_ANTHROPIC_UPSTREAM", "https://api.
 # MiniMax: endpoint Anthropic-compat ufficiale, diretto.
 MINIMAX_UPSTREAM = os.environ.get("AIROUTER_MINIMAX_UPSTREAM", "https://api.minimaxi.chat/anthropic")
 MINIMAX_MODEL = os.environ.get("AIROUTER_MINIMAX_MODEL", "MiniMax-M3")
+# mode=minimax: M3 ORCHESTRA (produce il piano, MAI esegue), i modelli inferiori
+# eseguono. L'orchestratore è M3; gli executor ammessi sono i modelli inferiori.
+MINIMAX_ORCHESTRATOR_MODEL = os.environ.get("AIROUTER_MINIMAX_ORCHESTRATOR", "MiniMax-M3")
+MINIMAX_EXECUTORS = set(
+    m.strip() for m in os.environ.get(
+        "AIROUTER_MINIMAX_EXECUTORS", "MiniMax-M2,MiniMax-M2.5,MiniMax-M2.7"
+    ).split(",") if m.strip()
+)
 # Feature flag redesign 4 modalità 2026-07-01: se =1 (default), mixed/inverse
 # usano le NUOVE pipeline gerarchiche (Anthropic THINK+CONTROLLA+M3 ACT / M3 THINK
 # + Opus OPPOSE + M3 ACT) per TUTTE le /v1/messages — abroga la distinzione T0/T1/T2
@@ -1146,6 +1154,98 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     return await relay(up, extra_headers={"x-ai-verified": f"anthropic-think+{MINIMAX_MODEL.lower()}-act"})
 
 
+# ── MINIMAX redesign 2026-07-02: M3 ORCHESTRA (mai esegue) → executor inferiore ACT ──
+
+def _build_minimax_think_body(orig: dict) -> bytes:
+    """mode=minimax: M3 orchestra e produce SOLO JSON con piano + executor scelto.
+    Forza model=MiniMax-M3 così remap_body_for_minimax NON lo rimappa all'executor."""
+    executors = ", ".join(sorted(MINIMAX_EXECUTORS)) or MINIMAX_MODEL
+    sys_msg = (
+        "Sei M3, il META-ORCHESTRATORE. Il tuo compito è PIANIFICARE, non eseguire. "
+        "Ricevi una richiesta utente (con possibili tools), produci un PIANO ragionato, "
+        "scegli quali tool chiamare e QUALE modello esecutore inferiore deve eseguire. "
+        "Rispondi SOLO con JSON valido, nessun testo fuori.\n\n"
+        "Schema esatto:\n"
+        '{"plan": "<ragionamento in italiano, max 800 char>",'
+        ' "tools_to_call": [{"name": "<tool_name>", "input": <object>}, ...],'
+        f' "executor_model": "<uno tra: {executors}>",'
+        ' "self_review_ok": <bool>,'
+        ' "self_review_notes": ["<criticita risolta>", ...]}\n\n'
+        "Regole: scegli executor_model in base al task (coding pesante → il più capace). "
+        "Fai auto-review del piano PRIMA di emettere JSON; se resta incoerente metti "
+        "self_review_ok=false e tools_to_call=[]. Tu NON esegui mai: solo pianifichi."
+    )
+    body = dict(orig)
+    body["model"] = MINIMAX_ORCHESTRATOR_MODEL   # M3 — remap lo preserva (inizia con 'MiniMax')
+    body["system"] = sys_msg
+    body["stream"] = False
+    body["max_tokens"] = max(int(orig.get("max_tokens", 2048)), 2048)
+    return json.dumps(body).encode()
+
+
+def _pick_minimax_executor(plan_json: dict) -> str:
+    """Executor scelto da M3, validato contro la whitelist dei modelli inferiori.
+    Default: MINIMAX_MODEL. M3 non è mai un executor (non esegue)."""
+    em = (plan_json.get("executor_model") or "").strip()
+    if em in MINIMAX_EXECUTORS and em != MINIMAX_ORCHESTRATOR_MODEL:
+        return em
+    return MINIMAX_MODEL
+
+
+def _build_minimax_act_body(orig: dict, plan: str, tools_to_call: list, executor: str) -> bytes:
+    """L'executor inferiore esegue il piano prodotto da M3."""
+    sys_msg = (
+        f"Sei {executor}, l'esecutore. Hai ricevuto un PIANO dal meta-orchestratore M3. "
+        "Eseguilo usando i tool in tools_to_call, nell'ordine indicato. Se il piano è una "
+        "domanda senza tool, rispondi direttamente.\n\n"
+        f"PIANO:\n{plan}\n\n"
+        f"TOOLS DA USARE (decisi da M3):\n{json.dumps(tools_to_call, ensure_ascii=False)}"
+    )
+    body = dict(orig)
+    body["model"] = executor   # MiniMax-* → remap lo preserva; se non-MiniMax, remap forza MINIMAX_MODEL
+    body["system"] = sys_msg
+    body["stream"] = bool(orig.get("stream"))
+    return json.dumps(body).encode()
+
+
+async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, relay) -> web.Response:
+    """mode=minimax redesign: M3 THINK/orchestra → executor inferiore ACT.
+    M3 non esegue MAI. Su ogni fallimento del THINK, l'executor esegue il task
+    originale direttamente (rimappato a MINIMAX_MODEL): M3 resta fuori dall'esecuzione."""
+    chat_fp = _resolve_chat_fingerprint(request)
+
+    async def _executor_direct():
+        """Fallback: l'executor esegue il task originale (remap → MINIMAX_MODEL). M3 non esegue."""
+        return await relay(await forward_minimax(request, body, session))
+
+    think_body = _build_minimax_think_body(orig)
+    try:
+        t_status, t_json = await _call_full(forward_minimax, request, think_body, session)
+    except Exception as e:
+        log(f"minimax-orch THINK EXC: {e} → executor diretto")
+        return await _executor_direct()
+    if not t_json or t_status in FALLBACK_STATUSES:
+        log(f"minimax-orch THINK ko {t_status} → executor diretto")
+        return await _executor_direct()
+    plan_json = _parse_think_json(_text_from_message(t_json))
+    if not plan_json or not plan_json.get("self_review_ok", False):
+        log(f"minimax-orch THINK: piano non valido → executor diretto")
+        return await _executor_direct()
+    plan = plan_json.get("plan", "")
+    tools_to_call = plan_json.get("tools_to_call", []) or []
+    executor = _pick_minimax_executor(plan_json)
+    log(f"minimax-orch THINK OK plan={len(plan)}c tools={len(tools_to_call)} executor={executor} fp={chat_fp}")
+
+    act_body = _build_minimax_act_body(orig, plan, tools_to_call, executor)
+    try:
+        up = await forward_minimax(request, act_body, session)
+    except Exception as e:
+        log(f"minimax-orch ACT EXC: {e} → executor diretto")
+        return await _executor_direct()
+    log(f"minimax-orch ACT {executor} {up.status} {request.path} fp={chat_fp}")
+    return await relay(up, extra_headers={"x-ai-verified": f"m3-orchestrate+{executor.lower()}-act"})
+
+
 # ── INVERSE redesign 2026-07-01: M3 THINK → Opus OPPOSE → M3 ACT (loop max 2) ──
 
 INVERSE_OPPOSE_MODEL = "claude-opus-4-8"
@@ -1720,19 +1820,42 @@ async def handle(request):
 
     forwarders = {"anthropic": forward_anthropic, "minimax": forward_minimax, "anthropic_direct": forward_anthropic_direct}
 
-    # ── MODALITÀ PURE: nessuno switch, mai. Si ritorna ciò che dà l'upstream ──
-    if mode in ("anthropic", "minimax"):
-        # Health-check interni (/readyz /livez /health /stats /metrics):
-        # chiamate del watchdog, non traffico utente. Non loggare (rumore).
+    # ── MODALITÀ anthropic PURA: proxy trasparente, nessuno switch ──
+    if mode == "anthropic":
         if not request.path.endswith("/v1/messages"):
-            up = await forwarders[mode](request, body, session)
+            up = await forward_anthropic(request, body, session)
             return await relay(up)
         try:
-            up = await forwarders[mode](request, body, session)
-            log(f"{mode} (pure) -> {up.status} {request.path}")
+            up = await forward_anthropic(request, body, session)
+            log(f"anthropic (pure) -> {up.status} {request.path}")
             return await relay(up)
         except Exception as e:
-            log(f"ERR {mode} (pure) {request.path}: {e}")
+            log(f"ERR anthropic (pure) {request.path}: {e}")
+            return web.json_response(
+                {"type": "error", "error": {"type": "router_error", "message": str(e)}},
+                status=502,
+            )
+
+    # ── MODALITÀ minimax: M3 ORCHESTRA (mai esegue) → executor inferiore ACT ──
+    if mode == "minimax":
+        # Health-check / path non-messages: executor passthrough (no orchestrazione).
+        if not request.path.endswith("/v1/messages"):
+            up = await forward_minimax(request, body, session)
+            return await relay(up)
+        if NEW_PIPELINE:
+            try:
+                orig = json.loads(body)
+            except Exception:
+                orig = {}
+            log(f"minimax-orch pipeline attivata fp={_resolve_chat_fingerprint(request)} tools={bool(orig.get('tools'))}")
+            return await _pipeline_minimax_orchestrate(request, body, session, orig, relay)
+        # Legacy (NEW_PIPELINE=0): passthrough diretto all'executor.
+        try:
+            up = await forward_minimax(request, body, session)
+            log(f"minimax (pure) -> {up.status} {request.path}")
+            return await relay(up)
+        except Exception as e:
+            log(f"ERR minimax (pure) {request.path}: {e}")
             return web.json_response(
                 {"type": "error", "error": {"type": "router_error", "message": str(e)}},
                 status=502,
