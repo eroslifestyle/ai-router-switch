@@ -1141,9 +1141,9 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
         except Exception as e:
             return web.json_response({"type": "error", "error": {"type": "router_error",
                 "message": f"act fallback ko: {e}"}}, status=502)
-    log(f"mixed-new ACT M3 {up.status} {request.path} fp={chat_fp}")
-    # Header distinctivo: gate attivo, M3 ha eseguito piano Anthropic
-    return await relay(up, extra_headers={"x-ai-verified": "anthropic-think+m3-act"})
+    log(f"mixed-new ACT {MINIMAX_MODEL} {up.status} {request.path} fp={chat_fp}")
+    # Header distinctivo: gate attivo, l'esecutore MiniMax ha eseguito il piano Anthropic
+    return await relay(up, extra_headers={"x-ai-verified": f"anthropic-think+{MINIMAX_MODEL.lower()}-act"})
 
 
 # ── INVERSE redesign 2026-07-01: M3 THINK → Opus OPPOSE → M3 ACT (loop max 2) ──
@@ -1306,8 +1306,8 @@ async def _pipeline_think_oppose_act(request, body, session, orig: dict, relay) 
         except Exception:
             pass
         return await _inverse_rescue_anthropic(request, body, session, relay)
-    log(f"inverse-new ACT M3 {up.status} {request.path} fp={chat_fp}")
-    return await relay(up, extra_headers={"x-ai-verified": "m3-think+opus-oppose+m3-act"})
+    log(f"inverse-new ACT {MINIMAX_MODEL} {up.status} {request.path} fp={chat_fp}")
+    return await relay(up, extra_headers={"x-ai-verified": f"{MINIMAX_MODEL.lower()}-think+opus-oppose+{MINIMAX_MODEL.lower()}-act"})
 
 
 async def _m3_think_iter(request, session, orig, prev_plan, fixes=None, warnings=None) -> str:
