@@ -895,6 +895,22 @@ async def _call_full(forward_fn, request, body, session):
         return status, None
 
 
+# OAuth subscription (sk-ant-oat01, piano Max) rifiuta con 429 le richieste
+# Sonnet/Opus il cui system NON inizia con questo marker esatto. Haiku è esente.
+# Bug 2026-07-02: le fasi THINK/VERIFY/OPPOSE sovrascrivevano il system col prompt
+# orchestratore, cancellando il marker → 429 → il router cadeva sempre su M3.
+CLAUDE_CODE_MARKER = "You are Claude Code, Anthropic's official CLI for Claude."
+
+
+def _anthropic_system(instruction: str) -> list:
+    """System array per Anthropic OAuth: marker Claude Code (auth-gate) + istruzione.
+    Il primo blocco deve essere il marker ESATTO o l'API risponde 429."""
+    return [
+        {"type": "text", "text": CLAUDE_CODE_MARKER},
+        {"type": "text", "text": instruction},
+    ]
+
+
 def _build_verify_body(orig: dict, question: str, draft: str) -> bytes:
     """Body per Opus che verifica/corregge la bozza MiniMax."""
     sys_msg = (
@@ -910,7 +926,7 @@ def _build_verify_body(orig: dict, question: str, draft: str) -> bytes:
     return json.dumps({
         "model": VERIFY_MODEL,
         "max_tokens": int(orig.get("max_tokens", 1024)),
-        "system": sys_msg,
+        "system": _anthropic_system(sys_msg),
         "messages": [{"role": "user", "content": user_msg}],
         "stream": False,
     }).encode()
@@ -935,7 +951,7 @@ def _build_critique_body(orig: dict, question: str, draft: str) -> bytes:
     return json.dumps({
         "model": VERIFY_MODEL,
         "max_tokens": min(int(orig.get("max_tokens", 1024)) // 2, 512),
-        "system": sys_msg,
+        "system": _anthropic_system(sys_msg),
         "messages": [{"role": "user", "content": user_msg}],
         "stream": False,
     }).encode()
@@ -976,7 +992,7 @@ def _build_finalize_body(orig: dict, question: str, draft_v2: str) -> bytes:
     return json.dumps({
         "model": VERIFY_MODEL,
         "max_tokens": int(orig.get("max_tokens", 1024)),
-        "system": sys_msg,
+        "system": _anthropic_system(sys_msg),
         "messages": [{"role": "user", "content": user_msg}],
         "stream": False,
     }).encode()
@@ -1003,7 +1019,7 @@ def _build_think_body(orig: dict) -> bytes:
         "di conoscenza), metti comunque self_review_ok=true con plan che spiega perché."
     )
     body = dict(orig)
-    body["system"] = sys_msg
+    body["system"] = _anthropic_system(sys_msg)
     body["stream"] = False
     # max_tokens basta per un JSON da ~1500 char
     body["max_tokens"] = max(int(orig.get("max_tokens", 2048)), 2048)
@@ -1168,7 +1184,7 @@ def _build_inverse_oppose_body(orig: dict, plan: str) -> bytes:
     return json.dumps({
         "model": INVERSE_OPPOSE_MODEL,
         "max_tokens": 1024,
-        "system": sys_msg,
+        "system": _anthropic_system(sys_msg),
         "messages": [{"role": "user", "content": user_msg}],
         "stream": False,
     }).encode()
