@@ -1261,6 +1261,7 @@ def _build_inverse_think_body(orig: dict) -> bytes:
         "Rispondi SOLO con il piano, niente JSON obbligatorio, niente meta-commenti."
     )
     body = dict(orig)
+    body["model"] = MINIMAX_ORCHESTRATOR_MODEL  # M3 orchestra — remap preserva ('MiniMax')
     body["system"] = sys_msg
     body["stream"] = False
     body["max_tokens"] = max(int(orig.get("max_tokens", 2048)), 2048)
@@ -1304,6 +1305,7 @@ def _build_inverse_revise_body(orig: dict, plan: str, fixes: list, warnings: lis
         "Restituisci il piano rivisto."
     )
     body = dict(orig)
+    body["model"] = MINIMAX_ORCHESTRATOR_MODEL  # M3 rivede il proprio piano — remap preserva
     body["system"] = sys_msg
     body["messages"] = [{"role": "user", "content": user_msg}]
     body["stream"] = False
@@ -1312,14 +1314,15 @@ def _build_inverse_revise_body(orig: dict, plan: str, fixes: list, warnings: lis
 
 
 def _build_inverse_act_body(orig: dict, plan: str) -> bytes:
-    """Inverse ACT: M3 esegue il piano approvato (con tool_use)."""
+    """Inverse ACT: l'executor coder (MiniMax code) esegue il piano approvato (con tool_use)."""
     sys_msg = (
-        "Sei M3, l'esecutore. Hai prodotto e iterato un piano. Ora eseguilo. "
-        "Usa i tool come da piano e rispondi all'utente con i risultati. "
+        f"Sei {MINIMAX_MODEL}, l'esecutore. Un piano è stato prodotto da M3 e validato da Opus. "
+        "Ora eseguilo. Usa i tool come da piano e rispondi all'utente con i risultati. "
         "Se il piano è una domanda senza tool, rispondi direttamente.\n\n"
         f"PIANO APPROVATO:\n{plan}"
     )
     body = dict(orig)
+    body["model"] = MINIMAX_MODEL  # executor coder esplicito (M2.7) — remap preserva
     body["system"] = sys_msg
     body["stream"] = bool(orig.get("stream"))
     return json.dumps(body).encode()
@@ -1407,7 +1410,7 @@ async def _pipeline_think_oppose_act(request, body, session, orig: dict, relay) 
             pass
         return await _inverse_rescue_anthropic(request, body, session, relay)
     log(f"inverse-new ACT {MINIMAX_MODEL} {up.status} {request.path} fp={chat_fp}")
-    return await relay(up, extra_headers={"x-ai-verified": f"{MINIMAX_MODEL.lower()}-think+opus-oppose+{MINIMAX_MODEL.lower()}-act"})
+    return await relay(up, extra_headers={"x-ai-verified": f"{MINIMAX_ORCHESTRATOR_MODEL.lower()}-think+opus-oppose+{MINIMAX_MODEL.lower()}-act"})
 
 
 async def _m3_think_iter(request, session, orig, prev_plan, fixes=None, warnings=None) -> str:
