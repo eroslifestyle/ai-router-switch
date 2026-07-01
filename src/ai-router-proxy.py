@@ -1034,30 +1034,69 @@ def _build_think_body(orig: dict) -> bytes:
     return json.dumps(body).encode()
 
 
-def _parse_think_json(text: str) -> dict | None:
-    """Parsifica il JSON emesso da Anthropic in fase THINK. Tollerante a markdown ```json."""
+def _extract_balanced_json(text: str) -> list:
+    """Ritorna tutte le sottostringhe JSON-object top-level bilanciate nel testo,
+    ignorando le graffe dentro le stringhe. Robusto a preamboli, code-fence e
+    più oggetti concatenati. Ordine di apparizione."""
+    objs = []
+    depth = 0
+    start = -1
+    in_str = False
+    esc = False
+    for i, ch in enumerate(text):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start >= 0:
+                    objs.append(text[start:i + 1])
+                    start = -1
+    return objs
+
+
+def _parse_json_with_keys(text: str, required: dict) -> dict | None:
+    """Estrae il primo oggetto JSON bilanciato nel testo che soddisfa i vincoli
+    `required` (chiave -> validatore/callable, o None = presente). Robusto a
+    preamboli testuali, code-fence e oggetti multipli (es. esempio + reale)."""
     if not text:
         return None
-    t = text.strip()
-    # Strip code-fence se presente
-    if t.startswith("```"):
-        nl = t.find("\n")
-        if nl > 0:
-            t = t[nl + 1:]
-        if t.endswith("```"):
-            t = t[:-3]
-    # Trova il primo { ... bilanciato
-    start = t.find("{")
-    end = t.rfind("}")
-    if start < 0 or end < 0 or end <= start:
-        return None
-    try:
-        j = json.loads(t[start:end + 1])
-    except Exception:
-        return None
-    if not isinstance(j, dict):
-        return None
-    if "plan" not in j or "self_review_ok" not in j:
+    for cand in _extract_balanced_json(text):
+        try:
+            j = json.loads(cand)
+        except Exception:
+            continue
+        if not isinstance(j, dict):
+            continue
+        ok = True
+        for k, check in required.items():
+            if k not in j:
+                ok = False
+                break
+            if callable(check) and not check(j[k]):
+                ok = False
+                break
+        if ok:
+            return j
+    return None
+
+
+def _parse_think_json(text: str) -> dict | None:
+    """Parsifica il JSON emesso in fase THINK. Robusto a preamboli/code-fence/multipli."""
+    j = _parse_json_with_keys(text, {"plan": None, "self_review_ok": None})
+    if j is None:
         return None
     j.setdefault("tools_to_call", [])
     j.setdefault("self_review_notes", [])
@@ -1279,12 +1318,14 @@ def _build_inverse_oppose_body(orig: dict, plan: str) -> bytes:
         '{"approved": <bool>, "fixes": ["<correzione>", ...], "warnings": ["<rischio>", ...]}\n\n'
         "Regole: approved=true SOLO se il piano è eseguibile senza modifiche rilevanti "
         "E non ha rischi operativi. Altrimenti approved=false con fixes/warnings azionabili. "
-        "Sii severo: meglio un rifiuto in più che un piano fragile."
+        "Sii severo: meglio un rifiuto in più che un piano fragile.\n"
+        "FORMATO OBBLIGATORIO: il PRIMO carattere della risposta è '{', l'ULTIMO è '}'. "
+        "Nessun preambolo, nessuna spiegazione fuori dal JSON, nessun blocco markdown."
     )
-    user_msg = f"PIANO M3:\n{plan}\n\nDecidi: approved? Se no, quali fix?"
+    user_msg = f"PIANO M3:\n{plan}\n\nDecidi: approved? Se no, quali fix? Rispondi SOLO col JSON."
     return json.dumps({
         "model": INVERSE_OPPOSE_MODEL,
-        "max_tokens": 1024,
+        "max_tokens": 2048,
         "system": _anthropic_system(sys_msg),
         "messages": [{"role": "user", "content": user_msg}],
         "stream": False,
@@ -1329,25 +1370,11 @@ def _build_inverse_act_body(orig: dict, plan: str) -> bytes:
 
 
 def _parse_oppose_json(text: str) -> dict | None:
-    """Parsifica JSON emesso da Opus in fase OPPOSE. Schema: {approved, fixes, warnings}."""
-    if not text:
-        return None
-    t = text.strip()
-    if t.startswith("```"):
-        nl = t.find("\n")
-        if nl > 0:
-            t = t[nl + 1:]
-        if t.endswith("```"):
-            t = t[:-3]
-    start = t.find("{")
-    end = t.rfind("}")
-    if start < 0 or end < 0 or end <= start:
-        return None
-    try:
-        j = json.loads(t[start:end + 1])
-    except Exception:
-        return None
-    if not isinstance(j, dict) or "approved" not in j or not isinstance(j["approved"], bool):
+    """Parsifica JSON emesso da Opus in fase OPPOSE. Schema: {approved, fixes, warnings}.
+    Robusto a preamboli testuali, code-fence e oggetti JSON multipli: prende il primo
+    oggetto bilanciato con 'approved' bool."""
+    j = _parse_json_with_keys(text, {"approved": lambda v: isinstance(v, bool)})
+    if j is None:
         return None
     j.setdefault("fixes", [])
     j.setdefault("warnings", [])
