@@ -580,6 +580,8 @@ async def get_minimax_key() -> str:
 
 # Campi beta/Anthropic-only che MiniMax (api.minimaxi.chat) rifiuta con 400.
 MINIMAX_UNSUPPORTED_FIELDS = ("context_management", "mcp_servers", "thinking")
+# FIX 2026-07-02: floor max_tokens per MiniMax reasoning-first (vedi remap_body_for_minimax)
+MINIMAX_MIN_MAX_TOKENS = int(os.environ.get("AIROUTER_MINIMAX_MIN_MAX_TOKENS", "1024"))
 
 # Anthropic public API: 'context_management' è beta-only gated da
 # 'anthropic-beta: context-management-2025-06-27'. Senza quel header,
@@ -684,6 +686,17 @@ def remap_body_for_minimax(raw: bytes, request=None) -> bytes:
         # Strip campi che MiniMax non accetta (causano 400 "Extra inputs not permitted")
         for f in MINIMAX_UNSUPPORTED_FIELDS:
             data.pop(f, None)
+        # FIX 2026-07-02: MiniMax-M2.7 è reasoning-first — il blocco <think> consuma
+        # i token PRIMA del testo. Con max_tokens piccolo (chiamate interne Claude Code:
+        # titoli/topic/commit-msg, spesso 20-100) il thinking mangia tutto il budget →
+        # content vuoto. Floor a MINIMAX_MIN_MAX_TOKENS garantisce spazio per il testo.
+        # (Il modello si ferma comunque da solo con end_turn: nessuno spreco di token.)
+        try:
+            _mt = int(data.get("max_tokens", 0) or 0)
+            if 0 < _mt < MINIMAX_MIN_MAX_TOKENS:
+                data["max_tokens"] = MINIMAX_MIN_MAX_TOKENS
+        except (TypeError, ValueError):
+            pass
         return json.dumps(data).encode()
     except Exception:
         log("remap_body: json parse fail, passthrough")  # FIX B5.1 residuo: log silenzioso
