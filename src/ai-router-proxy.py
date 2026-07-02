@@ -63,7 +63,7 @@ MINIMAX_EXECUTORS = set(
 # che escludeva le richieste agentiche. =0 fallback al comportamento legacy T2-only.
 NEW_PIPELINE = os.environ.get("AIROUTER_NEW_PIPELINE", "1") == "1"
 INVERSE_REVIEW_MAX_ITER = int(os.environ.get("AIROUTER_INVERSE_REVIEW_MAX_ITER", "2"))
-# Modello giudice per la verifica T2 in modalità interactive (Claude Opus).
+# Modello giudice per la verifica T2 in modalità inverse (Claude Opus).
 VERIFY_MODEL = os.environ.get("AIROUTER_VERIFY_MODEL", "claude-opus-4-8")
 VALID_MODES = ("anthropic", "minimax", "mixed", "inverse")
 
@@ -110,20 +110,6 @@ _inverse_cooldown_until = {}  # chat_fp -> timestamp fine cooldown
 _mixed_cooldown_until = {}  # chat_fp -> timestamp fine cooldown
 
 
-def breaker_is_open(backend: str) -> bool:
-    """DEPRECATO audit v4: mai chiamato nel flusso principale (dead code)."""
-    return False
-
-
-def breaker_fail(backend: str):
-    """DEPRECATO audit v4: mai chiamato."""
-    pass
-
-
-def breaker_ok(backend: str):
-    """DEPRECATO audit v4: mai chiamato."""
-    pass
-
 _FAILS_GC_MAX = 5000  # FIX audit v5 #7: soglia oltre cui ripulire chat_fp stale
 
 
@@ -165,15 +151,16 @@ def inverse_fail_reset(chat_fp: str) -> None:
 
 def inverse_should_escalate(chat_fp: str) -> bool:
     """True se Anthropic deve bypassare MiniMax ed eseguire direttamente."""
-    # Cooldown attivo: resta in modalità escalation
-    if time.time() < _inverse_cooldown_until.get(chat_fp, 0):
-        return True
-    fails = _inverse_fails.get(chat_fp, 0)
-    if fails >= INVERSE_FAIL_THRESHOLD:
-        # Attiva cooldown
-        _inverse_cooldown_until[chat_fp] = time.time() + RESCUE_COOLDOWN_SEC
-        return True
-    return False
+    with _counter_lock:  # FIX M3: check->write del cooldown atomico
+        # Cooldown attivo: resta in modalità escalation
+        if time.time() < _inverse_cooldown_until.get(chat_fp, 0):
+            return True
+        fails = _inverse_fails.get(chat_fp, 0)
+        if fails >= INVERSE_FAIL_THRESHOLD:
+            # Attiva cooldown
+            _inverse_cooldown_until[chat_fp] = time.time() + RESCUE_COOLDOWN_SEC
+            return True
+        return False
 
 
 def mixed_fail_inc(chat_fp: str) -> int:
@@ -199,15 +186,16 @@ def mixed_fail_reset(chat_fp: str) -> None:
 
 def mixed_anthropic_leads(chat_fp: str) -> bool:
     """True se MiniMax ha già fallito >= soglia: Anthropic prende il comando."""
-    # Cooldown attivo: resta in modalità escalation
-    if time.time() < _mixed_cooldown_until.get(chat_fp, 0):
-        return True
-    fails = _mixed_fails.get(chat_fp, 0)
-    if fails >= MIXED_FAIL_THRESHOLD:
-        # Attiva cooldown
-        _mixed_cooldown_until[chat_fp] = time.time() + RESCUE_COOLDOWN_SEC
-        return True
-    return False
+    with _counter_lock:  # FIX M3: check->write del cooldown atomico
+        # Cooldown attivo: resta in modalità escalation
+        if time.time() < _mixed_cooldown_until.get(chat_fp, 0):
+            return True
+        fails = _mixed_fails.get(chat_fp, 0)
+        if fails >= MIXED_FAIL_THRESHOLD:
+            # Attiva cooldown
+            _mixed_cooldown_until[chat_fp] = time.time() + RESCUE_COOLDOWN_SEC
+            return True
+        return False
 
 
 _minimax_key_cache = {"key": None, "ts": 0}
@@ -284,7 +272,6 @@ CHAT_STORE = Path.home() / ".claude" / "ai-router-chats.json"
 CHAT_TTL_DAYS = 7
 CHAT_MAX_ENTRIES = 10000  # FIX B2.4: cap duro anti-DoS
 _chat_cache = {"data": None, "ts": 0}
-_chat_lock = threading.Lock()  # FIX audit v3: TOCTOU read-modify-write protection
 
 
 def conversation_fingerprint(data: dict) -> str:
@@ -446,7 +433,7 @@ def _router_reply_text(action: dict, fp: str) -> str:
     if action["action"] == "reset":
         clear_chat_mode(fp)
         return f"↺ Chat riportata al default: **{get_file_mode()}**"
-    return ("🧭 Comandi: `!router <anthropic|minimax|mixed|interactive>` · "
+    return ("🧭 Comandi: `!router <anthropic|minimax|mixed|inverse>` · "
             "`!router status` · `!router reset`. Anche a voce: «usa solo minimax».")
 
 
@@ -480,18 +467,6 @@ def extract_last_user_text(data: dict) -> str:
                 return " ".join(b.get("text", "") for b in c if isinstance(b, dict))
             return str(c)
     return ""
-
-
-def _body_has_tools(body: bytes) -> bool:
-    """True se il body JSON contiene 'tools' = richiesta agentica (Claude Code/VSCode).
-    NB: MiniMax-M3 È agentico ed emette tool_use nativamente (verificato 2026-06-29:
-    non-stream + SSE streaming + multi-turn tool_result su api.minimaxi.chat/anthropic).
-    Le richieste agentiche vanno quindi a MiniMax in passthrough, con fallback Anthropic
-    su 429/5xx per resilienza sotto carico (es. 100 agenti paralleli)."""
-    try:
-        return bool(json.loads(body).get("tools"))
-    except Exception:
-        return False
 
 
 def classify_t2(body: bytes) -> bool:
@@ -677,6 +652,13 @@ def remap_body_for_minimax(raw: bytes, request=None) -> bytes:
                 chat_id = _resolve_chat_fingerprint(request)
                 _log_original_model(orig, MINIMAX_MODEL, chat_id)
             # FIX E: ricorda per riscrittura SSE — consumato dal relay()
+            # FIX M2: bound anti-leak. Le entry sono consumate da relay(), ma i path
+            # d'errore che saltano relay() le lasciano; nessun GC dedicato -> cap duro.
+            if len(_request_orig_model) > 2000:
+                _keep = _request_orig_model.get("__remap__")
+                _request_orig_model.clear()
+                if _keep is not None:
+                    _request_orig_model["__remap__"] = _keep
             _request_orig_model[chat_id] = orig
             data["model"] = MINIMAX_MODEL
         # Strip campi che MiniMax non accetta (causano 400 "Extra inputs not permitted")
@@ -842,7 +824,7 @@ async def forward_anthropic_direct(request, body, session):
 
 
 
-# ── Helper per modalità interactive (T2 verify) ──────────────────────
+# ── Helper per modalità inverse (T2 verify) ──────────────────────
 def _force_no_stream(body: bytes):
     try:
         d = json.loads(body)
@@ -932,27 +914,6 @@ def _anthropic_system(instruction: str) -> list:
         {"type": "text", "text": CLAUDE_CODE_MARKER},
         {"type": "text", "text": instruction},
     ]
-
-
-def _build_verify_body(orig: dict, question: str, draft: str) -> bytes:
-    """Body per Opus che verifica/corregge la bozza MiniMax."""
-    sys_msg = (
-        "Sei un verificatore esperto. Ricevi una DOMANDA e una RISPOSTA BOZZA "
-        "prodotta da un altro modello. Correggi errori fattuali, allucinazioni, "
-        "incoerenze e imprecisioni. Mantieni ciò che è corretto. Rispondi in "
-        "italiano con SOLO la risposta finale verificata, senza meta-commenti."
-    )
-    user_msg = (
-        f"DOMANDA:\n{question}\n\nRISPOSTA BOZZA:\n{draft}\n\n"
-        "Restituisci la risposta finale verificata e corretta."
-    )
-    return json.dumps({
-        "model": VERIFY_MODEL,
-        "max_tokens": int(orig.get("max_tokens", 1024)),
-        "system": _anthropic_system(sys_msg),
-        "messages": [{"role": "user", "content": user_msg}],
-        "stream": False,
-    }).encode()
 
 
 def _build_critique_body(orig: dict, question: str, draft: str) -> bytes:
@@ -1185,14 +1146,16 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     try:
         up = await forward_minimax(request, act_body, session)
     except Exception as e:
-        log(f"mixed-new ACT EXC: {e} → Anthropic rescue diretto (senza pipeline)")
+        n = mixed_fail_inc(chat_fp)
+        log(f"mixed-new ACT EXC ({n}/{MIXED_FAIL_THRESHOLD}): {e} → Anthropic rescue diretto (senza pipeline)")
         try:
             return await relay(await forward_anthropic(request, body, session))
         except Exception as e2:
             return web.json_response({"type": "error", "error": {"type": "router_error",
                 "message": f"act+rescue ko: {e2}"}}, status=502)
     if up.status in FALLBACK_STATUSES:
-        log(f"mixed-new ACT M3 {up.status} → Anthropic rescue")
+        n = mixed_fail_inc(chat_fp)
+        log(f"mixed-new ACT M3 {up.status} ({n}/{MIXED_FAIL_THRESHOLD}) → Anthropic rescue")
         try:
             await up.release()
         except Exception:
@@ -1296,6 +1259,13 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
         up = await forward_minimax(request, act_body, session)
     except Exception as e:
         log(f"minimax-orch ACT EXC: {e} → executor diretto")
+        return await _executor_direct()
+    if up.status in FALLBACK_STATUSES:
+        log(f"minimax-orch ACT {executor} {up.status} -> executor diretto (rescue)")
+        try:
+            await up.release()
+        except Exception:
+            pass
         return await _executor_direct()
     log(f"minimax-orch ACT {executor} {up.status} {request.path} fp={chat_fp}")
     return await relay(up, extra_headers={"x-ai-verified": f"m3-orchestrate+{executor.lower()}-act"})
@@ -1511,11 +1481,6 @@ def _sse_events_from_message(j: dict, verified: str) -> list:
     ]
 
 
-def _sse_from_message(j: dict, verified: str) -> bytes:
-    """Costruisce uno stream SSE Anthropic-compat (compat legacy)."""
-    return "".join(_sse_events_from_message(j, verified)).encode()
-
-
 async def _prepare_sse_response(request, status: int = 200, extra_headers=None):
     """Prepara una StreamResponse SSE con header anti-buffering.
 
@@ -1550,19 +1515,6 @@ async def _send_sse_message(request, final_json: dict, verified_flag: str, statu
             pass
     await resp.write_eof()
     return resp
-
-
-def _relay_collaborative(final_text, verified_flag, model_name, request):
-    """Helper: costruisce la message-response finale e la restituisce."""
-    final_json = {
-        "id": f"msg_collab_{int(time.time()*1000)}",
-        "type": "message", "role": "assistant",
-        "model": model_name,
-        "content": [{"type": "text", "text": final_text}],
-        "stop_reason": "end_turn", "stop_sequence": None,
-        "usage": {"input_tokens": 0, "output_tokens": max(1, len(final_text) // 4)}  # FIX B4.2: ~4 char/token, meglio di split(),
-    }
-    return web.json_response(final_json, headers={"x-ai-verified": verified_flag})
 
 
 # FIX bug 2026-06-29: _path_allowed era chiamata ma mai definita -> NameError -> 500 su ogni request.
@@ -1872,7 +1824,7 @@ async def handle(request):
         await resp.write_eof()
         return resp
 
-    forwarders = {"anthropic": forward_anthropic, "minimax": forward_minimax, "anthropic_direct": forward_anthropic_direct}
+    forwarders = {"anthropic": forward_anthropic, "minimax": forward_minimax}
 
     # ── MODALITÀ anthropic PURA: proxy trasparente, nessuno switch ──
     if mode == "anthropic":
