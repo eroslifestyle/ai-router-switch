@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""routestats — stato e statistiche AI Router.
+
+Comandi:
+  routestats status              stato corrente + health
+  routestats modes              lista modi disponibili
+  routestats switch <mode>      switch modalità (via :9988 proxy)
+  routestats card               apre card grafica fluttuante
+  routestats json               stampa widget_state.json
+"""
+from __future__ import annotations
+import argparse
+import json
+import time
+import urllib.request
+from pathlib import Path
+
+BASE = Path(__file__).resolve().parent
+MODE_FILE = Path.home() / ".claude" / "ai-router-mode"
+PROXY = "http://localhost:9988"
+ROUTER = "http://localhost:8787"
+STATE_FILE = BASE / "widget_state.json"
+
+MODES = [
+    {"id": "anthropic", "icon": "🔵", "label": "Anthropic",
+     "desc": "Claude Opus/Sonnet puro. Nessun routing.",
+     "exec": "→ Opus / Sonnet"},
+    {"id": "minimax",   "icon": "🟠", "label": "MiniMax",
+     "desc": "M3 pensa + sceglie esecutore (M2/M2.5/M2.7).",
+     "exec": "M3 orch · M2.7 act"},
+    {"id": "mixed",     "icon": "🔷", "label": "Mixed",
+     "desc": "Anthropic orchestra + MiniMax esegue.",
+     "exec": "Anthropic orch · M2.7 act"},
+    {"id": "inverse",   "icon": "🔶", "label": "Inverse",
+     "desc": "M3 think + Opus OPPOSE loop × 2 + M2.7 act.",
+     "exec": "M3 think · Opus OPPOSE · M2.7 act"},
+]
+
+
+def http_get(url, timeout=5):
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return json.loads(r.read())
+    except Exception as e:
+        return None
+
+
+def http_post(url, timeout=5):
+    try:
+        req = urllib.request.Request(url, data=b"", method="POST")
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read())
+    except Exception as e:
+        return None
+
+
+def get_current_mode():
+    # Prova proxy :9988 prima (via router-mode-panel.py)
+    j = http_get(f"{PROXY}/mode")
+    if j and j.get("mode"):
+        return j["mode"]
+    # Fallback: leggi file direttamente
+    if MODE_FILE.exists():
+        return MODE_FILE.read_text().strip()
+    return "?"
+
+
+def get_health():
+    j = http_get(f"{ROUTER}/health")
+    if j:
+        return j.get("mode"), j.get("ok")
+    return None, False
+
+
+def write_state():
+    mode = get_current_mode()
+    health_mode, ok = get_health()
+    state = {
+        "mode": mode,
+        "health_ok": ok,
+        "ts": int(time.time()),
+    }
+    STATE_FILE.write_text(json.dumps(state, indent=2))
+
+
+def cmd_status():
+    mode = get_current_mode()
+    health_mode, ok = get_health()
+
+    current = next((m for m in MODES if m["id"] == mode), None)
+    icon = current["icon"] if current else "❓"
+
+    print(f"\n  🔀 AI Router — Stato")
+    print(f"  ─────────────────────────")
+    print(f"  Modalità attiva : {icon} {mode}")
+    if current:
+        print(f"  Orchestrator    : {current['exec']}")
+    print(f"  Health         : {'✅ OK' if ok else '❌ OFFLINE'}")
+    print(f"  Router         : {ROUTER}")
+    print(f"  Proxy          : {PROXY}")
+    print()
+    print(f"  ╔══════════════════════════════════════════════╗")
+    print(f"  ║  {'✅ ATTIVO':^47}  ║" if ok else f"  ║  {'❌ OFFLINE':^47}  ║")
+    print(f"  ║  {mode.upper():^47}  ║")
+    print(f"  ╚══════════════════════════════════════════════╝")
+    print()
+
+
+def cmd_modes():
+    current = get_current_mode()
+    print(f"\n  🔀 Modalità disponibili\n")
+    for m in MODES:
+        tag = " ◀ ATTIVO" if m["id"] == current else ""
+        print(f"  {m['icon']}  {m['id']:12s} {m['desc']}{tag}")
+    print()
+
+
+def cmd_switch(target):
+    if target not in [m["id"] for m in MODES]:
+        valid = ", ".join(m["id"] for m in MODES)
+        print(f"  ❌ Modo '{target}' non valido. Validi: {valid}")
+        return
+    j = http_post(f"{PROXY}/admin/mode/{target}")
+    if j and j.get("ok"):
+        print(f"  ✅ Switched to {target}")
+    else:
+        err = j.get("error", "sconosciuto") if j else "nessuna risposta"
+        print(f"  ❌ Errore: {err}")
+
+
+def cmd_json():
+    write_state()
+    if STATE_FILE.exists():
+        print(STATE_FILE.read_text())
+    else:
+        print("{}")
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="routestats", add_help=True)
+    ap.add_argument("cmd", nargs="?", default="status")
+    ap.add_argument("arg", nargs="?")
+    a = ap.parse_args()
+
+    if a.cmd == "card":
+        import subprocess, sys
+        sys.exit(subprocess.call([sys.executable, str(BASE / "card.py")]))
+    elif a.cmd == "json":
+        cmd_json()
+    elif a.cmd == "status":
+        cmd_status()
+    elif a.cmd == "modes":
+        cmd_modes()
+    elif a.cmd == "switch":
+        if not a.arg:
+            print("  ❌ Specifica il modo: routestats switch <anthropic|minimax|mixed|inverse>")
+        else:
+            cmd_switch(a.arg)
+    else:
+        print(__doc__)
+
+
+if __name__ == "__main__":
+    main()
