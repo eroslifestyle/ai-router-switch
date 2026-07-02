@@ -63,6 +63,9 @@ MINIMAX_EXECUTORS = set(
 # che escludeva le richieste agentiche. =0 fallback al comportamento legacy T2-only.
 NEW_PIPELINE = os.environ.get("AIROUTER_NEW_PIPELINE", "1") == "1"
 INVERSE_REVIEW_MAX_ITER = int(os.environ.get("AIROUTER_INVERSE_REVIEW_MAX_ITER", "2"))
+# FIX bug hang inverse: cap di tempo totale sul loop OPPOSE. Sotto backoff 429
+# le chiamate Anthropic possono durare 50s+; senza budget il client scade (>60s).
+INVERSE_REVIEW_BUDGET_SEC = int(os.environ.get("AIROUTER_INVERSE_BUDGET_SEC", "25"))
 # Modello giudice per la verifica T2 in modalità inverse (Claude Opus).
 VERIFY_MODEL = os.environ.get("AIROUTER_VERIFY_MODEL", "claude-opus-4-8")
 VALID_MODES = ("anthropic", "minimax", "mixed", "inverse")
@@ -1382,8 +1385,12 @@ async def _pipeline_think_oppose_act(request, body, session, orig: dict, relay) 
         log(f"inverse-new THINK EXC: {e} → fallback Anthropic diretto")
         return await _inverse_rescue_anthropic(request, body, session, relay)
 
-    # OPPOSE/REVISE loop (max INVERSE_REVIEW_MAX_ITER volte)
+    # OPPOSE/REVISE loop (max INVERSE_REVIEW_MAX_ITER volte, con budget di tempo)
+    _oppose_t0 = time.time()
     for i in range(INVERSE_REVIEW_MAX_ITER):
+        if time.time() - _oppose_t0 > INVERSE_REVIEW_BUDGET_SEC:
+            log(f"inverse-new budget {INVERSE_REVIEW_BUDGET_SEC}s superato a iter{i} → ACT con piano attuale")
+            break
         op_body = _build_inverse_oppose_body(orig, plan)
         try:
             o_status, o_json = await _call_full(forward_anthropic_direct, request, op_body, session)
@@ -1428,7 +1435,7 @@ async def _pipeline_think_oppose_act(request, body, session, orig: dict, relay) 
         return await _inverse_rescue_anthropic(request, body, session, relay)
     log(f"inverse-new ACT {MINIMAX_MODEL} {up.status} {request.path} fp={chat_fp}")
     inverse_fail_reset(chat_fp)  # FIX H2: azzera il contatore su ACT riuscito (evita escalation permanente)
-    return await relay(up, extra_headers={"x-ai-verified": f"{MINIMAX_ORCHESTRATOR_MODEL.lower()}-think+opus-oppose+{MINIMAX_MODEL.lower()}-act"})
+    return await relay(up, extra_headers={"x-ai-verified": f"{MINIMAX_ORCHESTRATOR_MODEL.lower()}-think+anthropic-oppose+{MINIMAX_MODEL.lower()}-act"})
 
 
 async def _m3_think_iter(request, session, orig, prev_plan, fixes=None, warnings=None) -> str:
