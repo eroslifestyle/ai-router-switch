@@ -2355,8 +2355,19 @@ def _make_app(session, forced_mode):
         s["pid"] = os.getpid()
         return web.json_response(s)
 
+    async def admin_mode_switch(request):
+        """POST /admin/mode/{mode} — switch modalità (porta :8787 dinamica, no restart)."""
+        mode = request.match_info.get("mode", "")
+        if mode not in VALID_MODES:
+            return web.json_response({"ok": False, "error": f"Modo '{mode}' non valido. Validi: {VALID_MODES}"}, status=400)
+        mode_file = Path.home() / ".claude" / "ai-router-mode"
+        mode_file.write_text(mode + "\n")
+        # :8787 rilegge il file ad ogni richiesta -> switch immediato senza restart
+        return web.json_response({"ok": True, "mode": mode, "msg": f"Switched to {mode}"})
+
     app.router.add_get("/health", healthz)
     app.router.add_get("/__resilience", resiliencez)
+    app.router.add_post("/admin/mode/{mode}", admin_mode_switch)
     # catch-all: tutto il routing path-level passa da handle().
     # NB: route literal con '*' NON funziona in aiohttp; il catch-all e'
     # l'unico modo per coprire i sub-path legittimi (count_tokens, batches, ...).
