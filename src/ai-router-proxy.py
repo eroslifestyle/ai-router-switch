@@ -1294,10 +1294,14 @@ def _build_inverse_think_body(orig: dict) -> bytes:
 
 
 def _build_inverse_oppose_body(orig: dict, plan: str) -> bytes:
-    """Inverse OPPOSE: Opus esamina il piano M3 e decide approved/reject.
+    """Inverse OPPOSE: il modello Anthropic scelto dall'utente (fable/opus/sonnet)
+    esamina il piano M3 e decide approved/reject.
     Risponde JSON: {approved: bool, fixes: [...], warnings: [...]}"""
+    # FIX: usa il modello selezionato dall'utente nel picker (arriva nel body);
+    # INVERSE_OPPOSE_MODEL resta solo come fallback se il body non lo specifica.
+    _oppose_model = orig.get("model") or INVERSE_OPPOSE_MODEL
     sys_msg = (
-        f"Sei Opus, un critico severo (modello {INVERSE_OPPOSE_MODEL}). "
+        f"Sei il revisore critico avversariale (modello {_oppose_model}). "
         "Ricevi un PIANO prodotto da M3. Il tuo compito è bocciare piani deboli, "
         "rischiosi, incompleti o inefficienti. NON eseguire il piano: solo reviewer.\n\n"
         "Schema JSON esatto (SOLO JSON, niente testo fuori):\n"
@@ -1310,7 +1314,7 @@ def _build_inverse_oppose_body(orig: dict, plan: str) -> bytes:
     )
     user_msg = f"PIANO M3:\n{plan}\n\nDecidi: approved? Se no, quali fix? Rispondi SOLO col JSON."
     return json.dumps({
-        "model": INVERSE_OPPOSE_MODEL,
+        "model": _oppose_model,
         "max_tokens": 2048,
         "system": _anthropic_system(sys_msg),
         "messages": [{"role": "user", "content": user_msg}],
