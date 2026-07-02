@@ -1385,37 +1385,41 @@ async def _pipeline_think_oppose_act(request, body, session, orig: dict, relay) 
         log(f"inverse-new THINK EXC: {e} → fallback Anthropic diretto")
         return await _inverse_rescue_anthropic(request, body, session, relay)
 
-    # OPPOSE/REVISE loop (max INVERSE_REVIEW_MAX_ITER volte, con budget di tempo)
-    _oppose_t0 = time.time()
-    for i in range(INVERSE_REVIEW_MAX_ITER):
-        if time.time() - _oppose_t0 > INVERSE_REVIEW_BUDGET_SEC:
-            log(f"inverse-new budget {INVERSE_REVIEW_BUDGET_SEC}s superato a iter{i} → ACT con piano attuale")
-            break
-        op_body = _build_inverse_oppose_body(orig, plan)
-        try:
-            o_status, o_json = await _call_full(forward_anthropic_direct, request, op_body, session)
-        except Exception as e:
-            log(f"inverse-new OPPOSE iter{i} EXC: {e} → ACT con piano attuale")
-            break
-        if not o_json or o_status in FALLBACK_STATUSES:
-            log(f"inverse-new OPPOSE iter{i} ko {o_status} → ACT con piano attuale")
-            break
-        op_text = _text_from_message(o_json)
-        op = _parse_oppose_json(op_text)
-        if not op:
-            log(f"inverse-new OPPOSE iter{i} parse fail ({len(op_text)}c) → ACT con piano attuale")
-            break
-        log(f"inverse-new OPPOSE iter{i}: approved={op['approved']} fixes={len(op['fixes'])} warnings={len(op['warnings'])}")
-        if op["approved"]:
-            break  # piano ok
-        # M3 revisa
-        try:
-            plan = await _m3_think_iter(request, session, orig, plan, op["fixes"], op["warnings"])
-        except Exception as e:
-            log(f"inverse-new REVISE iter{i} EXC: {e} → ACT con piano non rivisto")
-            break
+    # Short-circuit B: richiesta senza tool = nessun piano operativo da criticare → salta OPPOSE
+    if not orig.get("tools"):
+        log("inverse-new: richiesta senza tool → skip OPPOSE, ACT diretto (come minimax)")
     else:
-        log(f"inverse-new: max iter ({INVERSE_REVIEW_MAX_ITER}) raggiunto, ACT con piano finale")
+        # OPPOSE/REVISE loop (max INVERSE_REVIEW_MAX_ITER volte, con budget di tempo)
+        _oppose_t0 = time.time()
+        for i in range(INVERSE_REVIEW_MAX_ITER):
+            if time.time() - _oppose_t0 > INVERSE_REVIEW_BUDGET_SEC:
+                log(f"inverse-new budget {INVERSE_REVIEW_BUDGET_SEC}s superato a iter{i} → ACT con piano attuale")
+                break
+            op_body = _build_inverse_oppose_body(orig, plan)
+            try:
+                o_status, o_json = await _call_full(forward_anthropic_direct, request, op_body, session)
+            except Exception as e:
+                log(f"inverse-new OPPOSE iter{i} EXC: {e} → ACT con piano attuale")
+                break
+            if not o_json or o_status in FALLBACK_STATUSES:
+                log(f"inverse-new OPPOSE iter{i} ko {o_status} → ACT con piano attuale")
+                break
+            op_text = _text_from_message(o_json)
+            op = _parse_oppose_json(op_text)
+            if not op:
+                log(f"inverse-new OPPOSE iter{i} parse fail ({len(op_text)}c) → ACT con piano attuale")
+                break
+            log(f"inverse-new OPPOSE iter{i}: approved={op['approved']} fixes={len(op['fixes'])} warnings={len(op['warnings'])}")
+            if op["approved"]:
+                break  # piano ok
+            # M3 revisa
+            try:
+                plan = await _m3_think_iter(request, session, orig, plan, op["fixes"], op["warnings"])
+            except Exception as e:
+                log(f"inverse-new REVISE iter{i} EXC: {e} → ACT con piano non rivisto")
+                break
+        else:
+            log(f"inverse-new: max iter ({INVERSE_REVIEW_MAX_ITER}) raggiunto, ACT con piano finale")
 
     # ACT: M3 esegue il piano
     act_body = _build_inverse_act_body(orig, plan)
