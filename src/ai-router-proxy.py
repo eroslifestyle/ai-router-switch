@@ -1659,9 +1659,13 @@ async def handle(request):
         # NB: i call site passano spesso chat_fp sbagliato (es 'default' vs IP reale).
         # Soluzione: prova la chiave esplicita; se manca e c'è esattamente UN orig
         # pending in _request_orig_model, usa quello (single-user loopback tipico).
+        # FIX D38 2026-07-02: escludi la chiave interna '__remap__' (indice remap, dict)
+        # dal fallback single-entry — altrimenti il dict finisce riscritto in body['model'].
         orig_model = _request_orig_model.pop(chat_fp_for_rewrite, None)
-        if orig_model is None and len(_request_orig_model) == 1:
-            orig_model = _request_orig_model.pop(next(iter(_request_orig_model)))
+        if orig_model is None:
+            _pending = [k for k in _request_orig_model if k != "__remap__"]
+            if len(_pending) == 1:
+                orig_model = _request_orig_model.pop(_pending[0])
         # FIX SSE: rileva text/event-stream per applicare flush immediato + no-buffering
         is_sse = "text/event-stream" in (upstream.headers.get("content-type") or "").lower()
         resp = web.StreamResponse(status=upstream.status)
@@ -1872,7 +1876,8 @@ async def handle(request):
         try:
             up = await forward_anthropic(request, body, session)
             log(f"anthropic (pure) -> {up.status} {request.path}")
-            return await relay(up)
+            # FIX D38 2026-07-02: header di verifica esecutore anche in modalità pura
+            return await relay(up, extra_headers={"x-ai-verified": "anthropic-pure"})
         except Exception as e:
             log(f"ERR anthropic (pure) {request.path}: {e}")
             return web.json_response(
