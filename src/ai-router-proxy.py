@@ -65,11 +65,7 @@ NEW_PIPELINE = os.environ.get("AIROUTER_NEW_PIPELINE", "1") == "1"
 INVERSE_REVIEW_MAX_ITER = int(os.environ.get("AIROUTER_INVERSE_REVIEW_MAX_ITER", "2"))
 # Modello giudice per la verifica T2 in modalità interactive (Claude Opus).
 VERIFY_MODEL = os.environ.get("AIROUTER_VERIFY_MODEL", "claude-opus-4-8")
-VALID_MODES = ("anthropic", "minimax", "mixed", "inverse", "ornith")
-
-# ── Ornith mode: Ollama locale ornith-35b via OpenAI-compat API ──────────
-OLLAMA_BASE = os.environ.get("AIROUTER_OLLAMA_BASE", "http://127.0.0.1:11434")
-ORNITH_MODEL = os.environ.get("AIROUTER_ORNITH_MODEL", "ornith-35b")
+VALID_MODES = ("anthropic", "minimax", "mixed", "inverse")
 
 MODE_FILE = Path.home() / ".claude" / "ai-router-mode"
 KEY_FILE = Path.home() / ".claude" / "secrets" / "secrets.sh"
@@ -412,7 +408,6 @@ _NL_MODE = [
     (_re.compile(r"solo\s+minimax|usa\s+minimax", _re.I), "minimax"),
     (_re.compile(r"mod\w*\s+mist|mixed|mist[ao]\b", _re.I), "mixed"),
     (_re.compile(r"inverse|inversa|inverti", _re.I), "inverse"),
-    (_re.compile(r"ornith|locale|local.llm|ollama", _re.I), "ornith"),
 ]
 _CMD_VERB = _re.compile(r"\b(usa|passa|metti|imposta|attiva|cambia|adesso\s+usa)\b", _re.I)
 _EXPLICIT = _re.compile(r"^\s*!router\s+(\w+)", _re.I)
@@ -811,74 +806,6 @@ async def forward_minimax(request, body, session):
     return await session.request(
         request.method, url, data=new_body, headers=headers, allow_redirects=False
     )
-
-async def forward_ollama(request, body, session) -> "web.Response":
-    """Converte Anthropic /v1/messages → Ollama /v1/chat/completions e ritorna
-    risposta già in formato Anthropic. Fonde reasoning+content (thinking mode Ornith-1).
-    """
-    try:
-        req_j = json.loads(body)
-    except Exception:
-        req_j = {}
-
-    # Converti messaggi Anthropic → OpenAI
-    messages = []
-    sys_prompt = req_j.get("system", "")
-    if isinstance(sys_prompt, list):
-        sys_prompt = " ".join(b.get("text", "") for b in sys_prompt if isinstance(b, dict))
-    if sys_prompt:
-        messages.append({"role": "system", "content": sys_prompt})
-    for m in req_j.get("messages", []):
-        role = m.get("role", "user")
-        content = m.get("content", "")
-        if isinstance(content, list):
-            content = " ".join(b.get("text", "") for b in content if isinstance(b, dict))
-        messages.append({"role": role, "content": content})
-
-    temperature = req_j.get("temperature", 0.3)
-
-    # Usa /api/chat con think=false per risposta diretta senza reasoning interno
-    ollama_body = json.dumps({
-        "model": ORNITH_MODEL,
-        "messages": messages,
-        "think": False,
-        "stream": False,
-        "options": {
-            "num_ctx": 32768,
-            "temperature": temperature,
-            "num_predict": req_j.get("max_tokens", 8192),
-        },
-    }).encode()
-
-    url = OLLAMA_BASE + "/api/chat"
-    async with session.request(
-        "POST", url, data=ollama_body,
-        headers={"Content-Type": "application/json"},
-        timeout=300,
-    ) as up:
-        resp_bytes = await up.read()
-
-    try:
-        resp_j = json.loads(resp_bytes)
-    except Exception:
-        resp_j = {}
-
-    final_text = (resp_j.get("message") or {}).get("content") or "(nessuna risposta)"
-
-    anthropic_resp = {
-        "id": f"msg_ornith_{int(time.time())}",
-        "type": "message",
-        "role": "assistant",
-        "model": ORNITH_MODEL,
-        "content": [{"type": "text", "text": final_text}],
-        "stop_reason": "end_turn",
-        "stop_sequence": None,
-        "usage": {
-            "input_tokens": resp_j.get("prompt_eval_count", 0),
-            "output_tokens": resp_j.get("eval_count", 0),
-        },
-    }
-    return web.json_response(anthropic_resp)
 
 
 ANTHROPIC_DIRECT_URL = os.environ.get("AIROUTER_ANTHROPIC_DIRECT", "https://api.anthropic.com")
@@ -2145,21 +2072,6 @@ async def handle(request):
             return await _send_sse_message(request, final_json, verified_flag)
         return web.json_response(
             final_json, headers={"x-ai-verified": verified_flag})
-
-    # ── MODALITÀ ORNITH: passthrough locale a Ollama ornith-35b ─────────────
-    # Proxy trasparente: converte Anthropic → OpenAI e rilancia la risposta.
-    # Nessuna logica T2, nessun fallback remoto — tutto on-device.
-    if mode == "ornith":
-        try:
-            resp = await forward_ollama(request, body, session)
-            log(f"ornith -> Ollama {ORNITH_MODEL} {resp.status} {request.path}")
-            return resp
-        except Exception as e:
-            log(f"ERR ornith {request.path}: {e}")
-            return web.json_response(
-                {"type": "error", "error": {"type": "router_error", "message": f"Ollama ornith: {e}"}},
-                status=502,
-            )
 
     # ── MODALITÀ MIXED: Anthropic orchestra SEMPRE + MiniMax esegue SEMPRE ──
     # Pipeline gerarchica:
