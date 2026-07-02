@@ -546,9 +546,10 @@ async def get_minimax_key() -> str:
             try:
                 loop = asyncio.get_running_loop()
                 proc = await asyncio.to_thread(
-                    subprocess.check_output,
-                    ["bash", str(KEY_FILE), "get", "minimax.api_key"],
-                    {"timeout": 5, "text": True},
+                    lambda: subprocess.check_output(
+                        ["bash", str(KEY_FILE), "get", "minimax.api_key"],
+                        timeout=5, text=True,
+                    )
                 )
                 key = proc.strip() if isinstance(proc, str) else proc.decode().strip()
             except RuntimeError:
@@ -1204,6 +1205,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
                 "message": f"act fallback ko: {e}"}}, status=502)
     log(f"mixed-new ACT {MINIMAX_MODEL} {up.status} {request.path} fp={chat_fp}")
     # Header distinctivo: gate attivo, l'esecutore MiniMax ha eseguito il piano Anthropic
+    mixed_fail_reset(chat_fp)  # FIX H2: azzera il contatore su ACT riuscito (simmetria con inverse)
     return await relay(up, extra_headers={"x-ai-verified": f"anthropic-think+{MINIMAX_MODEL.lower()}-act"})
 
 
@@ -1451,6 +1453,7 @@ async def _pipeline_think_oppose_act(request, body, session, orig: dict, relay) 
             pass
         return await _inverse_rescue_anthropic(request, body, session, relay)
     log(f"inverse-new ACT {MINIMAX_MODEL} {up.status} {request.path} fp={chat_fp}")
+    inverse_fail_reset(chat_fp)  # FIX H2: azzera il contatore su ACT riuscito (evita escalation permanente)
     return await relay(up, extra_headers={"x-ai-verified": f"{MINIMAX_ORCHESTRATOR_MODEL.lower()}-think+opus-oppose+{MINIMAX_MODEL.lower()}-act"})
 
 
@@ -1477,6 +1480,9 @@ async def _inverse_rescue_anthropic(request, body, session, relay) -> web.Respon
     except Exception as e:
         return web.json_response({"type": "error", "error": {"type": "router_error",
             "message": f"inverse rescue ko: {e}"}}, status=502)
+
+
+def _sse_events_from_message(j: dict, verified: str) -> list:
     """Ritorna lista di eventi SSE Anthropic-compat (per invio progressivo con flush)."""
     text = _text_from_message(j)
     mid = j.get("id", "msg_router")
