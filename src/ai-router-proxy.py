@@ -1321,7 +1321,8 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
 
     async def _executor_direct():
         """Fallback: l'executor esegue il task originale (remap → MINIMAX_MODEL). M3 non esegue."""
-        return await relay(await forward_minimax(request, body, session))
+        return await relay(await forward_minimax(request, body, session),
+                          extra_headers={"x-ai-verified": f"minimax-direct-fallback({MINIMAX_MODEL.lower()})"})
 
     think_body = _build_minimax_think_body(orig)
     try:
