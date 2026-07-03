@@ -840,8 +840,18 @@ def _force_no_stream(body: bytes):
 def _text_from_message(j: dict) -> str:
     out = []
     for b in (j or {}).get("content", []):
-        if isinstance(b, dict) and b.get("type") == "text":
-            out.append(b.get("text", ""))
+        if isinstance(b, dict):
+            t = b.get("type", "")
+            if t == "text":
+                out.append(b.get("text", ""))
+            elif t == "thinking":
+                # FIX 2026-07-03: il campo è nidificato come b["thinking"]["thinking"]
+                # (non b["thinking"]). L'Anthropic API restituisce il blocco in quel formato.
+                inner = b.get("thinking", {})
+                if isinstance(inner, dict):
+                    out.append(inner.get("thinking", ""))
+                elif isinstance(inner, str):
+                    out.append(inner)
     return "".join(out)
 
 
@@ -985,31 +995,33 @@ def _build_finalize_body(orig: dict, question: str, draft_v2: str) -> bytes:
     }).encode()
 
 
+THINK_MAX_TOKENS = int(os.environ.get("AIROUTER_THINK_MAX_TOKENS", "200"))
+# Modello per la fase THINK: Haiku è 3-5x più veloce di Sonnet/Opus e ha rate-limit
+# più alti (meno 429). Per un piano-guida breve la capacità di Haiku basta.
+THINK_MODEL = os.environ.get("AIROUTER_THINK_MODEL", "claude-haiku-4-5-20251001")
+
+
 def _build_think_body(orig: dict) -> bytes:
-    """Redesign 2026-07-01 mixed: Anthropic PENSA + fa self-review.
-    Deve produrre SOLO JSON: {plan, tools_to_call, self_review_ok, self_review_notes}.
-    Niente testo fuori dal JSON (forza output pulito)."""
+    """Version C (2026-07-03): THINK LEGGERO+VELOCE — piano libero breve su Haiku.
+    Collo di bottiglia originale: THINK con max_tokens=2048, formato JSON verboso e
+    model Sonnet/Opus → 4-8s + parse fail 90%. Nuovo design:
+      - model=Haiku (3-5x più veloce, meno 429)
+      - piano testo libero breve (max 200 token) → nessun parse fail possibile
+      - M3 in ACT sceglie i tool concreti (vede il task originale)."""
     sys_msg = (
-        "Sei un orchestratore esperto. Ricevi una richiesta utente (con possibili tools). "
-        "Il tuo compito: produrre un PIANO D'AZIONE ragionato, scegliere quali tool chiamare, "
-        "e fare AUTO-REVIEW interno. Rispondi SOLO con JSON valido, nessun testo fuori.\n\n"
-        "Schema esatto:\n"
-        '{"plan": "<chain-of-thought in italiano, max 800 char>",'
-        ' "tools_to_call": [{"name": "<tool_name>", "input": <object>}, ...],'
-        ' "self_review_ok": <bool>,'
-        ' "self_review_notes": ["<criticita risolta>", ...]}\n\n'
-        "Regole self_review: il piano è completo? edge case coperti? tool scelti corretti? "
-        "Se trovi debolezze, correggile nel campo 'plan' PRIMA di emettere JSON, "
-        "poi metti self_review_ok=true. self_review_ok=false SOLO se dopo la revisione "
-        "il piano resta vuoto o incoerente (in quel caso tools_to_call=[]). "
-        "Se tools_to_call è vuoto perché la richiesta non richiede tool (es. domanda "
-        "di conoscenza), metti comunque self_review_ok=true con plan che spiega perché."
+        "Sei un ORCHESTRATORE. Leggi la richiesta utente e scrivi un PIANO D'AZIONE "
+        "BREVE (2-3 frasi) in italiano: cosa va fatto e in che ordine. "
+        "Scrivi SOLO il piano come testo semplice. NON eseguire nulla, NON chiamare "
+        "strumenti, NON rispondere alla domanda — solo il piano operativo essenziale."
     )
     body = dict(orig)
     body["system"] = _anthropic_system(sys_msg)
     body["stream"] = False
-    # max_tokens basta per un JSON da ~1500 char
-    body["max_tokens"] = max(int(orig.get("max_tokens", 2048)), 2048)
+    body["max_tokens"] = THINK_MAX_TOKENS  # basso davvero: THINK veloce (~1s su Haiku)
+    body["model"] = THINK_MODEL            # Haiku: veloce + meno rate-limit
+    # Togli tools (il modello non deve emettere tool_use) e thinking (mangia budget).
+    body.pop("tools", None)
+    body.pop("thinking", None)
     return json.dumps(body).encode()
 
 
@@ -1072,29 +1084,76 @@ def _parse_json_with_keys(text: str, required: dict) -> dict | None:
     return None
 
 
-def _parse_think_json(text: str) -> dict | None:
-    """Parsifica il JSON emesso in fase THINK. Robusto a preamboli/code-fence/multipli."""
-    j = _parse_json_with_keys(text, {"plan": None, "self_review_ok": None})
-    if j is None:
+def _parse_plan_text(text: str) -> dict | None:
+    """Parsifica l'output della fase THINK con formato [PLAN]...[/PLAN] (Version B).
+    Il modello emette sezioni delimitate da tag — impossibile romperle con escaping.
+    Formato atteso:
+      [PLAN]<ragionamento>[/PLAN]
+      [TOOLS]<json array>[/TOOLS]
+      [SELF_REVIEW]OK: <bool>\nNOTES: <json array>[/SELF_REVIEW]"""
+    if not text:
         return None
-    j.setdefault("tools_to_call", [])
-    j.setdefault("self_review_notes", [])
-    return j
+    import re
+
+    def extract_section(tag: str) -> str:
+        # Case-insensitive, gestisce spazi/newline multipli
+        pattern = rf'\[{re.escape(tag)}\](.*?)\[/{re.escape(tag)}\]'
+        m = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+        return m.group(1).strip() if m else ""
+
+    plan = extract_section("PLAN")
+    tools_raw = extract_section("TOOLS")
+    review_raw = extract_section("SELF_REVIEW")
+
+    if not plan:
+        return None
+
+    # Parse tools: JSON array
+    tools = []
+    if tools_raw:
+        try:
+            tools = json.loads(tools_raw)
+        except Exception:
+            pass
+
+    # Parse self_review: "OK: true\nNOTES: [...]"
+    self_review_ok = True
+    self_review_notes = []
+    if review_raw:
+        ok_match = re.search(r'OK:\s*(true|false)', review_raw, re.IGNORECASE)
+        if ok_match:
+            self_review_ok = ok_match.group(1).lower() == "true"
+        notes_match = re.search(r'NOTES:\s*(\[.*?\])', review_raw, re.DOTALL)
+        if notes_match:
+            try:
+                self_review_notes = json.loads(notes_match.group(1))
+            except Exception:
+                pass
+
+    return {
+        "plan": plan,
+        "tools_to_call": tools,
+        "self_review_ok": self_review_ok,
+        "self_review_notes": self_review_notes,
+    }
+
+
+# Alias per compatibilità con chi chiama _parse_think_json
+def _parse_think_json(text: str) -> dict | None:
+    return _parse_plan_text(text)
 
 
 def _build_act_body(orig: dict, plan: str, tools_to_call: list) -> bytes:
-    """Redesign 2026-07-01 mixed: M3 ESEGUE il piano prodotto da Anthropic.
-    Passa a M3 i tools_to_call decisi da Anthropic come tool_use espliciti."""
-    tools = orig.get("tools") or []
+    """Version C 2026-07-03: M3 ESEGUE seguendo il piano-guida di Anthropic.
+    M3 sceglie e chiama i tool concreti (ha il body originale con tutti i tools);
+    il piano è solo una guida di orchestrazione, non una lista di tool preconfezionati."""
     sys_msg = (
-        "Sei M3, l'esecutore. Hai ricevuto un PIANO da un orchestratore Anthropic. "
-        "Il tuo compito: eseguilo usando i tool elencati in tools_to_call. "
-        "Rispondi come faresti normalmente all'utente, eseguendo i tool nell'ordine "
-        "indicato dal piano. Se il piano è una domanda senza tool, rispondi direttamente.\n\n"
-        f"PIANO:\n{plan}\n\n"
-        f"TOOLS DA USARE (decisi dall'orchestratore):\n{json.dumps(tools_to_call, ensure_ascii=False)}"
+        "Sei l'esecutore. Un orchestratore Anthropic ha analizzato la richiesta e "
+        "prodotto questo PIANO-GUIDA. Segui il piano usando i tuoi strumenti come "
+        "necessario. Rispondi normalmente all'utente eseguendo le azioni del piano.\n\n"
+        f"PIANO-GUIDA:\n{plan}"
     )
-    body = dict(orig)
+    body = dict(orig)  # conserva i tools originali → M3 può chiamarli
     body["system"] = sys_msg
     body["stream"] = bool(orig.get("stream"))  # preserva stream se client lo chiedeva
     return json.dumps(body).encode()
@@ -1109,7 +1168,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     # THINK: Anthropic produce piano self-reviewed (JSON puro, no streaming)
     think_body = _build_think_body(orig)
     try:
-        t_status, t_json = await _call_full(forward_anthropic, request, think_body, session)
+        t_status, t_json = await _call_full(forward_minimax, request, think_body, session)
     except Exception as e:
         log(f"mixed-new THINK EXC: {e} → fallback M3 diretto")
         try:
@@ -1124,25 +1183,18 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
         except Exception as e:
             return web.json_response({"type": "error", "error": {"type": "router_error",
                 "message": f"think ko + fallback ko: {e}"}}, status=502)
-    raw_text = _text_from_message(t_json)
-    plan_json = _parse_think_json(raw_text)
-    if not plan_json:
-        log(f"mixed-new THINK: parse JSON fallito ({len(raw_text)}c) → fallback M3 diretto")
+    # Version C: il piano è testo libero. Qualsiasi cosa il modello produca È il piano.
+    # Nessun parse fragile → nessun parse fail. Solo se il testo è VUOTO facciamo fallback.
+    plan = _text_from_message(t_json).strip()
+    if not plan:
+        log(f"mixed-new THINK: piano vuoto → fallback M3 diretto fp={chat_fp}")
         try:
             return await relay(await forward_minimax(request, body, session))
         except Exception as e:
             return web.json_response({"type": "error", "error": {"type": "router_error",
-                "message": f"parse ko + fallback ko: {e}"}}, status=502)
-    if not plan_json.get("self_review_ok", False):
-        log(f"mixed-new THINK: self_review_ok=false ({plan_json.get('self_review_notes')}) → fallback M3 diretto")
-        try:
-            return await relay(await forward_minimax(request, body, session))
-        except Exception as e:
-            return web.json_response({"type": "error", "error": {"type": "router_error",
-                "message": f"self_review false + fallback ko: {e}"}}, status=502)
-    plan = plan_json.get("plan", "")
-    tools_to_call = plan_json.get("tools_to_call", []) or []
-    log(f"mixed-new THINK OK plan={len(plan)}c tools={len(tools_to_call)} notes={len(plan_json.get('self_review_notes', []))} fp={chat_fp}")
+                "message": f"think vuoto + fallback ko: {e}"}}, status=502)
+    tools_to_call = []  # M3 sceglie i tool concreti in ACT (vede il task originale)
+    log(f"mixed-new THINK OK plan={len(plan)}c fp={chat_fp}")
 
     # ACT: M3 esegue il piano. Preserve stream se client lo chiedeva.
     act_body = _build_act_body(orig, plan, tools_to_call)
