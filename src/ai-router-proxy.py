@@ -1022,6 +1022,11 @@ THINK_MAX_TOKENS = int(os.environ.get("AIROUTER_THINK_MAX_TOKENS", "200"))
 # Modello per la fase THINK: Haiku è 3-5x più veloce di Sonnet/Opus e ha rate-limit
 # più alti (meno 429). Per un piano-guida breve la capacità di Haiku basta.
 THINK_MODEL = os.environ.get("AIROUTER_THINK_MODEL", "claude-haiku-4-5-20251001")
+# Timeout dedicato al THINK: è un piano Haiku da ~200 token (~1-3s reali). Il default
+# 90s di _call_full (applicato 2x = 180s worst-case) trasformava un rallentamento/coda
+# upstream in 180s di silenzio totale sul TTFB del client PRIMA del fallback M3. Un piano
+# che non arriva in THINK_TIMEOUT è già un segnale di degrado: meglio cadere subito su M3.
+THINK_TIMEOUT_SEC = float(os.environ.get("AIROUTER_THINK_TIMEOUT_SEC", "12"))
 
 
 def _build_think_body(orig: dict) -> bytes:
@@ -1195,7 +1200,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     # invece di Anthropic. ACT (sotto) resta su MiniMax = esecutore.
     think_body = _build_think_body(orig)
     try:
-        t_status, t_json = await _call_full(forward_anthropic_direct, request, think_body, session)
+        t_status, t_json = await _call_full(forward_anthropic_direct, request, think_body, session, timeout=THINK_TIMEOUT_SEC)
     except Exception as e:
         log(f"mixed-new THINK EXC: {e} → fallback M3 diretto")
         try:
@@ -2184,7 +2189,13 @@ async def handle(request):
                     {"type": "error", "error": {"type": "router_error",
                      "message": str(e)}}, status=502)  # legacy, vedi _err_response
         draft_v1 = _text_from_message(gen_json)
-        log(f"mixed escalation R1 M3 draft ({len(draft_v1)} chars)")
+        # FIX black-hole: M3 ha ripreso a rispondere (draft OK) → esci dall'escalation.
+        # Senza questo reset il contatore resta >= soglia e mixed_fail_inc (unico punto
+        # con time-decay) non è mai chiamato nel ramo escalation → lock-in permanente su
+        # Anthropic-esecutore, violando la regola 'MiniMax esegue'. Il reset riporta le
+        # richieste successive alla pipeline normale Anthropic-THINK + M3-ACT.
+        mixed_fail_reset(chat_fp)
+        log(f"mixed escalation R1 M3 draft ({len(draft_v1)} chars) → reset escalation (M3 recovered)")
         # Anthropic finalizza direttamente (salta critique+revise per latenza)
         fbody = _build_finalize_body(orig, question, draft_v1)
         try:
