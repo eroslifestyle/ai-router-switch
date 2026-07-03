@@ -147,7 +147,10 @@ def inverse_fail_inc(chat_fp: str) -> int:
 def inverse_fail_reset(chat_fp: str) -> None:
     """Azzera contatore (chiamata MiniMax riuscita)."""
     with _counter_lock:  # FIX audit v5 #2: simmetrico con inverse_fail_inc
-        _inverse_fails[chat_fp] = 0
+        # FIX leak: pop invece di =0. Un'entry a 0 senza ts corrispondente è orfana
+        # immortale (_gc_fail_dicts itera ts, non la raccoglie mai) → crescita RAM
+        # illimitata. mixed_fail_reset già fa pop: qui rendiamo i due simmetrici.
+        _inverse_fails.pop(chat_fp, None)
         _inverse_fail_ts.pop(chat_fp, None)
         _inverse_cooldown_until.pop(chat_fp, None)
 
@@ -684,13 +687,31 @@ def remap_body_for_minimax(raw: bytes, request=None) -> bytes:
         return raw
 
 
+_CREDS_PATH = Path.home() / ".claude" / ".credentials.json"
+_oauth_file_cache = {"token": "", "mtime": -1.0}
+
+
 def _read_oauth_from_file() -> str:
-    """Legge il token OAuth dal file di credenziali Claude Code (zero IO se errore)."""
+    """Legge il token OAuth dal file di credenziali Claude Code.
+
+    FIX bottleneck: cache gated su mtime → niente open()+json.load() sincroni
+    sull'event loop a OGNI richiesta Anthropic (serializzava le richieste concorrenti).
+    Rilegge solo quando il file cambia (Claude Code lo riscrive a ogni refresh OAuth).
+    """
     try:
-        with open(Path.home() / ".claude" / ".credentials.json") as f:
-            return json.load(f).get("claudeAiOauth", {}).get("accessToken", "")
+        mtime = _CREDS_PATH.stat().st_mtime
     except Exception:
-        return ""
+        return _oauth_file_cache["token"]
+    if mtime == _oauth_file_cache["mtime"]:
+        return _oauth_file_cache["token"]
+    try:
+        with open(_CREDS_PATH) as f:
+            tok = json.load(f).get("claudeAiOauth", {}).get("accessToken", "")
+        _oauth_file_cache["token"] = tok
+        _oauth_file_cache["mtime"] = mtime
+        return tok
+    except Exception:
+        return _oauth_file_cache["token"]
 
 
 def _load_oauth_token():
@@ -855,14 +876,16 @@ def _text_from_message(j: dict) -> str:
     return "".join(out)
 
 
-async def _call_full(forward_fn, request, body, session):
-    """Chiamata non-streaming: ritorna (status, json|None). Timeout 90s request + 90s read."""
+async def _call_full(forward_fn, request, body, session, timeout: float = 90):
+    """Chiamata non-streaming: ritorna (status, json|None). `timeout` secondi PER FASE
+    (headers + read), default 90. Il chiamante può passare il budget residuo (es. loop
+    OPPOSE/REVISE inverse) per non sforare la finestra dichiarata: worst-case ~2×timeout."""
     nb, _ = _force_no_stream(body)
     up = None
     try:
-        up = await asyncio.wait_for(forward_fn(request, nb, session), timeout=90)
+        up = await asyncio.wait_for(forward_fn(request, nb, session), timeout=timeout)
     except asyncio.TimeoutError:
-        log(f"_call_full TIMEOUT 90s req {getattr(request, 'path', '?')}")
+        log(f"_call_full TIMEOUT {timeout}s req {getattr(request, 'path', '?')}")
         return 0, None
     except Exception as e:
         log_exc(f"_call_full EXC req {getattr(request, 'path', '?')}: {e}")  # FIX B5.2
@@ -872,9 +895,9 @@ async def _call_full(forward_fn, request, body, session):
         return 0, None
     status = up.status
     try:
-        raw = await asyncio.wait_for(up.read(), timeout=90)
+        raw = await asyncio.wait_for(up.read(), timeout=timeout)
     except asyncio.TimeoutError:
-        log(f"_call_full TIMEOUT 90s read {getattr(request, 'path', '?')}")
+        log(f"_call_full TIMEOUT {timeout}s read {getattr(request, 'path', '?')}")
         try: up.release()
         except Exception: pass
         return status, None
@@ -1165,10 +1188,14 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     chat_fp = _resolve_chat_fingerprint(request)
     wants_stream = bool(orig.get("stream"))
 
-    # THINK: Anthropic produce piano self-reviewed (JSON puro, no streaming)
+    # THINK: Anthropic produce piano self-reviewed (JSON puro, no streaming).
+    # REGOLA VINCOLANTE (utente): mixed = Anthropic UNICO orchestratore. Il THINK
+    # DEVE girare su Anthropic (forward_anthropic_direct): forward_minimax passa da
+    # remap_body_for_minimax che riscrive model→MiniMax, facendo orchestrare MiniMax
+    # invece di Anthropic. ACT (sotto) resta su MiniMax = esecutore.
     think_body = _build_think_body(orig)
     try:
-        t_status, t_json = await _call_full(forward_minimax, request, think_body, session)
+        t_status, t_json = await _call_full(forward_anthropic_direct, request, think_body, session)
     except Exception as e:
         log(f"mixed-new THINK EXC: {e} → fallback M3 diretto")
         try:
@@ -1444,12 +1471,16 @@ async def _pipeline_think_oppose_act(request, body, session, orig: dict, relay) 
         # OPPOSE/REVISE loop (max INVERSE_REVIEW_MAX_ITER volte, con budget di tempo)
         _oppose_t0 = time.time()
         for i in range(INVERSE_REVIEW_MAX_ITER):
-            if time.time() - _oppose_t0 > INVERSE_REVIEW_BUDGET_SEC:
+            _budget_left = INVERSE_REVIEW_BUDGET_SEC - (time.time() - _oppose_t0)
+            if _budget_left <= 0:
                 log(f"inverse-new budget {INVERSE_REVIEW_BUDGET_SEC}s superato a iter{i} → ACT con piano attuale")
                 break
+            # FIX budget reale: passa il residuo a _call_full così una singola OPPOSE/REVISE
+            # non può bloccare 90+90s sforando il budget di 7× (il check era solo pre-iter).
+            _phase_to = max(1.0, _budget_left)
             op_body = _build_inverse_oppose_body(orig, plan)
             try:
-                o_status, o_json = await _call_full(forward_anthropic_direct, request, op_body, session)
+                o_status, o_json = await _call_full(forward_anthropic_direct, request, op_body, session, timeout=_phase_to)
             except Exception as e:
                 log(f"inverse-new OPPOSE iter{i} EXC: {e} → ACT con piano attuale")
                 break
@@ -1464,9 +1495,10 @@ async def _pipeline_think_oppose_act(request, body, session, orig: dict, relay) 
             log(f"inverse-new OPPOSE iter{i}: approved={op['approved']} fixes={len(op['fixes'])} warnings={len(op['warnings'])}")
             if op["approved"]:
                 break  # piano ok
-            # M3 revisa
+            # M3 revisa (col budget residuo aggiornato, non il 90s fisso)
             try:
-                plan = await _m3_think_iter(request, session, orig, plan, op["fixes"], op["warnings"])
+                _revise_to = max(1.0, INVERSE_REVIEW_BUDGET_SEC - (time.time() - _oppose_t0))
+                plan = await _m3_think_iter(request, session, orig, plan, op["fixes"], op["warnings"], timeout=_revise_to)
             except Exception as e:
                 log(f"inverse-new REVISE iter{i} EXC: {e} → ACT con piano non rivisto")
                 break
@@ -1494,13 +1526,14 @@ async def _pipeline_think_oppose_act(request, body, session, orig: dict, relay) 
     return await relay(up, extra_headers={"x-ai-verified": f"{MINIMAX_ORCHESTRATOR_MODEL.lower()}-think+anthropic-oppose+{MINIMAX_MODEL.lower()}-act"})
 
 
-async def _m3_think_iter(request, session, orig, prev_plan, fixes=None, warnings=None) -> str:
-    """Helper: una iter M3 THINK (o REVISE se prev_plan+fixes). Ritorna testo piano."""
+async def _m3_think_iter(request, session, orig, prev_plan, fixes=None, warnings=None, timeout: float = 90) -> str:
+    """Helper: una iter M3 THINK (o REVISE se prev_plan+fixes). Ritorna testo piano.
+    `timeout` inoltrato a _call_full: la REVISE dentro il loop OPPOSE passa il budget residuo."""
     if prev_plan is None:
         body = _build_inverse_think_body(orig)
     else:
         body = _build_inverse_revise_body(orig, prev_plan, fixes or [], warnings or [])
-    s, j = await _call_full(forward_minimax, request, body, session)
+    s, j = await _call_full(forward_minimax, request, body, session, timeout=timeout)
     if not j or s in FALLBACK_STATUSES:
         raise RuntimeError(f"M3 think iter ko {s}")
     plan = _text_from_message(j).strip()
