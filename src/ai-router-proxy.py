@@ -57,6 +57,11 @@ MINIMAX_EXECUTORS = set(
         "AIROUTER_MINIMAX_EXECUTORS", "MiniMax-M2,MiniMax-M2.5,MiniMax-M2.7"
     ).split(",") if m.strip()
 )
+# Decisione utente 2026-07-03 (mixed): l'ACT gira sull'executor CODE MiniMax
+# (default M2.7), NON su M3. M3 è il 2° tentativo. Catena completa esecuzione:
+# M2.7 -> M3 -> (2 fail MiniMax) -> Haiku -> modello selezionato dall'utente.
+# Gli orchestratori Anthropic (Fable/Opus/Sonnet) non eseguono MAI al 1° colpo.
+MIXED_EXECUTOR_MODEL = os.environ.get("AIROUTER_MIXED_EXECUTOR", "MiniMax-M2.7")
 # Feature flag redesign 4 modalità 2026-07-01: se =1 (default), mixed/inverse
 # usano le NUOVE pipeline gerarchiche (Anthropic THINK+CONTROLLA+M3 ACT / M3 THINK
 # + Opus OPPOSE + M3 ACT) per TUTTE le /v1/messages — abroga la distinzione T0/T1/T2
@@ -1019,8 +1024,9 @@ def _build_finalize_body(orig: dict, question: str, draft_v2: str) -> bytes:
 
 
 THINK_MAX_TOKENS = int(os.environ.get("AIROUTER_THINK_MAX_TOKENS", "200"))
-# Modello per la fase THINK: Haiku è 3-5x più veloce di Sonnet/Opus e ha rate-limit
-# più alti (meno 429). Per un piano-guida breve la capacità di Haiku basta.
+# Modello FALLBACK per la fase THINK (usato solo se il client non passa un model
+# Anthropic valido). Decisione utente 2026-07-03: il THINK gira sul modello
+# selezionato dall'utente; Haiku qui è solo riserva + esecutore d'emergenza ACT.
 THINK_MODEL = os.environ.get("AIROUTER_THINK_MODEL", "claude-haiku-4-5-20251001")
 # Timeout dedicato al THINK: è un piano Haiku da ~200 token (~1-3s reali). Il default
 # 90s di _call_full (applicato 2x = 180s worst-case) trasformava un rallentamento/coda
@@ -1030,12 +1036,11 @@ THINK_TIMEOUT_SEC = float(os.environ.get("AIROUTER_THINK_TIMEOUT_SEC", "12"))
 
 
 def _build_think_body(orig: dict) -> bytes:
-    """Version C (2026-07-03): THINK LEGGERO+VELOCE — piano libero breve su Haiku.
-    Collo di bottiglia originale: THINK con max_tokens=2048, formato JSON verboso e
-    model Sonnet/Opus → 4-8s + parse fail 90%. Nuovo design:
-      - model=Haiku (3-5x più veloce, meno 429)
-      - piano testo libero breve (max 200 token) → nessun parse fail possibile
-      - M3 in ACT sceglie i tool concreti (vede il task originale)."""
+    """Version D (decisione utente 2026-07-03): il THINK gira sul MODELLO
+    SELEZIONATO DALL'UTENTE (Fable/Opus/Sonnet) — l'orchestratore è sempre e solo
+    il modello Anthropic scelto, mai un downgrade a Haiku. Il piano resta testo
+    libero breve (max THINK_MAX_TOKENS) → nessun parse fail possibile.
+    THINK_MODEL (Haiku) è solo fallback se il client non passa un model valido."""
     sys_msg = (
         "Sei un ORCHESTRATORE. Leggi la richiesta utente e scrivi un PIANO D'AZIONE "
         "BREVE (2-3 frasi) in italiano: cosa va fatto e in che ordine. "
@@ -1045,8 +1050,10 @@ def _build_think_body(orig: dict) -> bytes:
     body = dict(orig)
     body["system"] = _anthropic_system(sys_msg)
     body["stream"] = False
-    body["max_tokens"] = THINK_MAX_TOKENS  # basso davvero: THINK veloce (~1s su Haiku)
-    body["model"] = THINK_MODEL            # Haiku: veloce + meno rate-limit
+    body["max_tokens"] = THINK_MAX_TOKENS  # piano breve: THINK resta veloce anche su Fable/Opus
+    _m = (orig.get("model") or "").strip()
+    # Modello utente = orchestratore; Haiku solo se il client non ha un model Anthropic
+    body["model"] = _m if _m and not _m.startswith("MiniMax") else THINK_MODEL
     # Togli tools (il modello non deve emettere tool_use) e thinking (mangia budget).
     body.pop("tools", None)
     body.pop("thinking", None)
@@ -1171,19 +1178,23 @@ def _parse_think_json(text: str) -> dict | None:
     return _parse_plan_text(text)
 
 
-def _build_act_body(orig: dict, plan: str, tools_to_call: list) -> bytes:
-    """Version C 2026-07-03: M3 ESEGUE seguendo il piano-guida di Anthropic.
-    M3 sceglie e chiama i tool concreti (ha il body originale con tutti i tools);
-    il piano è solo una guida di orchestrazione, non una lista di tool preconfezionati."""
+def _build_act_body(orig: dict, plan: str, tools_to_call: list,
+                    executor: str = "") -> bytes:
+    """Version D 2026-07-03: l'executor MiniMax ESEGUE il piano-guida Anthropic.
+    L'esecutore sceglie e chiama i tool concreti (ha il body originale con tutti
+    i tools); il piano è solo una guida di orchestrazione. `executor` (es.
+    MiniMax-M2.7 code) forza il modello: inizia con 'MiniMax' → remap lo preserva."""
     sys_msg = (
         "Sei l'esecutore. Un orchestratore Anthropic ha analizzato la richiesta e "
         "prodotto questo PIANO-GUIDA. Segui il piano usando i tuoi strumenti come "
         "necessario. Rispondi normalmente all'utente eseguendo le azioni del piano.\n\n"
         f"PIANO-GUIDA:\n{plan}"
     )
-    body = dict(orig)  # conserva i tools originali → M3 può chiamarli
+    body = dict(orig)  # conserva i tools originali → l'executor può chiamarli
     body["system"] = sys_msg
     body["stream"] = bool(orig.get("stream"))  # preserva stream se client lo chiedeva
+    if executor:
+        body["model"] = executor
     return json.dumps(body).encode()
 
 
@@ -1194,10 +1205,11 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     wants_stream = bool(orig.get("stream"))
 
     # THINK: Anthropic produce piano self-reviewed (JSON puro, no streaming).
-    # REGOLA VINCOLANTE (utente): mixed = Anthropic UNICO orchestratore. Il THINK
-    # DEVE girare su Anthropic (forward_anthropic_direct): forward_minimax passa da
-    # remap_body_for_minimax che riscrive model→MiniMax, facendo orchestrare MiniMax
-    # invece di Anthropic. ACT (sotto) resta su MiniMax = esecutore.
+    # REGOLA VINCOLANTE (utente 2026-07-03): mixed = il MODELLO SELEZIONATO
+    # dall'utente (Fable/Opus/Sonnet) è l'UNICO orchestratore e NON esegue MAI.
+    # Il THINK gira su Anthropic (forward_anthropic_direct) col model del client.
+    # ACT (sotto): SOLO MiniMax esegue (executor code M2.7, poi M3); dopo 2 fail
+    # MiniMax → Haiku; se anche Haiku fallisce → modello superiore dell'utente.
     think_body = _build_think_body(orig)
     try:
         t_status, t_json = await _call_full(forward_anthropic_direct, request, think_body, session, timeout=THINK_TIMEOUT_SEC)
@@ -1228,35 +1240,73 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     tools_to_call = []  # M3 sceglie i tool concreti in ACT (vede il task originale)
     log(f"mixed-new THINK OK plan={len(plan)}c fp={chat_fp}")
 
-    # ACT: M3 esegue il piano. Preserve stream se client lo chiedeva.
-    act_body = _build_act_body(orig, plan, tools_to_call)
+    # ACT (decisione utente 2026-07-03): SOLO MiniMax esegue. Catena:
+    # 1) executor CODE (M2.7)  2) M3  → dopo 2 fail MiniMax → 3) Haiku esegue
+    # → se anche Haiku fallisce → 4) modello superiore selezionato dall'utente.
+    executors = [MIXED_EXECUTOR_MODEL]
+    if MINIMAX_MODEL not in executors:
+        executors.append(MINIMAX_MODEL)
+    orig_model = (orig.get("model") or "").strip()
+    up = None
+    used_exe = ""
+    for exe in executors:
+        act_body = _build_act_body(orig, plan, tools_to_call, executor=exe)
+        if orig_model and not orig_model.startswith("MiniMax"):
+            # model executor inizia con 'MiniMax' → remap non logga/riscrive: lo
+            # facciamo qui a mano (ledger + riscrittura model nella SSE response)
+            _log_original_model(orig_model, exe, chat_fp)
+            _request_orig_model[chat_fp] = orig_model
+        try:
+            up = await forward_minimax(request, act_body, session)
+        except Exception as e:
+            n = mixed_fail_inc(chat_fp)
+            log(f"mixed-new ACT {exe} EXC ({n}/{MIXED_FAIL_THRESHOLD}): {e}")
+            up = None
+            continue
+        if up.status in FALLBACK_STATUSES:
+            n = mixed_fail_inc(chat_fp)
+            log(f"mixed-new ACT {exe} {up.status} ({n}/{MIXED_FAIL_THRESHOLD})")
+            try:
+                await up.release()
+            except Exception:
+                pass
+            up = None
+            continue
+        used_exe = exe
+        break
+    if up is not None:
+        log(f"mixed-new ACT {used_exe} {up.status} {request.path} fp={chat_fp}")
+        mixed_fail_reset(chat_fp)  # FIX H2: azzera il contatore su ACT riuscito
+        return await relay(up, extra_headers={
+            "x-ai-verified": f"anthropic-think+{used_exe.lower()}-act"})
+
+    # 2 fail MiniMax → Haiku esegue il task originale (tools inclusi)
+    log(f"mixed-new ACT: 2 fail MiniMax → Haiku esegue fp={chat_fp}")
     try:
-        up = await forward_minimax(request, act_body, session)
-    except Exception as e:
-        n = mixed_fail_inc(chat_fp)
-        log(f"mixed-new ACT EXC ({n}/{MIXED_FAIL_THRESHOLD}): {e} → Anthropic rescue diretto (senza pipeline)")
+        haiku_body = dict(orig)
+        haiku_body["model"] = THINK_MODEL  # Haiku
+        up_h = await forward_anthropic(request, json.dumps(haiku_body).encode(), session)
+        if up_h.status < 400:
+            mixed_fail_reset(chat_fp)
+            return await relay(up_h, extra_headers={"x-ai-verified": "haiku-rescue-act"})
+        log(f"mixed-new ACT rescue Haiku {up_h.status} → modello superiore")
         try:
-            return await relay(await forward_anthropic(request, body, session))
-        except Exception as e2:
-            return web.json_response({"type": "error", "error": {"type": "router_error",
-                "message": f"act+rescue ko: {e2}"}}, status=502)
-    if up.status in FALLBACK_STATUSES:
-        n = mixed_fail_inc(chat_fp)
-        log(f"mixed-new ACT M3 {up.status} ({n}/{MIXED_FAIL_THRESHOLD}) → Anthropic rescue")
-        try:
-            await up.release()
+            await up_h.release()
         except Exception:
             pass
-        try:
-            up2 = await forward_anthropic(request, body, session)
-            return await relay(up2)
-        except Exception as e:
-            return web.json_response({"type": "error", "error": {"type": "router_error",
-                "message": f"act fallback ko: {e}"}}, status=502)
-    log(f"mixed-new ACT {MINIMAX_MODEL} {up.status} {request.path} fp={chat_fp}")
-    # Header distinctivo: gate attivo, l'esecutore MiniMax ha eseguito il piano Anthropic
-    mixed_fail_reset(chat_fp)  # FIX H2: azzera il contatore su ACT riuscito (simmetria con inverse)
-    return await relay(up, extra_headers={"x-ai-verified": f"anthropic-think+{MINIMAX_MODEL.lower()}-act"})
+    except Exception as e:
+        log(f"mixed-new ACT rescue Haiku EXC: {e} → modello superiore")
+
+    # Ultimo gradino: il modello superiore selezionato dall'utente (Fable/Opus/Sonnet)
+    try:
+        up2 = await forward_anthropic(request, body, session)
+        log(f"mixed-new ACT rescue {orig_model or 'anthropic'} {up2.status} fp={chat_fp}")
+        if up2.status < 400:
+            mixed_fail_reset(chat_fp)
+        return await relay(up2, extra_headers={"x-ai-verified": "user-model-rescue-act"})
+    except Exception as e:
+        return web.json_response({"type": "error", "error": {"type": "router_error",
+            "message": f"act+rescue ko: {e}"}}, status=502)
 
 
 # ── MINIMAX redesign 2026-07-02: M3 ORCHESTRA (mai esegue) → executor inferiore ACT ──
