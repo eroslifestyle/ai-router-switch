@@ -1198,6 +1198,24 @@ def _build_act_body(orig: dict, plan: str, tools_to_call: list,
     return json.dumps(body).encode()
 
 
+async def _is_context_exceed_400(up) -> tuple:
+    """MiniMax ha context window più piccolo di Anthropic (1M). Su conversazioni
+    lunghe risponde 400 'context window exceeds limit (2013)'. Questo 400 NON è un
+    bad-request del client: va gestito come fallback verso il modello utente (1M).
+    Ritorna (is_context_err, body_bytes). Consuma il body di `up`."""
+    if up.status != 400:
+        return (False, b"")
+    try:
+        raw = await up.read()
+    except Exception:
+        return (False, b"")
+    low = raw.lower()
+    is_ctx = (b"context window" in low or b"exceeds limit" in low
+              or b"2013" in low or b"context_length" in low
+              or b"too long" in low or b"maximum context" in low)
+    return (is_ctx, raw)
+
+
 async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.Response:
     """Redesign 2026-07-01 mixed: Anthropic THINK+self-review → M3 ACT.
     Scatta per TUTTE le /v1/messages (incluso agentico con tools)."""
@@ -1266,6 +1284,17 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
         if up.status in FALLBACK_STATUSES:
             n = mixed_fail_inc(chat_fp)
             log(f"mixed-new ACT {exe} {up.status} ({n}/{MIXED_FAIL_THRESHOLD})")
+            try:
+                await up.release()
+            except Exception:
+                pass
+            up = None
+            continue
+        # 400 context-exceed: MiniMax non regge il context (1M Anthropic > ~200k M2.7).
+        # NON è bad-request: forza rescue verso il modello utente (context 1M).
+        is_ctx, _ctx_raw = await _is_context_exceed_400(up)
+        if is_ctx:
+            log(f"mixed-new ACT {exe} 400 context-exceed → rescue modello utente fp={chat_fp}")
             try:
                 await up.release()
             except Exception:
