@@ -39,7 +39,7 @@ C = {
     "faint":      "#5a6470",   # testo terziario
 }
 
-PROXY = "http://localhost:9988"
+# Punto unico: ai-router :8787 (il proxy :9988 non esiste più)
 ROUTER = "http://localhost:8787"
 MODE_FILE = Path.home() / ".claude" / "ai-router-mode"
 ICON_PATH = Path.home() / ".claude" / "scripts" / "router-mode-icon.png"
@@ -77,7 +77,7 @@ def http_post(url, timeout=10):
 
 
 def get_current():
-    j = http_get(f"{PROXY}/mode")
+    j = http_get(f"{ROUTER}/health")
     if j and j.get("mode"):
         return j["mode"]
     if MODE_FILE.exists():
@@ -459,7 +459,7 @@ class Card(QWidget):
             card.set_active(mid == self._current)
 
     def _do_switch(self, mode):
-        j = http_post(f"{PROXY}/admin/mode/{mode}")
+        j = http_post(f"{ROUTER}/admin/mode/{mode}")
         if j and j.get("ok"):
             self._current = mode
         self._update_ui()
