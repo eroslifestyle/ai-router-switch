@@ -7,10 +7,11 @@ updated: 2026-06-29
 
 # Project Global TOD — ai-router-switch
 
-**Main HEAD**: ea3fb1f · **Branch**: main · **Updated**: 2026-07-02 20:45
+**Main HEAD**: cb2c4f1 · **Branch**: fix/audit-4modes-p0-p1 · **Updated**: 2026-07-03 05:35
 
 ## ✅ Done (recenti, evidence-gated)
 
+- [x] **CARD-FIX-9988** — Fix pulsanti switch card GUI: puntavano a proxy `:9988` rimosso → ora `POST :8787/admin/mode/{mode}` + mode da `GET /health` · commit `cb2c4f1` pushato, round-trip curl verificato + test utente live (2026-07-03)
 - [x] **C1/H1/H2/M1/M3/L7/M2/L1/L3/L4/L6a/OPPOSE** — Audit 4-modi + 12 fix P0-P4 (3 crash/bug reali, escalation coerenza, pulizia 7 orfane, OPPOSE modello utente) · commits `4762406` `9813e5a` `334760c` (2026-07-02 20:30-20:50)
 - [x] **D36** — Parser JSON OPPOSE/THINK irrobustito per preamboli + code-fence + oggetti multipli · `ea3fb1f` (2026-07-02 01:28, all 6 parser tests green)
 - [x] **D36a** — Inverse M3 orchestra + Opus critica + M2.7 code esegue (alias MINIMAX_ORCHESTRATOR_MODEL forzato) · `ea3fb1f` + fix commit
