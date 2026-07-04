@@ -1804,19 +1804,24 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     mixed_fail_last_status = None  # traccia ultimo status nel loop ACT
     wants_stream = bool(orig.get("stream"))
 
-    # VISION GATE (bug 2026-07-04): MiniMax è text-only — con blocchi image
-    # l'executor allucina la descrizione dal contesto chat. Se ci sono immagini
-    # l'ACT DEVE essere Anthropic: salta anche il THINK (piano inutile, l'ACT
-    # non può essere MiniMax) → Haiku esegue, modello utente come fallback.
-    if _has_image_blocks(orig):
-        log(f"mixed-new: image blocks → pipeline bypass, ACT Anthropic fp={chat_fp}")
-        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
-
     # SERVER-TOOL GATE (bug 2026-07-04): web_search & co. sono eseguiti lato API
     # Anthropic. MiniMax li rifiuta con 400 (2013) che il client incastona come
-    # risultato della ricerca. Bypass totale: ACT Anthropic (Haiku → superiore).
+    # risultato della ricerca. PRECEDE il vision gate: immagine+web_search →
+    # Anthropic (che gestisce entrambi), non M3 (perderebbe la search).
     if _has_server_tools(orig):
         log(f"mixed-new: server tools nel body → pipeline bypass, ACT Anthropic fp={chat_fp}")
+        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
+
+    # VISION GATE (redesign 2026-07-04): MiniMax-M3 LEGGE gli image block
+    # (verificato). L'executor M2.x no → allucina. Immagini → servite da M3,
+    # non più deviate ad Anthropic. Eccezione dichiarata alla REGOLA VINCOLANTE
+    # sotto: per le immagini M3 orchestra+esegue senza il modello utente.
+    # Fallback: se M3 non regge (5xx/context/server-tool) → _mixed_haiku_rescue.
+    if _has_image_blocks(orig):
+        res = await _serve_minimax_vision(request, orig, session, chat_fp, relay)
+        if res is not None:
+            return res
+        log(f"mixed-new: vision M3 fallback → Anthropic fp={chat_fp}")
         return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
 
     # THINK: Anthropic produce piano self-reviewed (JSON puro, no streaming).
@@ -1866,10 +1871,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     # Se il body è troppo grande per MiniMax, skippa MiniMax e vai diretto al
     # rescue Haiku (evita il 400 che consuma i token comunque).
     if orig_model and not orig_model.startswith("MiniMax"):
-        # VISION: MiniMax è text-only — con immagini allucina. ACT → Anthropic.
-        if _has_image_blocks(orig):
-            log(f"mixed-new ACT: image blocks nel body → skip MiniMax, ACT Anthropic fp={chat_fp}")
-            return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
+        # (il gate immagini è a monte, prima del THINK → qui non serve ripeterlo)
         if _is_context_too_large_for_minimax(body):
             log(f"mixed-new ACT: body {len(body)}b > limit → skip MiniMax, rescue Haiku fp={chat_fp}")
             return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
@@ -1933,6 +1935,44 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     # Altri fallimenti → rescue: modello utente → Haiku → 502
     log(f"mixed-new ACT: tutti executor falliti (non-429) → rescue fp={chat_fp}")
     return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
+
+async def _serve_minimax_vision(request, orig: dict, session, chat_fp: str, relay):
+    """OCR/vision 2026-07-04: MiniMax-M3 legge gli image block (verificato: M3
+    li supporta via endpoint anthropic-compat, M2.x no → allucinano). Serve la
+    richiesta con M3, bypassando la pipeline che manderebbe l'immagine a un
+    executor M2.x cieco. Ritorna la response, oppure None per far fare al
+    caller il suo fallback (Anthropic).
+
+    Ordine gate: server-tool vince (immagine+web_search → None → Anthropic).
+    Context troppo grande → None (screenshot >750KB → no 400 nudo)."""
+    if _has_server_tools(orig):
+        return None
+    orig2 = dict(orig)
+    orig_model = (orig2.get("model") or "").strip()
+    orig2["model"] = "MiniMax-M3"  # remap preserva i model che iniziano con 'MiniMax'
+    body2 = json.dumps(orig2).encode()
+    if _is_context_too_large_for_minimax(body2):
+        return None
+    # model-rewrite manuale: senza questo la risposta leakerebbe 'MiniMax-M3'
+    # al posto del modello client nel jsonl (remap non scatta, model già MiniMax).
+    if orig_model and not orig_model.startswith("MiniMax"):
+        _log_original_model(orig_model, "MiniMax-M3", chat_fp)
+        _request_orig_model[chat_fp] = orig_model
+    try:
+        up = await forward_minimax(request, body2, session)
+    except Exception as e:
+        log(f"minimax-vision EXC: {e} → fallback caller fp={chat_fp}")
+        return None
+    if up.status in MINIMAX_FALLBACK_STATUSES:  # 5xx (429 già gestito interno)
+        log(f"minimax-vision {up.status} → fallback caller fp={chat_fp}")
+        try:
+            await up.release()
+        except Exception:
+            pass
+        return None
+    log(f"minimax-vision M3 OK {up.status} fp={chat_fp}")
+    return await relay(up, extra_headers={"x-ai-verified": "minimax-m3-vision"})
+
 
 async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay):
     """Esegue il rescue Haiku: chiamato sia dal check preventivo che dal fallback.
@@ -2042,6 +2082,15 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
         """Fallback: l'executor esegue il task originale (remap → MINIMAX_MODEL). M3 non esegue."""
         return await relay(await forward_minimax(request, body, session),
                           extra_headers={"x-ai-verified": f"minimax-direct-fallback({MINIMAX_MODEL.lower()})"})
+
+    # VISION (2026-07-04): l'orchestrate manderebbe l'immagine a un executor
+    # M2.x cieco → serve M3. Immagini → M3 diretto, bypass orchestrate.
+    if _has_image_blocks(orig):
+        res = await _serve_minimax_vision(request, orig, session, chat_fp, relay)
+        if res is not None:
+            return res
+        log(f"minimax-orch: vision M3 fallback → executor diretto fp={chat_fp}")
+        return await _executor_direct()
 
     think_body = _build_minimax_think_body(orig)
     try:
