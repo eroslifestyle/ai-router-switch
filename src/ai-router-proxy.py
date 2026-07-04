@@ -1148,6 +1148,112 @@ async def _fwd_minimax_short(request, body, session):
                                  retry_budget_sec=MINIMAX_RETRY_BUDGET_SHORT)
 
 
+# ── D43: Generative tools stubs (image / video / music / tts) ─────────────────
+# MiniMax native REST endpoints (non-Anthropic-compatible).
+# Gli header HOP_HEADERS filtrano i campi di trasporto; X-Api-Key viene aggiunto.
+
+MINIMAX_GENERATIVE_HOST = os.environ.get(
+    "AIROUTER_MINIMAX_GENERATIVE_HOST", "https://api.minimaxi.chat"
+)
+
+_GENERATIVE_PATHS = {
+    "m3-image": "/v1/image_generation",
+    "m3-video": "/v1/video_generation",
+    "m3-music": "/v1/music_generation",
+    "m3-tts":   "/v1/t2a_v2",
+}
+
+
+async def _forward_minimax_generative(request, body: bytes, session,
+                                     path: str) -> "web.Response":
+    """Inoltra a MiniMax generative endpoint con retry di backoff.
+    Ritorna web.Response con la risposta upstream (byte per video/music, JSON per image/tts).
+    Solleva 400 se il body non è JSON valido."""
+    url = MINIMAX_GENERATIVE_HOST + path
+    key = await get_minimax_key()
+    headers = {k: v for k, v in request.headers.items()
+               if k.lower() not in HOP_HEADERS}
+    for h in list(headers):
+        if h.lower() in ("authorization", "x-api-key"):
+            headers.pop(h)
+    headers["X-Api-Key"] = key
+    try:
+        json.loads(body)
+    except (json.JSONDecodeError, TypeError):
+        return _err_response("invalid JSON body", status=400)
+    retry_budget_sec = MINIMAX_RETRY_CAP_SEC
+    t0 = time.monotonic()
+    while True:
+        budget_left = retry_budget_sec - (time.monotonic() - t0)
+        if budget_left <= 0:
+            return _synthetic_429(
+                f"MiniMax generative rate limited: retry budget {retry_budget_sec:.0f}s esaurito.")
+        try:
+            est_tokens = max(1, len(body) // 4)
+            entry = await MINIMAX_LIMITER.acquire("generative", est_tokens, budget_left)
+        except RateLimitExhausted as e:
+            return _synthetic_429(f"MiniMax generative rate limited (pacing): {e}")
+        async with _MINIMAX_SEM:
+            up = await session.request(
+                request.method, url, data=body, headers=headers, allow_redirects=False
+            )
+        if up.status != 429:
+            MINIMAX_LIMITER.record(entry, est_tokens, success=True)
+            MINIMAX_LIMITER.on_success()
+            raw = b""
+            async for chunk in up.content.iter_chunked(65536):
+                raw += chunk
+            await up.release()
+            try:
+                resp_json = json.loads(raw)
+                return web.json_response(resp_json, status=up.status)
+            except Exception:
+                return web.Response(body=raw,
+                                    content_type=up.content_type or "application/octet-stream",
+                                    status=up.status)
+        # 429
+        try:
+            raw = await up.read()
+        except Exception:
+            raw = b""
+        try:
+            await up.release()
+        except Exception:
+            pass
+        MINIMAX_LIMITER.record(entry, 0, success=False)
+        step = MINIMAX_LIMITER.on_429_rpm()
+        log(f"minimax-generative 429: backoff {step}s (budget {budget_left:.0f}s)")
+        await asyncio.sleep(step)
+
+
+# Route handlers OpenAI-compatible: /v1/images, /v1/videos, /v1/music,
+# /v1/audio/speech — inoltrati al backend MiniMax nativo.
+
+async def _route_v1_images(request) -> "web.Response":
+    body = await request.read()
+    session: "ClientSession" = request.app["session"]
+    return await _forward_minimax_generative(request, body, session,
+                                            _GENERATIVE_PATHS["m3-image"])
+
+async def _route_v1_videos(request) -> "web.Response":
+    body = await request.read()
+    session: "ClientSession" = request.app["session"]
+    return await _forward_minimax_generative(request, body, session,
+                                            _GENERATIVE_PATHS["m3-video"])
+
+async def _route_v1_music(request) -> "web.Response":
+    body = await request.read()
+    session: "ClientSession" = request.app["session"]
+    return await _forward_minimax_generative(request, body, session,
+                                            _GENERATIVE_PATHS["m3-music"])
+
+async def _route_v1_audio_speech(request) -> "web.Response":
+    body = await request.read()
+    session: "ClientSession" = request.app["session"]
+    return await _forward_minimax_generative(request, body, session,
+                                            _GENERATIVE_PATHS["m3-tts"])
+
+
 ANTHROPIC_DIRECT_URL = os.environ.get("AIROUTER_ANTHROPIC_DIRECT", "https://api.anthropic.com")
 ANTHROPIC_OAUTH_TOKEN = os.environ.get("ANTHROPIC_OAUTH_TOKEN", "")  # Bearer da Claude Code OAuth
 
@@ -2440,6 +2546,12 @@ def _path_allowed(path: str) -> bool:
     # /v1/messages/batches, /v1/models, /v1/models/{id}, ecc.
     if path.startswith("/v1/"):
         return True
+    # Generative tool stubs OpenAI-compatible
+    if path in ("/v1/images/generations",
+                "/v1/videos/generations",
+                "/v1/music/generations",
+                "/v1/audio/speech"):
+        return True
     return False
 
 async def handle(request):
@@ -2484,6 +2596,16 @@ async def handle(request):
     _HC = {"/", "/readyz", "/livez", "/health", "/stats", "/metrics", "/status"}
     if request.path in _HC:
         return web.Response(status=200, text="ok")
+
+    # D43: smista generative tool stubs
+    if request.path == "/v1/images/generations":
+        return await _route_v1_images(request)
+    if request.path == "/v1/videos/generations":
+        return await _route_v1_videos(request)
+    if request.path == "/v1/music/generations":
+        return await _route_v1_music(request)
+    if request.path == "/v1/audio/speech":
+        return await _route_v1_audio_speech(request)
 
     # FIX B3.1 (corretto): soft-whitelist sul path. Ammette /v1/* (incluso
     # count_tokens/batches/models/{id}) e i path locali; blocca path traversal
