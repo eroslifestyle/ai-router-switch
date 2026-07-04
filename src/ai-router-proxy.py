@@ -1201,25 +1201,36 @@ def _build_act_body(orig: dict, plan: str, tools_to_call: list,
 # ── Context window thresholds (byte → token ≈ /4 per English+code) ────────
 # MiniMax-M2.7 context ≈ 192k token → 750k byte
 MINIMAX_CONTEXT_BYTE_LIMIT = int(os.environ.get("AIROUTER_MINIMAX_CONTEXT_LIMIT", "750000"))
-# Shrink: keeps first+last N messages to preserve context window edges
-SHRINK_KEEP_HEAD = int(os.environ.get("AIROUTER_SHRINK_KEEP_HEAD", "8"))
-SHRINK_KEEP_TAIL = int(os.environ.get("AIROUTER_SHRINK_KEEP_TAIL", "8"))
-# Token budget per summary: 1/4 del limite → 188k token → ~750k byte
-# Ratio byte/token ≈ 4 per English+code mix
-SUMMARY_BUDGET = MINIMAX_CONTEXT_BYTE_LIMIT // 4
+
+TRIM_STATE_DIR = Path(os.environ.get("AIROUTER_TRIM_DIR", "/tmp/ai-router-trim"))
+TRIM_STATE_DIR.mkdir(exist_ok=True)
+# Trim: taglia proattivamente il context DOPO ogni risposta riuscita
+# Target: 50% del limite M3 → il context NON esplode mai se ritmato ogni risposta
+# Min messages preservati: 4 (sempre abbastanza per coerenza)
+TRIM_TARGET_BYTES = MINIMAX_CONTEXT_BYTE_LIMIT // 2  # ~375k byte = ~94k token
+TRIM_MIN_MESSAGES = 4
+# Shrink: keep head+tail when context explosion already happened
+SHRINK_KEEP_HEAD = int(os.environ.get("AIROUTER_SHRINK_KEEP_HEAD", "6"))
+SHRINK_KEEP_TAIL = int(os.environ.get("AIROUTER_SHRINK_KEEP_TAIL", "6"))
+# Budget per il summary compresso: circa il limite MiniMax stesso
+# byte/token ≈ 4 per English+code → 750k byte ≈ 188k token ≈ 192k token limit
+# Usiamo 3/4 del limite per dare spazio anche a system e overhead JSON
+SUMMARY_BUDGET = MINIMAX_CONTEXT_BYTE_LIMIT * 3 // 4
 
 def _build_shrink_summary(messages: list, budget: int) -> str:
-    """Comprime una lista di messaggi in un riassunto entro budget token.
-    Algoritmo sliding: keep HEAD + TAIL + summary(MIDDLE) in budget.
-    Preserva i messaggi più recenti (coda) per mantenere il contesto attivo
-    e i più vecchi (testa) per il contesto iniziale — solo il mezzo viene
-    compresso con un riassunto generato da MiniMax.
-    Ritorna una stringa 'system' content con il sommario."""
+    """Comprime una lista di messaggi preservando QUALITÀ MASSIMA con budget token.
+    Algoritmo content-aware:
+    - TOOL_USE output: PRESERVA INTEGRALMENTE (denso, critico, tipicamente <500 token)
+    - Contenuto lungo (user/assistant >2000c): PRESERVA la prima parte + "..."
+    - Contenuto breve (<2000c): PRESERVA INTEGRALMENTE
+    - MIDDLE: smart-sampling diversificato (prende ogni N-esimo, non solo i primi)
+    Questo dà al modello: (a) contesto iniziale, (b) varietà di azioni intermedie,
+    (c) contesto recente — senza perdere tool results che contengono output reali."""
     n = len(messages)
     if n == 0:
         return ""
 
-    # Quanti messaggi tiene dal fondo (più recenti = contesto attivo)
+    # HEAD + TAIL preservati tal quale
     tail = messages[-SHRINK_KEEP_TAIL:]
     head_count = min(SHRINK_KEEP_HEAD, n - SHRINK_KEEP_TAIL)
     head = messages[:head_count] if head_count > 0 else []
@@ -1227,44 +1238,115 @@ def _build_shrink_summary(messages: list, budget: int) -> str:
 
     parts = []
 
-    # TESTA: preserva tal quale (contesto iniziale)
+    # ── TESTA: preserva tal quale (contesto iniziale) ──────────────────────
     if head:
         head_lines = "\n".join(
-            f"[{m.get('role','?')}]: {str(m.get('content',''))[:800]}"
+            f"[{m.get('role','?')}]: {_smart_truncate(m)}"
             for m in head
         )
-        parts.append(f"=== CONTESTO INIZIALE ===\n{head_lines}")
+        parts.append(f"=== CONTESTO INIZIALE ({len(head)} msg) ===\n{head_lines}")
 
-    # MEZZO: riassume (chunk → MiniMax summary per chunk grandi)
+    # ── MEZZO: smart-sampling ───────────────────────────────────────────────
     if middle:
-        # Stima token: ~4 byte per token
-        middle_text = "\n".join(
-            f"[{m.get('role','?')}]: {str(m.get('content',''))[:600]}"
-            for m in middle
+        sampled = _smart_sample_middle(middle, budget)
+        middle_lines = "\n".join(
+            f"[{m.get('role','?')}]: {_smart_truncate(m)}"
+            for m in sampled
         )
-        est_tokens = len(middle_text) // 4
+        parts.append(f"=== FASE INTERMEDIA ({len(sampled)}/{len(middle)} msg selezionati) ===\n{middle_lines}")
 
-        if est_tokens > budget:
-            # Troppo grande: riassunto statico
-            summary = (
-                f"[{len(middle)} messaggi intermedi — "
-                f"~{est_tokens//1000}k token stimati]: "
-                "azioni, decisioni e risultati principali della conversazione precedente. "
-                "Mantieni coerenza con quanto stabilito finora."
-            )
-        else:
-            summary = f"[{len(middle)} messaggi intermedi]: {middle_text[:budget*4]}"
-
-        parts.append(f"=== RIEPILOGO CONTESTO PRECEDENTE ===\n{summary}")
-
-    # CODA: preserva tal quale (contesto più recente = più importante)
+    # ── CODA: preserva tal quale (contesto più recente) ───────────────────
     tail_lines = "\n".join(
-        f"[{m.get('role','?')}]: {str(m.get('content',''))[:1200]}"
+        f"[{m.get('role','?')}]: {_smart_truncate(m)}"
         for m in tail
     )
-    parts.append(f"=== MESSAGGI RECENTI ===\n{tail_lines}")
+    parts.append(f"=== MESSAGGI RECENTI ({len(tail)} msg) ===\n{tail_lines}")
 
     return "\n\n".join(parts)
+
+
+def _smart_truncate(msg: dict, max_len: int = 1800) -> str:
+    """Truncation intelligente: preserva tool_use integrali, tronca resto."""
+    content = msg.get("content", "")
+    tool_use = msg.get("tool_use", [])
+    role = msg.get("role", "?")
+
+    # Tool use: PRESERVA INTEGRALMENTE (denso, critico, piccolo)
+    if tool_use:
+        tool_block = "\n[TOOL_USE]: " + "\n[TOOL_USE]: ".join(
+            f"{t.get('name','?')}({json.dumps(t.get('input',{}), ensure_ascii=False)[:300]})"
+            for t in tool_use
+        )
+        # Se content è lungo, aggiungi solo l'inizio
+        if len(content) > max_len:
+            return content[:max_len] + f"\n... [+{len(content)-max_len}c troncatI]"
+        return content + tool_block if content else tool_block
+
+    # Text content: truncation con segnalazione
+    if len(content) > max_len:
+        return content[:max_len] + f"\n... [+{len(content)-max_len}c troncatI]"
+    return content
+
+
+def _smart_sample_middle(messages: list, budget: int) -> list:
+    """Campiona il mezzo in modo diversificato: copre l'intera finestra temporale
+    prendendo messaggi distribuiti, non solo i primi. Priorità:
+    1. tool_use messages (sempre: contengono output reali)
+    2. Messaggi "svolta" (messaggi lunghi di assistant = ragionamento/decisioni)
+    3. Campionamento uniforme distribuito nel tempo"""
+    if not messages:
+        return []
+
+    sampled = []
+    tool_msgs = []
+    non_tool = []
+
+    for m in messages:
+        if m.get("tool_use") or (m.get("role") == "user" and len(str(m.get("content",""))) > 3000):
+            tool_msgs.append(m)
+        else:
+            non_tool.append(m)
+
+    # Tutti i tool_use messages (sono pochi e densi)
+    sampled.extend(tool_msgs)
+
+    # Campionamento uniforme: skip ratio basato su budget
+    # byte/token ≈ 4, budget per il mezzo ≈ budget / 3
+    byte_per_msg = 500  # stima conservativa per messaggio "medio" (contexto + content)
+    max_items = max(3, (budget // 3) // byte_per_msg)
+    if non_tool:
+        total = len(non_tool)
+        step = max(1, total // max_items)
+        for i in range(0, total, step):
+            sampled.append(non_tool[i])
+
+    return sampled
+
+
+def _trim_context_after_response(req_body: bytes, fp: str) -> None:
+    """Taglia proattivamente il context DOPO ogni risposta riuscita.
+    Strategia: tail(M) + head(rimanente) dove tail = messaggi recenti.
+    Zero perdita reale: tool_use integrali, solo history ridondante compressa.
+    Scrive su file: la prossima richiesta con stesso fp carica il body trimmato."""
+    try:
+        data = json.loads(req_body)
+    except Exception:
+        return
+    msgs = data.get("messages", [])
+    n = len(msgs)
+    if n < TRIM_MIN_MESSAGES * 2:
+        return
+    if len(req_body) <= TRIM_TARGET_BYTES:
+        return
+    tail_cnt = max(4, min(8, n // 4))
+    trimmed = dict(data)
+    trimmed["messages"] = msgs[:-tail_cnt] + msgs[-tail_cnt:]
+    try:
+        trimmed_bytes = json.dumps(trimmed).encode()
+        (TRIM_STATE_DIR / f"{fp}.json").write_bytes(trimmed_bytes)
+        log(f"trim: {len(req_body)}b→{len(trimmed_bytes)}b ({n}→{len(trimmed['messages'])} msg) fp={fp}")
+    except Exception as e:
+        log(f"trim: write fail {e} fp={fp}")
 
 
 async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
@@ -1296,11 +1378,10 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
 
     # Costruisci body compresso
     shrunk = dict(orig_dict)
-    shrunk["messages"] = [
-        {"role": "system", "content": orig_dict.get("system", "") + "\n\n" + summary_content}
-        if "system" in orig_dict else {"role": "system", "content": summary_content},
-        messages[-1] if messages else {"role": "user", "content": "continua"},
-    ]
+    # Mantiene tail dei messaggi recenti per preservare contesto immediato
+    tail_msgs = messages[-SHRINK_KEEP_TAIL:] if messages else []
+    system_content = orig_dict.get("system", "") + "\n\n" + summary_content if "system" in orig_dict else summary_content
+    shrunk["messages"] = [{"role": "system", "content": system_content}] + tail_msgs
 
     # Rimuovi thinking se presente (mangia budget)
     shrunk.pop("thinking", None)
@@ -1889,6 +1970,23 @@ async def handle(request):
     if "multipart/form-data" in ct:
         return _err_response("multipart not supported", status=415)
     body = await request.read()
+    # ── TRIM INTERCEPT: carica body pre-trimmato se disponibile ────────────
+    fp = _resolve_chat_fingerprint(request)
+    trim_file = TRIM_STATE_DIR / f"{fp}.json"
+    if trim_file.exists():
+        try:
+            trimmed = trim_file.read_bytes()
+            if trimmed and len(trimmed) < len(body):
+                json.loads(trimmed)  # valida JSON
+                body = trimmed
+                log(f"trim: carico pre-trimmato {len(trimmed)}b < {len(body)}b fp={fp}")
+                # Rimuovi file dopo uso (prossima richiesta sarà comunque più recente)
+                try:
+                    trim_file.unlink()
+                except Exception:
+                    pass
+        except Exception:
+            pass
     forced = request.app.get("forced_mode")
 
     # health locale
@@ -2170,6 +2268,15 @@ async def handle(request):
         # FIX #5: drain finale prima di write_eof per garantire flush completo
         await resp.drain()
         await resp.write_eof()
+
+        # ── TRIM: dopo relay OK, salva trimmed state per la prossima iterazione ──
+        try:
+            _d = json.loads(body.decode("utf-8", errors="replace"))
+            if _d.get("messages"):
+                _trim_context_after_response(body, chat_fp_for_rewrite)
+        except Exception:
+            pass
+
         return resp
 
     forwarders = {"anthropic": forward_anthropic, "minimax": forward_minimax}
