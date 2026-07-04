@@ -232,21 +232,33 @@ MINIMAX_LIMITER = MinimaxRateLimiter()
 _MINIMAX_SEM = asyncio.Semaphore(MINIMAX_CONCURRENCY)
 
 
+_last_alert_ts = 0.0
+_ALERT_MIN_INTERVAL_SEC = 300  # max 1 notifica desktop ogni 5 min (il log resta completo)
+
+
 def _minimax_alert(msg: str):
     """Notifica Token Plan esaurito: notify-send best-effort (systemd user può
-    non avere DBUS) + SEMPRE append su file di alert."""
+    non avere DBUS) + SEMPRE append su file di alert.
+    urgency=normal + timeout: NON deve restare bloccata sullo schermo (con
+    -u critical GNOME la rende persistente). Throttle anti-spam: il log ha
+    sempre tutto, il popup desktop al massimo 1 ogni 5 min."""
+    global _last_alert_ts
     try:
         with open(MINIMAX_ALERTS_LOG, "a") as f:
             f.write(f"[{time.strftime('%Y-%m-%dT%H:%M:%S')}] {msg}\n")
     except Exception:
         pass
+    now = time.monotonic()
+    if now - _last_alert_ts < _ALERT_MIN_INTERVAL_SEC:
+        return
+    _last_alert_ts = now
     try:
         import subprocess
-        subprocess.Popen(["notify-send", "-u", "critical", "MiniMax Token Plan", msg[:300]],
+        subprocess.Popen(["notify-send", "-u", "normal", "-t", "20000",
+                          "MiniMax Token Plan", msg[:300]],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass
-
 # Circuit breaker (D15): dopo N fail un backend va in cooldown e viene saltato.
 # FIX audit v4: BREAKER_* removed (dead code - mai chiamato nel flusso;
 # la logica di escalation usa _inverse_fails / _mixed_fails per-chat).
