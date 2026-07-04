@@ -35,6 +35,10 @@ updated: 2026-06-29
       Comando: script bash che testa tutte e 4 le porte (8787=dynamic/8771=anthropic/8772=minimax/8773=mixed/8774=inverse) in sequenza
       Done when: tutti gli header x-ai-verified corretti, tutti gli esecutori i modelli attesi (Anthropic/M3 orchestra→executor/M2.7)
 
+- [ ] **D41** — Delta-correction TPM con usage reale (confer M3 2026-07-04): su successo il limiter registra la stima (bytes/4+max_tokens) che sovrastima le risposte corte → sottoutilizzo TPM 30-60%. relay() estrae già l'usage dai chunk SSE (FIX F _acc_buf): retro-alimentare MINIMAX_LIMITER.record con i token reali · P2
+      Comando: `grep -n "_acc_buf\|extract_usage" src/ai-router-proxy.py` per il punto di aggancio in relay()
+      Done when: snapshot /health mostra tpm_used ≈ usage reale (non stima), unit test delta-correction verde
+
 ## 🚫 Deferred / Blocked
 
 - [~] **D32** — Test carico distribuito (k6) — non urgente, fail-mode già coperto da release+timeout
