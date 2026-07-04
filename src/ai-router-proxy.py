@@ -1773,6 +1773,22 @@ def _has_server_tools(orig: dict) -> bool:
                for t in orig.get("tools") or [])
 
 
+def _has_web_search_tool(orig: dict) -> bool:
+    """web_search server-tool Anthropic nel body. In mixed/minimax la ricerca web
+    la esegue SEMPRE MiniMax via MCP, mai Anthropic -> gate 400 (utente 2026-07-04)."""
+    return any(isinstance(t, dict) and (str(t.get("type", "")).startswith("web_search")
+               or t.get("name") == "web_search") for t in orig.get("tools") or [])
+
+
+def _web_search_blocked_response() -> web.Response:
+    """400: usa il tool MCP MiniMax, non il server-tool web_search Anthropic."""
+    return web.json_response(
+        {"type": "error", "error": {"type": "invalid_request_error",
+         "message": "web_search Anthropic disabilitato in mixed/minimax: la ricerca "
+                    "web la esegue MiniMax via il tool MCP 'mcp__MiniMax__web_search'."}},
+        status=400)
+
+
 def _is_context_too_large_for_minimax(body_bytes: bytes) -> bool:
     """Stima preventiva: se il body supera ~MINIMAX_CONTEXT_BYTE_LIMIT byte,
     MiniMax fallirà con 400 context-exceed (2013). Salta MiniMax e vai diretto
@@ -1803,6 +1819,12 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     chat_fp = _resolve_chat_fingerprint(request)
     mixed_fail_last_status = None  # traccia ultimo status nel loop ACT
     wants_stream = bool(orig.get("stream"))
+
+    # WEB-SEARCH GATE (utente 2026-07-04): in mixed la ricerca web la fa SEMPRE
+    # MiniMax via MCP, mai Anthropic. Blocca il server-tool web_search Anthropic.
+    if _has_web_search_tool(orig):
+        log(f"mixed-new: web_search Anthropic bloccato -> usa MCP MiniMax fp={chat_fp}")
+        return _web_search_blocked_response()
 
     # SERVER-TOOL GATE (bug 2026-07-04): web_search & co. sono eseguiti lato API
     # Anthropic. MiniMax li rifiuta con 400 (2013) che il client incastona come
@@ -2083,6 +2105,12 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
     M3 non esegue MAI. Su ogni fallimento del THINK, l'executor esegue il task
     originale direttamente (rimappato a MINIMAX_MODEL): M3 resta fuori dall'esecuzione."""
     chat_fp = _resolve_chat_fingerprint(request)
+
+    # WEB-SEARCH GATE (utente 2026-07-04): in minimax la ricerca web la fa SEMPRE
+    # MiniMax via MCP, mai Anthropic. Blocca il server-tool web_search Anthropic.
+    if _has_web_search_tool(orig):
+        log(f"minimax-orch: web_search Anthropic bloccato -> usa MCP MiniMax fp={chat_fp}")
+        return _web_search_blocked_response()
 
     async def _executor_direct():
         """Fallback: l'executor esegue il task originale (remap → MINIMAX_MODEL). M3 non esegue."""
