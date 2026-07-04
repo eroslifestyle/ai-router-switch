@@ -646,6 +646,40 @@ def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
         pass  # silent fallback
 
 
+# Blocchi prodotti dai server tool Anthropic: restano nella history dopo un turno
+# di WebSearch e MiniMax li rifiuta con 400 (2013) → chat rotta per sempre.
+_SERVER_TOOL_BLOCK_TYPES = (
+    "server_tool_use", "web_search_tool_result", "web_fetch_tool_result",
+    "code_execution_tool_result",
+)
+
+
+def _strip_server_tools_for_minimax(data: dict) -> None:
+    """Bug 2026-07-04: MiniMax non conosce i server tool Anthropic (web_search_20250305...).
+    Rifiuta sia le definizioni in `tools` (niente input_schema) sia i blocchi
+    server_tool_use/web_search_tool_result rimasti nella history → 400 (2013).
+    Strip delle definizioni + conversione dei blocchi in testo. Muta `data`."""
+    tools = data.get("tools")
+    if isinstance(tools, list):
+        kept = [t for t in tools if not (isinstance(t, dict) and "input_schema" not in t)]
+        if len(kept) != len(tools):
+            if kept:
+                data["tools"] = kept
+            else:
+                data.pop("tools", None)
+                data.pop("tool_choice", None)
+    for m in data.get("messages", []):
+        c = m.get("content")
+        if not isinstance(c, list):
+            continue
+        for i, blk in enumerate(c):
+            if isinstance(blk, dict) and blk.get("type") in _SERVER_TOOL_BLOCK_TYPES:
+                payload = {k: v for k, v in blk.items() if k != "type"}
+                c[i] = {"type": "text",
+                        "text": f"[{blk['type']}] "
+                                + json.dumps(payload, ensure_ascii=False, default=str)[:4000]}
+
+
 def remap_body_for_minimax(raw: bytes, request=None) -> bytes:
     """Riscrive il model Claude -> MiniMax-M3 e rimuove i campi beta non supportati.
 
@@ -675,6 +709,9 @@ def remap_body_for_minimax(raw: bytes, request=None) -> bytes:
         # Strip campi che MiniMax non accetta (causano 400 "Extra inputs not permitted")
         for f in MINIMAX_UNSUPPORTED_FIELDS:
             data.pop(f, None)
+        # Bug 2026-07-04: server tool Anthropic + blocchi web_search nella history
+        # → MiniMax 400 (2013). Sanitizza SEMPRE (choke point di tutti i path MiniMax).
+        _strip_server_tools_for_minimax(data)
         # FIX 2026-07-02: MiniMax-M2.7 è reasoning-first — il blocco <think> consuma
         # i token PRIMA del testo. Con max_tokens piccolo (chiamate interne Claude Code:
         # titoli/topic/commit-msg, spesso 20-100) il thinking mangia tutto il budget →
@@ -1435,6 +1472,16 @@ def _has_image_blocks(orig: dict) -> bool:
     return False
 
 
+def _has_server_tools(orig: dict) -> bool:
+    """True se il body dichiara server tool Anthropic (web_search_20250305, ...).
+    Si riconoscono perché NON hanno input_schema (obbligatorio per i client tool).
+    Girano lato API Anthropic: MiniMax non li conosce e non può eseguirli —
+    risponde 400 'function name or parameters is empty' (2013), che il client
+    mostra come risultato della ricerca (bug grave 2026-07-04). ACT → Anthropic."""
+    return any(isinstance(t, dict) and "input_schema" not in t
+               for t in orig.get("tools") or [])
+
+
 def _is_context_too_large_for_minimax(body_bytes: bytes) -> bool:
     """Stima preventiva: se il body supera ~MINIMAX_CONTEXT_BYTE_LIMIT byte,
     MiniMax fallirà con 400 context-exceed (2013). Salta MiniMax e vai diretto
@@ -1471,6 +1518,13 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     # non può essere MiniMax) → Haiku esegue, modello utente come fallback.
     if _has_image_blocks(orig):
         log(f"mixed-new: image blocks → pipeline bypass, ACT Anthropic fp={chat_fp}")
+        return await _mixed_haiku_rescue(request, orig, session, chat_fp)
+
+    # SERVER-TOOL GATE (bug 2026-07-04): web_search & co. sono eseguiti lato API
+    # Anthropic. MiniMax li rifiuta con 400 (2013) che il client incastona come
+    # risultato della ricerca. Bypass totale: ACT Anthropic (Haiku → superiore).
+    if _has_server_tools(orig):
+        log(f"mixed-new: server tools nel body → pipeline bypass, ACT Anthropic fp={chat_fp}")
         return await _mixed_haiku_rescue(request, orig, session, chat_fp)
 
     # THINK: Anthropic produce piano self-reviewed (JSON puro, no streaming).
