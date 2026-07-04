@@ -1711,12 +1711,16 @@ def _smart_truncate(msg: dict, max_len: int = 1800) -> str:
             f"{t.get('name','?')}({json.dumps(t.get('input',{}), ensure_ascii=False)[:300]})"
             for t in tool_use
         )
+        # Normalizza content (può essere str o list di blocchi tool_result/text)
+        content_str = json.dumps(content, ensure_ascii=False) if isinstance(content, list) else (content or "")
         # Se content è lungo, aggiungi solo l'inizio
-        if len(content) > max_len:
-            return content[:max_len] + f"\n... [+{len(content)-max_len}c troncatI]"
-        return content + tool_block if content else tool_block
+        if len(content_str) > max_len:
+            return content_str[:max_len] + f"\n... [+{len(content_str)-max_len}c troncatI]"
+        return content_str + tool_block if content_str else tool_block
 
     # Text content: truncation con segnalazione
+    if isinstance(content, list):
+        content = json.dumps(content, ensure_ascii=False)
     if len(content) > max_len:
         return content[:max_len] + f"\n... [+{len(content)-max_len}c troncatI]"
     return content
