@@ -1421,6 +1421,20 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
         return await _mixed_haiku_rescue(request, orig, session, chat_fp)
 
 
+def _has_image_blocks(orig: dict) -> bool:
+    """True se il body contiene blocchi image (vision). MiniMax è text-only:
+    ignora i blocchi image e ALLUCINA la descrizione dal contesto chat
+    (bug gravissimo 2026-07-04: screenshot descritto con contenuto inventato
+    dal CLAUDE.md). Con immagini l'ACT DEVE andare a un modello Anthropic."""
+    for m in orig.get("messages", []):
+        c = m.get("content")
+        if isinstance(c, list):
+            for blk in c:
+                if isinstance(blk, dict) and blk.get("type") == "image":
+                    return True
+    return False
+
+
 def _is_context_too_large_for_minimax(body_bytes: bytes) -> bool:
     """Stima preventiva: se il body supera ~MINIMAX_CONTEXT_BYTE_LIMIT byte,
     MiniMax fallirà con 400 context-exceed (2013). Salta MiniMax e vai diretto
@@ -1450,6 +1464,14 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     Scatta per TUTTE le /v1/messages (incluso agentico con tools)."""
     chat_fp = _resolve_chat_fingerprint(request)
     wants_stream = bool(orig.get("stream"))
+
+    # VISION GATE (bug 2026-07-04): MiniMax è text-only — con blocchi image
+    # l'executor allucina la descrizione dal contesto chat. Se ci sono immagini
+    # l'ACT DEVE essere Anthropic: salta anche il THINK (piano inutile, l'ACT
+    # non può essere MiniMax) → Haiku esegue, modello utente come fallback.
+    if _has_image_blocks(orig):
+        log(f"mixed-new: image blocks → pipeline bypass, ACT Anthropic fp={chat_fp}")
+        return await _mixed_haiku_rescue(request, orig, session, chat_fp)
 
     # THINK: Anthropic produce piano self-reviewed (JSON puro, no streaming).
     # REGOLA VINCOLANTE (utente 2026-07-03): mixed = il MODELLO SELEZIONATO
@@ -1498,6 +1520,10 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     # Se il body è troppo grande per MiniMax, skippa MiniMax e vai diretto al
     # rescue Haiku (evita il 400 che consuma i token comunque).
     if orig_model and not orig_model.startswith("MiniMax"):
+        # VISION: MiniMax è text-only — con immagini allucina. ACT → Anthropic.
+        if _has_image_blocks(orig):
+            log(f"mixed-new ACT: image blocks nel body → skip MiniMax, ACT Anthropic fp={chat_fp}")
+            return await _mixed_haiku_rescue(request, orig, session, chat_fp)
         if _is_context_too_large_for_minimax(body):
             log(f"mixed-new ACT: body {len(body)}b > limit → skip MiniMax, rescue Haiku fp={chat_fp}")
             return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
