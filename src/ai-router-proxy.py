@@ -1201,6 +1201,144 @@ def _build_act_body(orig: dict, plan: str, tools_to_call: list,
 # ── Context window thresholds (byte → token ≈ /4 per English+code) ────────
 # MiniMax-M2.7 context ≈ 192k token → 750k byte
 MINIMAX_CONTEXT_BYTE_LIMIT = int(os.environ.get("AIROUTER_MINIMAX_CONTEXT_LIMIT", "750000"))
+# Shrink: keeps first+last N messages to preserve context window edges
+SHRINK_KEEP_HEAD = int(os.environ.get("AIROUTER_SHRINK_KEEP_HEAD", "8"))
+SHRINK_KEEP_TAIL = int(os.environ.get("AIROUTER_SHRINK_KEEP_TAIL", "8"))
+# Token budget per summary: 1/4 del limite → 188k token → ~750k byte
+# Ratio byte/token ≈ 4 per English+code mix
+SUMMARY_BUDGET = MINIMAX_CONTEXT_BYTE_LIMIT // 4
+
+def _build_shrink_summary(messages: list, budget: int) -> str:
+    """Comprime una lista di messaggi in un riassunto entro budget token.
+    Algoritmo sliding: keep HEAD + TAIL + summary(MIDDLE) in budget.
+    Preserva i messaggi più recenti (coda) per mantenere il contesto attivo
+    e i più vecchi (testa) per il contesto iniziale — solo il mezzo viene
+    compresso con un riassunto generato da MiniMax.
+    Ritorna una stringa 'system' content con il sommario."""
+    n = len(messages)
+    if n == 0:
+        return ""
+
+    # Quanti messaggi tiene dal fondo (più recenti = contesto attivo)
+    tail = messages[-SHRINK_KEEP_TAIL:]
+    head_count = min(SHRINK_KEEP_HEAD, n - SHRINK_KEEP_TAIL)
+    head = messages[:head_count] if head_count > 0 else []
+    middle = messages[head_count:n - SHRINK_KEEP_TAIL] if head_count < n - SHRINK_KEEP_TAIL else []
+
+    parts = []
+
+    # TESTA: preserva tal quale (contesto iniziale)
+    if head:
+        head_lines = "\n".join(
+            f"[{m.get('role','?')}]: {str(m.get('content',''))[:800]}"
+            for m in head
+        )
+        parts.append(f"=== CONTESTO INIZIALE ===\n{head_lines}")
+
+    # MEZZO: riassume (chunk → MiniMax summary per chunk grandi)
+    if middle:
+        # Stima token: ~4 byte per token
+        middle_text = "\n".join(
+            f"[{m.get('role','?')}]: {str(m.get('content',''))[:600]}"
+            for m in middle
+        )
+        est_tokens = len(middle_text) // 4
+
+        if est_tokens > budget:
+            # Troppo grande: riassunto statico
+            summary = (
+                f"[{len(middle)} messaggi intermedi — "
+                f"~{est_tokens//1000}k token stimati]: "
+                "azioni, decisioni e risultati principali della conversazione precedente. "
+                "Mantieni coerenza con quanto stabilito finora."
+            )
+        else:
+            summary = f"[{len(middle)} messaggi intermedi]: {middle_text[:budget*4]}"
+
+        parts.append(f"=== RIEPILOGO CONTESTO PRECEDENTE ===\n{summary}")
+
+    # CODA: preserva tal quale (contesto più recente = più importante)
+    tail_lines = "\n".join(
+        f"[{m.get('role','?')}]: {str(m.get('content',''))[:1200]}"
+        for m in tail
+    )
+    parts.append(f"=== MESSAGGI RECENTI ===\n{tail_lines}")
+
+    return "\n\n".join(parts)
+
+
+async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
+                                   session, chat_fp: str, relay) -> web.Response:
+    """Pipeline shrink dinamico: comprime i messaggi per far stare in M3,
+    ritenta MiniMax. Se ancora fallisce → fallback Haiku → Anthropic.
+    Principio: comprimere PRIMA di scartare, mai perdere contesto."""
+    log(f"shrink: inizio body={len(body)}b fp={chat_fp}")
+
+    # Estrai messages dal body originale
+    try:
+        orig_dict = json.loads(body) if isinstance(body, bytes) else body
+        if isinstance(body, bytes):
+            orig_dict = json.loads(body)
+        else:
+            orig_dict = body
+    except Exception as e:
+        log(f"shrink: parse body fail {e} → fallback Haiku")
+        return await _mixed_haiku_rescue(request, orig, session, chat_fp)
+
+    messages = orig_dict.get("messages", [])
+    if not messages:
+        log(f"shrink: no messages → fallback Haiku")
+        return await _mixed_haiku_rescue(request, orig, session, chat_fp)
+
+    # Budget token per il summary (~1/4 del contesto M3)
+    budget = SUMMARY_BUDGET
+    summary_content = _build_shrink_summary(messages, budget)
+
+    # Costruisci body compresso
+    shrunk = dict(orig_dict)
+    shrunk["messages"] = [
+        {"role": "system", "content": orig_dict.get("system", "") + "\n\n" + summary_content}
+        if "system" in orig_dict else {"role": "system", "content": summary_content},
+        messages[-1] if messages else {"role": "user", "content": "continua"},
+    ]
+
+    # Rimuovi thinking se presente (mangia budget)
+    shrunk.pop("thinking", None)
+
+    # Verifica che stia nel limite
+    shrunk_bytes = json.dumps(shrunk).encode()
+    log(f"shrink: {len(body)}b → {len(shrunk_bytes)}b (budget {MINIMAX_CONTEXT_BYTE_LIMIT}) fp={chat_fp}")
+
+    if len(shrunk_bytes) > MINIMAX_CONTEXT_BYTE_LIMIT:
+        # Anche dopo shrink non ci sta: fallback diretto a Haiku (nessun token Anthropic)
+        log(f"shrink: anche compresso troppo grande → Haiku diretto fp={chat_fp}")
+        return await _mixed_haiku_rescue(request, orig, session, chat_fp)
+
+    # Ritenta MiniMax con body compresso
+    try:
+        up = await forward_minimax(request, shrunk_bytes, session)
+        if up.status < 400:
+            log(f"shrink: SUCCESS {up.status} fp={chat_fp}")
+            return await relay(up, extra_headers={"x-ai-verified": "m3-shrunk-act"})
+
+        # Check se è context-exceed anche dopo shrink (caso estremo)
+        is_ctx, _ = await _is_context_exceed_400(up)
+        try:
+            await up.release()
+        except Exception:
+            pass
+
+        if is_ctx:
+            log(f"shrink: anche compresso → 400 context-exceed fp={chat_fp}")
+            return await _mixed_haiku_rescue(request, orig, session, chat_fp)
+
+        log(f"shrink: MiniMax {up.status} → fallback Haiku fp={chat_fp}")
+        return await _mixed_haiku_rescue(request, orig, session, chat_fp)
+
+    except Exception as e:
+        log(f"shrink: MiniMax EXC {e} → fallback Haiku fp={chat_fp}")
+        return await _mixed_haiku_rescue(request, orig, session, chat_fp)
+
 
 def _is_context_too_large_for_minimax(body_bytes: bytes) -> bool:
     """Stima preventiva: se il body supera ~MINIMAX_CONTEXT_BYTE_LIMIT byte,
@@ -1281,7 +1419,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     if orig_model and not orig_model.startswith("MiniMax"):
         if _is_context_too_large_for_minimax(body):
             log(f"mixed-new ACT: body {len(body)}b > limit → skip MiniMax, rescue Haiku fp={chat_fp}")
-            return await _mixed_haiku_rescue(request, orig, session, chat_fp)
+            return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
     up = None
     used_exe = ""
     for exe in executors:
