@@ -17,10 +17,12 @@ Gestisce streaming SSE. Backend diretto (nessun proxy intermedio).
 import asyncio
 import json
 import os
+import random
 import signal
 import sys
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 from aiohttp import web, ClientSession, ClientTimeout, TCPConnector
@@ -86,6 +88,164 @@ USAGE_SIDECAR = Path.home() / ".claude" / "logs" / "router-usage.jsonl"
 # 401/403 (auth/billing) -> fallback a MiniMax cosi' l'utente non resta bloccato.
 # 429 (rate limit) -> fallback per non aspettare.
 FALLBACK_STATUSES = {401, 403, 408, 409, 413, 429, 500, 502, 503, 504, 529}
+# Rate-limit redesign 2026-07-04: il 429 MiniMax NON è più un fallback verso
+# Anthropic — lo gestisce MinimaxRateLimiter (polling+backoff dentro
+# forward_minimax). Questo set va usato nei check post-chiamata MiniMax;
+# FALLBACK_STATUSES (con 429) resta SOLO per i check lato Anthropic.
+MINIMAX_FALLBACK_STATUSES = FALLBACK_STATUSES - {429}
+
+# ── MiniMax rate limits ufficiali (platform.minimax.io/docs/guides/rate-limits,
+#    2026-07): (RPM, TPM input+output). Reset ~1 min; throttling dinamico nei
+#    picchi (feriali 15:00-17:30). Modello ignoto → il più restrittivo (M3).
+MINIMAX_RATE_LIMITS = {
+    "MiniMax-M3": (200, 10_000_000),
+    "MiniMax-M2.7": (500, 20_000_000),
+    "MiniMax-M2.7-highspeed": (500, 20_000_000),
+    "MiniMax-M2.5": (500, 20_000_000),
+    "MiniMax-M2.5-highspeed": (500, 20_000_000),
+    "MiniMax-M2": (500, 20_000_000),
+}
+MINIMAX_RATE_LIMITS_DEFAULT = (200, 10_000_000)
+# Safety factor: usiamo l'80% dei limiti pubblicati (headroom per il jitter
+# del gateway e per il throttling dinamico dei picchi).
+MINIMAX_SAFETY = float(os.environ.get("AIROUTER_MINIMAX_SAFETY", "0.8"))
+# Cap totale del polling su 429 RPM/TPM (decisione utente 2026-07-04: MAI
+# fallback Anthropic; oltre il cap → 429 sintetico al client, che ritenta).
+# 90s conservativo per i timeout client; alzabile a 180 dopo verifica empirica.
+MINIMAX_RETRY_CAP_SEC = float(os.environ.get("AIROUTER_MINIMAX_RETRY_CAP_SEC", "90"))
+MINIMAX_CONCURRENCY = int(os.environ.get("AIROUTER_MINIMAX_SEMAPHORE", "8"))
+MINIMAX_BACKOFF_STEPS = (5, 10, 20, 40, 60)  # esponenziale, cap 60s
+MINIMAX_ALERTS_LOG = os.path.expanduser("~/.claude/logs/minimax-alerts.log")
+
+_TOKEN_PLAN_RE = None  # compilata lazy in _classify_429 (re importato più giù come _re)
+
+
+def _classify_429(raw: bytes) -> str:
+    """Classifica un body 429 MiniMax: 'token_plan' (finestra 5h esaurita,
+    'usage limit ... resets at <ts>' nel body — attesa di ORE) vs 'rpm_tpm'
+    (rate limit al minuto — attesa di secondi). MiniMax non usa Retry-After:
+    il reset è embeddato nel messaggio."""
+    low = raw[:2000].lower()
+    if b"usage limit" in low or b"resets at" in low:
+        return "token_plan"
+    return "rpm_tpm"
+
+
+class RateLimitExhausted(Exception):
+    """acquire() ha esaurito il budget di attesa senza trovare uno slot."""
+
+
+class MinimaxRateLimiter:
+    """Pacing client-side sui limiti ufficiali MiniMax (sliding window 60s
+    per modello) + cooldown globale condiviso sui 429 (anti-hammering).
+
+    Design (piano 2026-07-04):
+    - window per modello: deque di entry MUTABILI [ts_monotonic, tokens].
+      RPM = len(window), TPM = sum(tokens). record() aggiorna la STESSA
+      entry in-place → nessun doppio conteggio stima+reale.
+    - 429 → tokens=0 ma l'entry resta (il tentativo conta per l'RPM).
+    - lock SOLO per check+insert; gli sleep avvengono FUORI dal lock
+      (altrimenti le richieste concorrenti si serializzano a 1).
+    - cooldown globale: scritto dal primo 429 osservato, letto da TUTTE le
+      richieste in acquire() → nessuno martella durante il backoff.
+    - MAI annidare con get_minimax_key()/to_thread (deadlock già visto).
+    """
+
+    def __init__(self):
+        self._lock = asyncio.Lock()
+        self._windows = {}          # model -> deque([[ts, tokens], ...])
+        self._cooldown_until = 0.0  # monotonic; globale, condiviso
+        self._plan_exhausted_until = ""  # ISO/testo dal body Token Plan (per /health)
+        self._backoff_idx = 0
+
+    def _limits(self, model: str):
+        rpm, tpm = MINIMAX_RATE_LIMITS.get(model, MINIMAX_RATE_LIMITS_DEFAULT)
+        return max(1, int(rpm * MINIMAX_SAFETY)), int(tpm * MINIMAX_SAFETY)
+
+    def _prune(self, model: str, now: float):
+        win = self._windows.setdefault(model, deque())
+        while win and now - win[0][0] > 60.0:
+            win.popleft()
+        return win
+
+    async def acquire(self, model: str, est_tokens: int, budget_sec: float):
+        """Attende uno slot RPM/TPM per `model`. Ritorna l'entry mutabile da
+        passare a record(). RateLimitExhausted se il budget si esaurisce."""
+        waited = 0.0
+        while True:
+            async with self._lock:
+                now = time.monotonic()
+                if self._cooldown_until > now:
+                    wait = min(self._cooldown_until - now, 60.0)
+                else:
+                    win = self._prune(model, now)
+                    rpm_limit, tpm_limit = self._limits(model)
+                    tpm_used = sum(e[1] for e in win)
+                    if len(win) < rpm_limit and tpm_used + est_tokens <= tpm_limit:
+                        entry = [now, est_tokens]
+                        win.append(entry)
+                        return entry
+                    # attesa fino all'uscita dell'entry più vecchia dalla finestra
+                    wait = max(0.5, 60.0 - (now - win[0][0])) if win else 1.0
+            wait += random.uniform(0.05, 0.5)
+            if waited + wait > budget_sec:
+                raise RateLimitExhausted(
+                    f"minimax rate-limit: budget {budget_sec:.0f}s esaurito (waited {waited:.0f}s)")
+            await asyncio.sleep(wait)
+            waited += wait
+
+    def record(self, entry: list, actual_tokens: int, success: bool):
+        """Aggiorna l'entry restituita da acquire() in-place: successo →
+        token reali, 429/fail → 0 token (ma l'entry resta: RPM conta)."""
+        entry[1] = actual_tokens if success else 0
+
+    def on_429_rpm(self):
+        """Cooldown globale con backoff esponenziale + jitter."""
+        step = MINIMAX_BACKOFF_STEPS[min(self._backoff_idx, len(MINIMAX_BACKOFF_STEPS) - 1)]
+        self._backoff_idx += 1
+        until = time.monotonic() + step + random.uniform(0, 2)
+        if until > self._cooldown_until:
+            self._cooldown_until = until
+        return step
+
+    def on_success(self):
+        self._backoff_idx = 0
+        self._cooldown_until = 0.0
+
+    def set_plan_exhausted(self, reset_hint: str):
+        self._plan_exhausted_until = reset_hint[:200]
+
+    def snapshot(self) -> dict:
+        """Stato per /health (solo lettura, best-effort senza lock)."""
+        now = time.monotonic()
+        per_model = {}
+        for m, win in self._windows.items():
+            live = [e for e in win if now - e[0] <= 60.0]
+            rpm_limit, tpm_limit = self._limits(m)
+            per_model[m] = {"rpm_used": len(live), "rpm_limit": rpm_limit,
+                            "tpm_used": sum(e[1] for e in live), "tpm_limit": tpm_limit}
+        return {"cooldown_sec": max(0.0, round(self._cooldown_until - now, 1)),
+                "plan_exhausted": self._plan_exhausted_until, "per_model": per_model}
+
+
+MINIMAX_LIMITER = MinimaxRateLimiter()
+_MINIMAX_SEM = asyncio.Semaphore(MINIMAX_CONCURRENCY)
+
+
+def _minimax_alert(msg: str):
+    """Notifica Token Plan esaurito: notify-send best-effort (systemd user può
+    non avere DBUS) + SEMPRE append su file di alert."""
+    try:
+        with open(MINIMAX_ALERTS_LOG, "a") as f:
+            f.write(f"[{time.strftime('%Y-%m-%dT%H:%M:%S')}] {msg}\n")
+    except Exception:
+        pass
+    try:
+        import subprocess
+        subprocess.Popen(["notify-send", "-u", "critical", "MiniMax Token Plan", msg[:300]],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
 
 # Circuit breaker (D15): dopo N fail un backend va in cooldown e viene saltato.
 # FIX audit v4: BREAKER_* removed (dead code - mai chiamato nel flusso;
@@ -842,7 +1002,70 @@ async def forward_anthropic(request, body, session):
     )
 
 
-async def forward_minimax(request, body, session):
+def _minimax_est_tokens(new_body: bytes) -> int:
+    """Stima TPM (input+output): byte/4 per l'input + max_tokens richiesto
+    per l'output (spec ufficiale: TPM conta entrambi)."""
+    est = max(1, len(new_body) // 4)
+    try:
+        mt = int(json.loads(new_body).get("max_tokens", 0) or 0)
+        est += max(0, mt)
+    except Exception:
+        pass
+    return est
+
+
+class _SyntheticResponse:
+    """429 sintetico che emula la superficie ClientResponse usata dal router
+    (relay: status/headers/content.iter_any; _call_full: read/release/json).
+    NON usare web.Response qui: i caller trattano il ritorno di
+    forward_minimax come una response aiohttp CLIENT, non server."""
+
+    def __init__(self, status: int, payload: dict):
+        self._body = json.dumps(payload).encode()
+        self.status = status
+        self.headers = {"Content-Type": "application/json",
+                        "x-ai-router": "synthetic-429"}
+
+    async def read(self):
+        return self._body
+
+    async def json(self):
+        return json.loads(self._body)
+
+    async def release(self):
+        return None
+
+    @property
+    def content(self):
+        body = self._body
+
+        class _OneShot:
+            async def iter_any(self):
+                yield body
+
+        return _OneShot()
+
+
+def _synthetic_429(msg: str) -> "_SyntheticResponse":
+    return _SyntheticResponse(
+        429, {"type": "error", "error": {"type": "rate_limit_error", "message": msg}})
+
+
+async def forward_minimax(request, body, session, retry_budget_sec: float = None):
+    """Chiama MiniMax con pacing preventivo (MinimaxRateLimiter, limiti
+    ufficiali × safety) + retry con backoff sul 429 (redesign 2026-07-04).
+
+    Decisione utente: MAI fallback Anthropic sui rate limit. 429 RPM/TPM →
+    polling con backoff fino a retry_budget_sec, poi 429 sintetico al client
+    (Claude Code ritenta da solo). 429 Token Plan (finestra 5h, 'resets at'
+    nel body) → alert + 1 retry breve → 429 sintetico col reset visibile.
+    Ritorna web.Response (429 sintetico) o aiohttp response (passthrough).
+
+    NB: non avvolgere in asyncio.wait_for con timeout < retry_budget_sec
+    (cancellerebbe il backoff a metà sleep). Call site degradati (fallback
+    THINK ecc.) passano retry_budget_sec basso."""
+    if retry_budget_sec is None:
+        retry_budget_sec = MINIMAX_RETRY_CAP_SEC
     url = MINIMAX_UPSTREAM + request.path_qs
     key = await get_minimax_key()
     headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS}
@@ -852,9 +1075,65 @@ async def forward_minimax(request, body, session):
             headers.pop(h)
     headers["X-Api-Key"] = key
     new_body = remap_body_for_minimax(body, request=request)  # FIX A: pass request per modello log
-    return await session.request(
-        request.method, url, data=new_body, headers=headers, allow_redirects=False
-    )
+    try:
+        model = json.loads(new_body).get("model", "") or MINIMAX_MODEL
+    except Exception:
+        model = MINIMAX_MODEL
+    est = _minimax_est_tokens(new_body)
+    t0 = time.monotonic()
+    plan_retry_done = False
+    while True:
+        budget_left = retry_budget_sec - (time.monotonic() - t0)
+        if budget_left <= 0:
+            return _synthetic_429(
+                f"MiniMax rate limited: retry budget {retry_budget_sec:.0f}s esaurito. Riprova.")
+        try:
+            entry = await MINIMAX_LIMITER.acquire(model, est, budget_left)
+        except RateLimitExhausted as e:
+            return _synthetic_429(f"MiniMax rate limited (pacing): {e}")
+        async with _MINIMAX_SEM:
+            up = await session.request(
+                request.method, url, data=new_body, headers=headers, allow_redirects=False
+            )
+        if up.status != 429:
+            # body NON letto: streaming preservato per relay()
+            MINIMAX_LIMITER.record(entry, est, success=True)
+            MINIMAX_LIMITER.on_success()
+            return up
+        # ── 429: consuma il body, classifica, backoff ──────────────────────
+        try:
+            raw = await up.read()
+        except Exception:
+            raw = b""
+        try:
+            await up.release()
+        except Exception:
+            pass
+        MINIMAX_LIMITER.record(entry, 0, success=False)
+        kind = _classify_429(raw)
+        if kind == "token_plan":
+            snippet = raw[:400].decode("utf-8", "replace")
+            MINIMAX_LIMITER.set_plan_exhausted(snippet)
+            log(f"minimax 429 TOKEN-PLAN: {snippet[:200]}")
+            _minimax_alert(f"Token Plan esaurito: {snippet[:200]}")
+            if not plan_retry_done:
+                plan_retry_done = True
+                await asyncio.sleep(10)
+                continue
+            return _synthetic_429(f"MiniMax Token Plan esaurito. {snippet[:300]}")
+        step = MINIMAX_LIMITER.on_429_rpm()
+        log(f"minimax 429 RPM/TPM: backoff {step}s (budget left {budget_left:.0f}s) model={model}")
+
+
+# Budget corto per i path secondari/non-streaming: _call_full li avvolge in
+# asyncio.wait_for(timeout=90) che CANCELLEREBBE un backoff lungo a metà sleep.
+MINIMAX_RETRY_BUDGET_SHORT = float(os.environ.get("AIROUTER_MINIMAX_RETRY_SHORT_SEC", "8"))
+
+
+async def _fwd_minimax_short(request, body, session):
+    """forward_minimax con budget di retry corto — da usare SOLO via _call_full."""
+    return await forward_minimax(request, body, session,
+                                 retry_budget_sec=MINIMAX_RETRY_BUDGET_SHORT)
 
 
 ANTHROPIC_DIRECT_URL = os.environ.get("AIROUTER_ANTHROPIC_DIRECT", "https://api.anthropic.com")
@@ -1402,12 +1681,12 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
             orig_dict = body
     except Exception as e:
         log(f"shrink: parse body fail {e} → fallback Haiku")
-        return await _mixed_haiku_rescue(request, orig, session, chat_fp)
+        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
 
     messages = orig_dict.get("messages", [])
     if not messages:
         log(f"shrink: no messages → fallback Haiku")
-        return await _mixed_haiku_rescue(request, orig, session, chat_fp)
+        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
 
     # Budget token per il summary (~1/4 del contesto M3)
     budget = SUMMARY_BUDGET
@@ -1430,7 +1709,7 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
     if len(shrunk_bytes) > MINIMAX_CONTEXT_BYTE_LIMIT:
         # Anche dopo shrink non ci sta: fallback diretto a Haiku (nessun token Anthropic)
         log(f"shrink: anche compresso troppo grande → Haiku diretto fp={chat_fp}")
-        return await _mixed_haiku_rescue(request, orig, session, chat_fp)
+        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
 
     # Ritenta MiniMax con body compresso
     try:
@@ -1448,14 +1727,14 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
 
         if is_ctx:
             log(f"shrink: anche compresso → 400 context-exceed fp={chat_fp}")
-            return await _mixed_haiku_rescue(request, orig, session, chat_fp)
+            return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
 
         log(f"shrink: MiniMax {up.status} → fallback Haiku fp={chat_fp}")
-        return await _mixed_haiku_rescue(request, orig, session, chat_fp)
+        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
 
     except Exception as e:
         log(f"shrink: MiniMax EXC {e} → fallback Haiku fp={chat_fp}")
-        return await _mixed_haiku_rescue(request, orig, session, chat_fp)
+        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
 
 
 def _has_image_blocks(orig: dict) -> bool:
@@ -1510,6 +1789,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     """Redesign 2026-07-01 mixed: Anthropic THINK+self-review → M3 ACT.
     Scatta per TUTTE le /v1/messages (incluso agentico con tools)."""
     chat_fp = _resolve_chat_fingerprint(request)
+    mixed_fail_last_status = None  # traccia ultimo status nel loop ACT
     wants_stream = bool(orig.get("stream"))
 
     # VISION GATE (bug 2026-07-04): MiniMax è text-only — con blocchi image
@@ -1518,14 +1798,14 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     # non può essere MiniMax) → Haiku esegue, modello utente come fallback.
     if _has_image_blocks(orig):
         log(f"mixed-new: image blocks → pipeline bypass, ACT Anthropic fp={chat_fp}")
-        return await _mixed_haiku_rescue(request, orig, session, chat_fp)
+        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
 
     # SERVER-TOOL GATE (bug 2026-07-04): web_search & co. sono eseguiti lato API
     # Anthropic. MiniMax li rifiuta con 400 (2013) che il client incastona come
     # risultato della ricerca. Bypass totale: ACT Anthropic (Haiku → superiore).
     if _has_server_tools(orig):
         log(f"mixed-new: server tools nel body → pipeline bypass, ACT Anthropic fp={chat_fp}")
-        return await _mixed_haiku_rescue(request, orig, session, chat_fp)
+        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
 
     # THINK: Anthropic produce piano self-reviewed (JSON puro, no streaming).
     # REGOLA VINCOLANTE (utente 2026-07-03): mixed = il MODELLO SELEZIONATO
@@ -1577,7 +1857,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
         # VISION: MiniMax è text-only — con immagini allucina. ACT → Anthropic.
         if _has_image_blocks(orig):
             log(f"mixed-new ACT: image blocks nel body → skip MiniMax, ACT Anthropic fp={chat_fp}")
-            return await _mixed_haiku_rescue(request, orig, session, chat_fp)
+            return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
         if _is_context_too_large_for_minimax(body):
             log(f"mixed-new ACT: body {len(body)}b > limit → skip MiniMax, rescue Haiku fp={chat_fp}")
             return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
@@ -1593,11 +1873,13 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
         try:
             up = await forward_minimax(request, act_body, session)
         except Exception as e:
+            mixed_fail_last_status = None
             n = mixed_fail_inc(chat_fp)
             log(f"mixed-new ACT {exe} EXC ({n}/{MIXED_FAIL_THRESHOLD}): {e}")
             up = None
             continue
-        if up.status in FALLBACK_STATUSES:
+        mixed_fail_last_status = up.status  # traccia PRIMA di ogni altra valutazione
+        if up.status in MINIMAX_FALLBACK_STATUSES:
             n = mixed_fail_inc(chat_fp)
             log(f"mixed-new ACT {exe} {up.status} ({n}/{MIXED_FAIL_THRESHOLD})")
             try:
@@ -1625,37 +1907,59 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
         return await relay(up, extra_headers={
             "x-ai-verified": f"anthropic-think+{used_exe.lower()}-act"})
 
-async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str):
-    """Esegue il rescue Haiku: chiamato sia dal check preventivo che dal fallback."""
-    log(f"mixed-new ACT: Haiku rescue fp={chat_fp}")
-    try:
-        haiku_body = dict(orig)
-        haiku_body["model"] = THINK_MODEL  # Haiku
-        up_h = await forward_anthropic(request, json.dumps(haiku_body).encode(), session)
-        if up_h.status < 400:
-            mixed_fail_reset(chat_fp)
-            return await relay(up_h, extra_headers={"x-ai-verified": "haiku-rescue-act"})
-        log(f"mixed-new ACT rescue Haiku {up_h.status} → modello superiore")
-        try:
-            await up_h.release()
-        except Exception:
-            pass
-    except Exception as e:
-        log(f"mixed-new ACT rescue Haiku EXC: {e} → modello superiore")
+    # ── ACT loop terminato con up=None: tutti gli executor falliti ─────────────
+    # FIX 2026-07-04: 429 Rate Limit → relay subito al client. NON chiamare rescue
+    # (Haiku/Anthropic in hammering peggiorano il backoff). Rispetta il rate limit.
+    # Fallback solo per 5xx / errori recuperabili (429 escluso).
+    if mixed_fail_last_status == 429:
+        log(f"mixed-new ACT: tutti executor 429 Rate Limit → relay subito fp={chat_fp}")
+        return web.json_response(
+            {"type": "error", "error": {"type": "rate_limit_error",
+             "message": "MiniMax rate limited (429). Retry-After rispettato dal client."}},
+            status=429)
 
-    # Ultimo gradino: il modello superiore selezionato dall'utente (Fable/Opus/Sonnet)
+    # Altri fallimenti → rescue: modello utente → Haiku → 502
+    log(f"mixed-new ACT: tutti executor falliti (non-429) → rescue fp={chat_fp}")
+    return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
+
+async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay):
+    """Esegue il rescue Haiku: chiamato sia dal check preventivo che dal fallback.
+    relay: callable necessario per restituire la risposta al client."""
+    log(f"mixed-new ACT: Haiku rescue fp={chat_fp}")
+
+    # ── Gradino 1: modello originale utente (Fable/Opus/Sonnet — 1M context) ──
+    # FIX 2026-07-04: se il body è grande (>750k byte), Haiku fallisce con 400.
+    # Proviamo PRIMA il modello dell'utente — ha context 1M, gestisce tutto.
     try:
         up = await forward_anthropic_direct(request, json.dumps(dict(orig)).encode(), session)
         if up.status < 400:
             mixed_fail_reset(chat_fp)
+            log(f"mixed-new ACT rescue: modello utente {up.status} OK fp={chat_fp}")
             return await relay(up)
-        log(f"mixed-new ACT superiore {up.status} → errore 502")
+        log(f"mixed-new ACT rescue: modello utente {up.status} → Haiku")
         try:
             await up.release()
         except Exception:
             pass
     except Exception as e:
-        log(f"mixed-new ACT superiore EXC: {e}")
+        log(f"mixed-new ACT rescue modello utente EXC: {e} → Haiku")
+
+    # ── Gradino 2: Haiku (fallback, context 200k) ──
+    try:
+        haiku_body = dict(orig)
+        haiku_body["model"] = THINK_MODEL
+        up_h = await forward_anthropic(request, json.dumps(haiku_body).encode(), session)
+        if up_h.status < 400:
+            mixed_fail_reset(chat_fp)
+            log(f"mixed-new ACT rescue Haiku OK fp={chat_fp}")
+            return await relay(up_h, extra_headers={"x-ai-verified": "haiku-rescue-act"})
+        log(f"mixed-new ACT rescue Haiku {up_h.status} → 502")
+        try:
+            await up_h.release()
+        except Exception:
+            pass
+    except Exception as e:
+        log(f"mixed-new ACT rescue Haiku EXC: {e} → 502")
 
     return web.json_response(
         {"type": "error", "error": {"type": "router_error",
@@ -1729,7 +2033,7 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
 
     think_body = _build_minimax_think_body(orig)
     try:
-        t_status, t_json = await _call_full(forward_minimax, request, think_body, session)
+        t_status, t_json = await _call_full(_fwd_minimax_short, request, think_body, session)
     except Exception as e:
         log(f"minimax-orch THINK EXC: {e} → executor diretto")
         return await _executor_direct()
@@ -1922,7 +2226,7 @@ async def _pipeline_think_oppose_act(request, body, session, orig: dict, relay) 
         n = inverse_fail_inc(chat_fp)
         log(f"inverse-new ACT EXC ({n}/{INVERSE_FAIL_THRESHOLD}): {e} → rescue Anthropic")
         return await _inverse_rescue_anthropic(request, body, session, relay)
-    if up.status in FALLBACK_STATUSES:
+    if up.status in MINIMAX_FALLBACK_STATUSES:
         n = inverse_fail_inc(chat_fp)
         log(f"inverse-new ACT M3 {up.status} ({n}/{INVERSE_FAIL_THRESHOLD}) → rescue Anthropic")
         try:
@@ -1942,7 +2246,7 @@ async def _m3_think_iter(request, session, orig, prev_plan, fixes=None, warnings
         body = _build_inverse_think_body(orig)
     else:
         body = _build_inverse_revise_body(orig, prev_plan, fixes or [], warnings or [])
-    s, j = await _call_full(forward_minimax, request, body, session, timeout=timeout)
+    s, j = await _call_full(_fwd_minimax_short, request, body, session, timeout=timeout)
     if not j or s in FALLBACK_STATUSES:
         raise RuntimeError(f"M3 think iter ko {s}")
     plan = _text_from_message(j).strip()
@@ -2453,7 +2757,7 @@ async def handle(request):
                     return web.json_response(
                         {"type": "error", "error": {"type": "router_error",
                          "message": f"both down: {e2}"}}, status=502)
-            if up.status in FALLBACK_STATUSES:
+            if up.status in MINIMAX_FALLBACK_STATUSES:
                 n = inverse_fail_inc(chat_fp)
                 await up.release()
                 log(f"inverse T1 M3 {up.status} ({n}/{INVERSE_FAIL_THRESHOLD}) -> anthropic rescue")
@@ -2484,11 +2788,11 @@ async def handle(request):
 
         # R1: bozza M3
         try:
-            gen_status, gen_json = await _call_full(forward_minimax, request, body, session)
+            gen_status, gen_json = await _call_full(_fwd_minimax_short, request, body, session)
         except Exception as e:
             gen_status, gen_json = 0, None
             log(f"inverse T2 R1 EXC: {e}")
-        if not gen_json or gen_status in FALLBACK_STATUSES:  # FIX B4.1: solo retryable
+        if not gen_json or gen_status in MINIMAX_FALLBACK_STATUSES:  # FIX B4.1: solo retryable
             n = inverse_fail_inc(chat_fp)
             log(f"inverse T2: M3 R1 fallita ({gen_status}) [{n}/{INVERSE_FAIL_THRESHOLD}]")
             if inverse_should_escalate(chat_fp):
@@ -2532,7 +2836,7 @@ async def handle(request):
             rbody = _build_revise_body(orig, question, draft_v1, critique)
             draft_v2 = draft_v1  # fallback
             try:
-                r_status, r_json = await _call_full(forward_minimax, request, rbody, session)
+                r_status, r_json = await _call_full(_fwd_minimax_short, request, rbody, session)
                 if r_json and r_status < 400:
                     draft_v2 = _text_from_message(r_json) or draft_v1
             except Exception as e:
@@ -2605,10 +2909,10 @@ async def handle(request):
         # pipeline verify (T2-style): M3 draft -> Anthropic critique -> M3 revise
         # -> Anthropic finalize. Se T2 è False, salta al primo step Anthropic.
         try:
-            gen_status, gen_json = await _call_full(forward_minimax, request, body, session)
+            gen_status, gen_json = await _call_full(_fwd_minimax_short, request, body, session)
         except Exception as e:
             gen_status, gen_json = 0, None
-        if not gen_json or gen_status in FALLBACK_STATUSES:  # FIX B4.1 residuo
+        if not gen_json or gen_status in MINIMAX_FALLBACK_STATUSES:  # FIX B4.1 residuo
             # M3 ancora giù: Anthropic esegue DIRETTO senza pipeline
             log(f"mixed escalation: M3 ko {gen_status}, Anthropic esegue diretto")
             try:
@@ -2712,10 +3016,10 @@ async def handle(request):
     question = extract_last_user_text(orig)
     wants_stream = bool(orig.get("stream"))
     try:
-        gen_status, gen_json = await _call_full(forward_minimax, request, body, session)
+        gen_status, gen_json = await _call_full(_fwd_minimax_short, request, body, session)
     except Exception as e:
         gen_status, gen_json = 0, None
-    if not gen_json or gen_status in FALLBACK_STATUSES:  # FIX B4.1: solo retryable
+    if not gen_json or gen_status in MINIMAX_FALLBACK_STATUSES:  # FIX B4.1: solo retryable
         n = mixed_fail_inc(chat_fp)
         log(f"mixed T2 M3 R1 ko {gen_status} ({n}/{MIXED_FAIL_THRESHOLD}) {request.path}")
         try:
@@ -2773,7 +3077,8 @@ def _make_app(session, forced_mode):
         app["RESILIENCE"] = RESILIENCE_INST
 
     async def healthz(request):
-        return web.json_response({"ok": True, "mode": forced_mode or _current_mode()})
+        return web.json_response({"ok": True, "mode": forced_mode or _current_mode(),
+                                  "minimax": MINIMAX_LIMITER.snapshot()})
 
     async def resiliencez(request):
         """Stato resilienza: OAuth, heartbeat, modalità corrente."""
