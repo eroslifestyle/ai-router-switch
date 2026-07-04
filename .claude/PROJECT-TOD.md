@@ -7,11 +7,12 @@ updated: 2026-06-29
 
 # Project Global TOD — ai-router-switch
 
-**Main HEAD**: cb2c4f1 · **Branch**: fix/audit-4modes-p0-p1 · **Updated**: 2026-07-04 14:28
+**Main HEAD**: 098cb48 · **Branch**: main · **Updated**: 2026-07-04 17:23
 
 ## ✅ Done (recenti, evidence-gated)
 
 - [x] **CARD-FIX-9988** — Fix pulsanti switch card GUI: puntavano a proxy `:9988` rimosso → ora `POST :8787/admin/mode/{mode}` + mode da `GET /health` · commit `cb2c4f1` pushato, round-trip curl verificato + test utente live (2026-07-03)
+- [x] **BUG-SHRINK-SYSTEM-LIST** — Fix crash `_shrink_and_retry_minimax` linea 1821: `system` field può essere `list` (non solo `str`) → TypeError `can only concatenate list not str`. Normalizza a str con `isinstance` check. Stessa logica già in `_smart_truncate:1715` · commit `098cb48` pushato, health OK, zero errori post-restart · hotfix live 2026-07-04
 - [x] **C1/H1/H2/M1/M3/L7/M2/L1/L3/L4/L6a/OPPOSE** — Audit 4-modi + 12 fix P0-P4 (3 crash/bug reali, escalation coerenza, pulizia 7 orfane, OPPOSE modello utente) · commits `4762406` `9813e5a` `334760c` (2026-07-02 20:30-20:50)
 - [x] **D36** — Parser JSON OPPOSE/THINK irrobustito per preamboli + code-fence + oggetti multipli · `ea3fb1f` (2026-07-02 01:28, all 6 parser tests green)
 - [x] **D36a** — Inverse M3 orchestra + Opus critica + M2.7 code esegue (alias MINIMAX_ORCHESTRATOR_MODEL forzato) · `ea3fb1f` + fix commit
