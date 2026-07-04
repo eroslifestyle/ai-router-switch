@@ -7,7 +7,7 @@ updated: 2026-06-29
 
 # Project Global TOD — ai-router-switch
 
-**Main HEAD**: cb2c4f1 · **Branch**: fix/audit-4modes-p0-p1 · **Updated**: 2026-07-04 13:31
+**Main HEAD**: cb2c4f1 · **Branch**: fix/audit-4modes-p0-p1 · **Updated**: 2026-07-04 14:28
 
 ## ✅ Done (recenti, evidence-gated)
 
@@ -19,6 +19,7 @@ updated: 2026-06-29
 - [x] **D34** — OAuth marker Claude Code fix (sk-ant-oat01 richiede marker esatto nel system, fasi THINK/OPPOSE non lo avevano) · `a4d9a77` + refactor etichette
 - [x] **D34** — Gerarchia mixed 4 regole bloccanti + 429 escalation immediata · `1730b3b` (pushed) + `ed24e2d` (fix SSE rewrite)
 - [x] **D30** — Stress test 4 modalità in carico reale — OK su sessione 2026-06-30 (mixed T0/T1 live, M3 esegue, no blocchi)
+- [x] **D42** — OCR + Web Search MiniMax (docs/minimax-capabilities.md). Scoperta: M3 legge le immagini, M2.7 no (vera root cause vision-gate). OCR: _serve_minimax_vision instrada le immagini a M3 in mixed+minimax (server-tool gate precede vision, model-rewrite, fallback su 5xx/context); rimosso gate morto. Web search: MCP minimax-coding-plan-mcp registrato (web_search+understand_image, connesso) · commit d7ca84c, test live 'Rosso'+SSE OK · vault: progetti/ai-router-ocr-websearch-integration
 - [x] **D40** — MinimaxRateLimiter: pacing sui limiti ufficiali (M3 200rpm/10M, M2.7 500rpm/20M × safety 0.8), polling backoff su 429 nel choke point forward_minimax (11 call site), MAI fallback Anthropic sui rate limit; Token Plan 429 → alert + 429 sintetico col reset; MINIMAX_FALLBACK_STATUSES nei 6 path verso Anthropic; _fwd_minimax_short (8s) per i siti via _call_full; Semaphore(8); /health con snapshot limiter; fix 502 relay mancante in _mixed_haiku_rescue · commit 9b345d1, unit+smoke verdi, router live · vault: progetti/ai-router-minimax-rate-limiter
 - [x] **D39** — Bug fix server-tool gate in mixed: WebSearch (server tool Anthropic senza input_schema) girava a MiniMax → 400 (2013). History con server_tool_use rompeva ogni richiesta MiniMax successiva. Fix: _has_server_tools gate in _pipeline_think_act + _strip_server_tools_for_minimax in remap. Principio: MiniMax non può eseguire capacita server-side Anthropic. · commit 8530a97 pushato, router riavviato + ping 200
 - [x] **D33** — Fix tool_use agentici mixed/inverse: `classify_t2` bypassa pipeline su `tools` + routing agentico → Anthropic (MiniMax-M3 non fa tool_use) · `9892a84` (live :8773/:8774 = 429 firma Anthropic)
