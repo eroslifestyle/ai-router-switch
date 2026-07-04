@@ -19,6 +19,7 @@ updated: 2026-06-29
 - [x] **D34** — OAuth marker Claude Code fix (sk-ant-oat01 richiede marker esatto nel system, fasi THINK/OPPOSE non lo avevano) · `a4d9a77` + refactor etichette
 - [x] **D34** — Gerarchia mixed 4 regole bloccanti + 429 escalation immediata · `1730b3b` (pushed) + `ed24e2d` (fix SSE rewrite)
 - [x] **D30** — Stress test 4 modalità in carico reale — OK su sessione 2026-06-30 (mixed T0/T1 live, M3 esegue, no blocchi)
+- [x] **D39** — Bug fix server-tool gate in mixed: WebSearch (server tool Anthropic senza input_schema) girava a MiniMax → 400 (2013). History con server_tool_use rompeva ogni richiesta MiniMax successiva. Fix: _has_server_tools gate in _pipeline_think_act + _strip_server_tools_for_minimax in remap. Principio: MiniMax non può eseguire capacita server-side Anthropic. · commit 8530a97 pushato, router riavviato + ping 200
 - [x] **D33** — Fix tool_use agentici mixed/inverse: `classify_t2` bypassa pipeline su `tools` + routing agentico → Anthropic (MiniMax-M3 non fa tool_use) · `9892a84` (live :8773/:8774 = 429 firma Anthropic)
 - [x] **D27** — Bug fix OAuth beta header in `forward_anthropic_direct` (verify T2 inverse) · 998658b
 - [x] **D28** — Bug fix `_call_full` connection leak: `up.release()` su tutti i branch · 998658b
