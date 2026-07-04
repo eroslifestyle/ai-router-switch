@@ -1988,6 +1988,9 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
             mixed_fail_reset(chat_fp)
             log(f"mixed-new ACT rescue: modello utente {up.status} OK fp={chat_fp}")
             return await relay(up)
+        if up.status == 429:  # FIX 2026-07-04: 429 → relay subito (Retry-After), no hammering Haiku
+            log(f"mixed-new ACT rescue: modello utente 429 Rate Limit → relay subito fp={chat_fp}")
+            return await relay(up)
         log(f"mixed-new ACT rescue: modello utente {up.status} → Haiku")
         try:
             await up.release()
@@ -2005,6 +2008,9 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
             mixed_fail_reset(chat_fp)
             log(f"mixed-new ACT rescue Haiku OK fp={chat_fp}")
             return await relay(up_h, extra_headers={"x-ai-verified": "haiku-rescue-act"})
+        if up_h.status == 429:  # FIX 2026-07-04: 429 Haiku → relay 429, non 502
+            log(f"mixed-new ACT rescue Haiku 429 Rate Limit → relay subito fp={chat_fp}")
+            return await relay(up_h)
         log(f"mixed-new ACT rescue Haiku {up_h.status} → 502")
         try:
             await up_h.release()
