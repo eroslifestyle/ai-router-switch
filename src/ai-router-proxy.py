@@ -1198,6 +1198,16 @@ def _build_act_body(orig: dict, plan: str, tools_to_call: list,
     return json.dumps(body).encode()
 
 
+# ── Context window thresholds (byte → token ≈ /4 per English+code) ────────
+# MiniMax-M2.7 context ≈ 192k token → 750k byte
+MINIMAX_CONTEXT_BYTE_LIMIT = int(os.environ.get("AIROUTER_MINIMAX_CONTEXT_LIMIT", "750000"))
+
+def _is_context_too_large_for_minimax(body_bytes: bytes) -> bool:
+    """Stima preventiva: se il body supera ~MINIMAX_CONTEXT_BYTE_LIMIT byte,
+    MiniMax fallirà con 400 context-exceed (2013). Salta MiniMax e vai diretto
+    al rescue Haiku per evitare il 400 (che consuma i token comunque)."""
+    return len(body_bytes) > MINIMAX_CONTEXT_BYTE_LIMIT
+
 async def _is_context_exceed_400(up) -> tuple:
     """MiniMax ha context window più piccolo di Anthropic (1M). Su conversazioni
     lunghe risponde 400 'context window exceeds limit (2013)'. Questo 400 NON è un
@@ -1265,6 +1275,13 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     if MINIMAX_MODEL not in executors:
         executors.append(MINIMAX_MODEL)
     orig_model = (orig.get("model") or "").strip()
+    # ── FIX 2026-07-04: preventive check ──────────────────────────────────
+    # Se il body è troppo grande per MiniMax, skippa MiniMax e vai diretto al
+    # rescue Haiku (evita il 400 che consuma i token comunque).
+    if orig_model and not orig_model.startswith("MiniMax"):
+        if _is_context_too_large_for_minimax(body):
+            log(f"mixed-new ACT: body {len(body)}b > limit → skip MiniMax, rescue Haiku fp={chat_fp}")
+            return await _mixed_haiku_rescue(request, orig, session, chat_fp)
     up = None
     used_exe = ""
     for exe in executors:
@@ -1309,8 +1326,9 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
         return await relay(up, extra_headers={
             "x-ai-verified": f"anthropic-think+{used_exe.lower()}-act"})
 
-    # 2 fail MiniMax → Haiku esegue il task originale (tools inclusi)
-    log(f"mixed-new ACT: 2 fail MiniMax → Haiku esegue fp={chat_fp}")
+async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str):
+    """Esegue il rescue Haiku: chiamato sia dal check preventivo che dal fallback."""
+    log(f"mixed-new ACT: Haiku rescue fp={chat_fp}")
     try:
         haiku_body = dict(orig)
         haiku_body["model"] = THINK_MODEL  # Haiku
@@ -1328,14 +1346,21 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
 
     # Ultimo gradino: il modello superiore selezionato dall'utente (Fable/Opus/Sonnet)
     try:
-        up2 = await forward_anthropic(request, body, session)
-        log(f"mixed-new ACT rescue {orig_model or 'anthropic'} {up2.status} fp={chat_fp}")
-        if up2.status < 400:
+        up = await forward_anthropic_direct(request, json.dumps(dict(orig)).encode(), session)
+        if up.status < 400:
             mixed_fail_reset(chat_fp)
-        return await relay(up2, extra_headers={"x-ai-verified": "user-model-rescue-act"})
+            return await relay(up)
+        log(f"mixed-new ACT superiore {up.status} → errore 502")
+        try:
+            await up.release()
+        except Exception:
+            pass
     except Exception as e:
-        return web.json_response({"type": "error", "error": {"type": "router_error",
-            "message": f"act+rescue ko: {e}"}}, status=502)
+        log(f"mixed-new ACT superiore EXC: {e}")
+
+    return web.json_response(
+        {"type": "error", "error": {"type": "router_error",
+         "message": "mixed: Haiku rescue + superiore falliti"}}, status=502)
 
 
 # ── MINIMAX redesign 2026-07-02: M3 ORCHESTRA (mai esegue) → executor inferiore ACT ──
