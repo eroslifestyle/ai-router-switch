@@ -1818,7 +1818,12 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
     shrunk = dict(orig_dict)
     # Mantiene tail dei messaggi recenti per preservare contesto immediato
     tail_msgs = messages[-SHRINK_KEEP_TAIL:] if messages else []
-    system_content = orig_dict.get("system", "") + "\n\n" + summary_content if "system" in orig_dict else summary_content
+    system_val = orig_dict.get("system", "")
+    if isinstance(system_val, list):
+        system_str = "\n\n".join(json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else v for v in system_val)
+    else:
+        system_str = system_val or ""
+    system_content = system_str + "\n\n" + summary_content if "system" in orig_dict else summary_content
     shrunk["messages"] = [{"role": "system", "content": system_content}] + tail_msgs
 
     # Rimuovi thinking se presente (mangia budget)
