@@ -7,7 +7,7 @@ updated: 2026-06-29
 
 # Project Global TOD — ai-router-switch
 
-**Main HEAD**: 098cb48 · **Branch**: main · **Updated**: 2026-07-04 17:23
+**Main HEAD**: 8b616ce · **Branch**: main · **Updated**: 2026-07-04 21:10
 
 ## ✅ Done (recenti, evidence-gated)
 
@@ -37,6 +37,12 @@ updated: 2026-06-29
       Comando: script bash che testa tutte e 4 le porte (8787=dynamic/8771=anthropic/8772=minimax/8773=mixed/8774=inverse) in sequenza
       Done when: tutti gli header x-ai-verified corretti, tutti gli esecutori i modelli attesi (Anthropic/M3 orchestra→executor/M2.7)
 
+- [ ] **D44** — Mitigazione latenza mixed mode (P1)
+      Comando: confronta latenza minimax puro (:8772) vs mixed (:8787) su stesso task
+      Done when: documento con raccomandazioni implementabili + test che dimostra il gap
+- [ ] **D45** — Valutare bypass THINK per task leggeri in mixed (P2)
+      Comando: grep _build_think_body + piano vuoto fallback
+      Done when: test dimostra miglioramento latenza senza degrado qualità
 - [ ] **D41** — Delta-correction TPM con usage reale (confer M3 2026-07-04): su successo il limiter registra la stima (bytes/4+max_tokens) che sovrastima le risposte corte → sottoutilizzo TPM 30-60%. relay() estrae già l'usage dai chunk SSE (FIX F _acc_buf): retro-alimentare MINIMAX_LIMITER.record con i token reali · P2
       Comando: `grep -n "_acc_buf\|extract_usage" src/ai-router-proxy.py` per il punto di aggancio in relay()
       Done when: snapshot /health mostra tpm_used ≈ usage reale (non stima), unit test delta-correction verde
