@@ -3531,7 +3531,10 @@ async def _run_multiport():
     # Una sola ClientSession condivisa da tutte le porte.
     session = ClientSession(
         # FIX: timeout granulari per streaming SSE - sock_read alto per first-token LLM
-        timeout=ClientTimeout(total=600, connect=30, sock_read=120, sock_connect=15),
+        # BUG 2026-07-08 (FIX-SSE-MID-RESPONSE): total=600 era cronometro assoluto
+        # che tronca stream lunghi (thinking esteso, agenti secondari). Rimosso: i
+        # path non-streaming sono protetti da _call_full→asyncio.wait_for(90s).
+        timeout=ClientTimeout(connect=30, sock_read=120, sock_connect=15),
         connector=connector,
         # FIX #7 CRITICAL: auto_decompress=False per passthrough brotli/gzip.
         auto_decompress=False,
