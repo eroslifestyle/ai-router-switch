@@ -1063,6 +1063,21 @@ def _synthetic_429(msg: str) -> "_SyntheticResponse":
         429, {"type": "error", "error": {"type": "rate_limit_error", "message": msg}})
 
 
+def _synthetic_context_exceed(body_bytes: bytes) -> "_SyntheticResponse":
+    """FIX 2026-07-08 (BUG-CTX-PRE): MiniMax ha context window ~200k.
+    Se il body in ingresso eccede MINIMAX_CONTEXT_BYTE_LIMIT, NON chiamare
+    MiniMax: ritorna synthetic 400 con marker header x-ai-context-exceeded=true
+    così i call site (mixed/minimax/inverse) possono intercettare il caso,
+    fare shrink/retry prima di girare il 400 nudo al client (che altrimenti
+    blocca la sessione in loop)."""
+    resp = _SyntheticResponse(
+        400, {"type": "error", "error": {"type": "context_exceeded",
+                "message": f"body {len(body_bytes)}b > MiniMax limit "
+                           f"{MINIMAX_CONTEXT_BYTE_LIMIT}b: caller must shrink"}})
+    resp.headers["x-ai-context-exceeded"] = "true"
+    return resp
+
+
 async def forward_minimax(request, body, session, retry_budget_sec: float = None):
     """Chiama MiniMax con pacing preventivo (MinimaxRateLimiter, limiti
     ufficiali × safety) + retry con backoff sul 429 (redesign 2026-07-04).
@@ -1078,6 +1093,15 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
     THINK ecc.) passano retry_budget_sec basso."""
     if retry_budget_sec is None:
         retry_budget_sec = MINIMAX_RETRY_CAP_SEC
+    # FIX 2026-07-08 (BUG-CTX-PRE): pre-check sintetico per body > limite MiniMax.
+    # Evita di spendere il round-trip che ritornerebbe 400 context-exceed (2013).
+    # Call site che NON hanno già il shrink integrato (minimax-orchestrate, inverse
+    # T1) intercettano questo marker e applicano shrink prima del 400 al client.
+    try:
+        if len(body) > MINIMAX_CONTEXT_BYTE_LIMIT:
+            return _synthetic_context_exceed(body)
+    except Exception:
+        pass
     url = MINIMAX_UPSTREAM + request.path_qs
     key = await get_minimax_key()
     headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS}
@@ -1864,6 +1888,43 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
         return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
 
 
+async def _try_shrink_body(orig: dict, target_bytes: int) -> "bytes | None":
+    """FIX 2026-07-08 (BUG-CTX-PRE): riusa l'algoritmo di _shrink_and_retry_minimax
+    senza retry. Ritorna i bytes shrinkati se ci stanno in target_bytes,
+    altrimenti None. Usato dai rescue che devono già gestire il fallback dopo."""
+    try:
+        msgs = orig.get("messages", []) or []
+        if not msgs:
+            return None
+        budget = SUMMARY_BUDGET
+        summary_content = _build_shrink_summary(msgs, budget)
+        tail_msgs = msgs[-SHRINK_KEEP_TAIL:] if msgs else []
+        system_val = orig.get("system", "")
+        if isinstance(system_val, list):
+            system_str = "\n\n".join(json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else v for v in system_val)
+        else:
+            system_str = system_val or ""
+        system_content = system_str + "\n\n" + summary_content if "system" in orig else summary_content
+        shrunk = dict(orig)
+        shrunk["messages"] = [{"role": "system", "content": system_content}] + tail_msgs
+        shrunk.pop("thinking", None)
+        shrunk_bytes = json.dumps(shrunk).encode()
+        if len(shrunk_bytes) <= target_bytes:
+            return shrunk_bytes
+        # shrink non basta: prova tail aggressivo
+        tail2 = msgs[-2:] if len(msgs) >= 2 else msgs
+        shrunk2 = dict(orig)
+        shrunk2["messages"] = [{"role": "system", "content": summary_content}] + tail2
+        shrunk2.pop("thinking", None)
+        shrunk2_bytes = json.dumps(shrunk2).encode()
+        if len(shrunk2_bytes) <= target_bytes:
+            return shrunk2_bytes
+        return None
+    except Exception as e:
+        log(f"try_shrink_body EXC: {e}")
+        return None
+
+
 def _has_image_blocks(orig: dict) -> bool:
     """True se il body contiene blocchi image (vision). MiniMax è text-only:
     ignora i blocchi image e ALLUCINA la descrizione dal contesto chat
@@ -1924,7 +1985,8 @@ async def _is_context_exceed_400(up) -> tuple:
     low = raw.lower()
     is_ctx = (b"context window" in low or b"exceeds limit" in low
               or b"2013" in low or b"context_length" in low
-              or b"too long" in low or b"maximum context" in low)
+              or b"too long" in low or b"maximum context" in low
+              or b"context_exceeded" in low)  # FIX 2026-07-08: marker sintetico forward_minimax
     return (is_ctx, raw)
 
 
@@ -1934,6 +1996,15 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     chat_fp = _resolve_chat_fingerprint(request)
     mixed_fail_last_status = None  # traccia ultimo status nel loop ACT
     wants_stream = bool(orig.get("stream"))
+
+    # FIX 2026-07-08 (BUG-CTX-PRE): se il body è troppo grande per MiniMax,
+    # salta THINK (Anthropic regge ma è spreco di tempo + token) e vai diretto
+    # a shrink/retry → rescue Haiku/Anthropic. Senza questo, su body 1.5MB
+    # il THINK Anthropic può rispondere "piano vuoto" → fallback forward_minimax
+    # → synthetic 400 al client.
+    if _is_context_too_large_for_minimax(body):
+        log(f"mixed-new PRE: body {len(body)}b > limit → shrink/retry fp={chat_fp}")
+        return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
 
     # WEB-SEARCH GATE (utente 2026-07-04): in mixed la ricerca web la fa SEMPRE
     # MiniMax via MCP, mai Anthropic. Blocca il server-tool web_search Anthropic.
@@ -2116,11 +2187,24 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
     relay: callable necessario per restituire la risposta al client."""
     log(f"mixed-new ACT: Haiku rescue fp={chat_fp}")
 
+    # ── Gradino 0 (FIX 2026-07-08 BUG-CTX-PRE): se il body è troppo grande per
+    # qualsiasi modello, prova prima uno shrink. Se MAI shrink, rescue può solo
+    # rinviare al modello utente 1M; se è Haiku selezionato → 400 inevitabile.
+    body_bytes_rescue = json.dumps(dict(orig)).encode()
+    if len(body_bytes_rescue) > MINIMAX_CONTEXT_BYTE_LIMIT:
+        log(f"mixed-new ACT rescue: body {len(body_bytes_rescue)}b > limit, tento shrink fp={chat_fp}")
+        shrunk = await _try_shrink_body(orig, MINIMAX_CONTEXT_BYTE_LIMIT)
+        if shrunk is not None and shrunk != body_bytes_rescue:
+            body_bytes_rescue = shrunk
+            log(f"mixed-new ACT rescue: shrink OK → {len(body_bytes_rescue)}b fp={chat_fp}")
+        # se shrink impossibile, vai dritto al rescue sotto: modello utente 1M
+        # può ancora gestirlo; il problema Haiku lo gestiamo dopo se capita.
+
     # ── Gradino 1: modello originale utente (Fable/Opus/Sonnet — 1M context) ──
     # FIX 2026-07-04: se il body è grande (>750k byte), Haiku fallisce con 400.
     # Proviamo PRIMA il modello dell'utente — ha context 1M, gestisce tutto.
     try:
-        up = await forward_anthropic_direct(request, json.dumps(dict(orig)).encode(), session)
+        up = await forward_anthropic_direct(request, body_bytes_rescue, session)
         if up.status < 400:
             mixed_fail_reset(chat_fp)
             log(f"mixed-new ACT rescue: modello utente {up.status} OK fp={chat_fp}")
@@ -2140,7 +2224,22 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
     try:
         haiku_body = dict(orig)
         haiku_body["model"] = THINK_MODEL
-        up_h = await forward_anthropic(request, json.dumps(haiku_body).encode(), session)
+        haiku_body_bytes = json.dumps(haiku_body).encode()
+        # FIX 2026-07-08 (BUG-CTX-PRE): Haiku ha 200k context. Se ancora >limite
+        # anche dopo shrink sopra, shrink ulteriore per Haiku — o skippa.
+        if len(haiku_body_bytes) > MINIMAX_CONTEXT_BYTE_LIMIT:
+            shrunk_h = await _try_shrink_body(haiku_body, MINIMAX_CONTEXT_BYTE_LIMIT)
+            if shrunk_h is None:
+                log(f"mixed-new ACT rescue: body {len(haiku_body_bytes)}b > Haiku limit, skip fp={chat_fp}")
+                return web.json_response(
+                    {"type": "error", "error": {"type": "context_exceeded",
+                     "message": f"body troppo grande anche per shrink: "
+                                f"{len(haiku_body_bytes)}b > 200k Haiku limit. "
+                                "Ridurre la cronologia o usare un modello 1M."}},
+                    status=400)
+            haiku_body_bytes = shrunk_h
+            log(f"mixed-new ACT rescue: shrink Haiku OK → {len(haiku_body_bytes)}b fp={chat_fp}")
+        up_h = await forward_anthropic(request, haiku_body_bytes, session)
         if up_h.status < 400:
             mixed_fail_reset(chat_fp)
             log(f"mixed-new ACT rescue Haiku OK fp={chat_fp}")
@@ -2221,6 +2320,36 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
     originale direttamente (rimappato a MINIMAX_MODEL): M3 resta fuori dall'esecuzione."""
     chat_fp = _resolve_chat_fingerprint(request)
 
+    # FIX 2026-07-08 (BUG-CTX-PRE): pre-check sintetico prima del THINK. Se il
+    # body è già oltre il limite MiniMax, il THINK M3 fallirà con 400 context-
+    # exceed → spreco di round-trip + sintomo classico del bug.
+    # Shrink una volta: se ci sta → executor diretto con body shrunk;
+    # altrimenti → 400 sintetico comprensibile al client.
+    if _is_context_too_large_for_minimax(body):
+        shrunk = await _try_shrink_body(orig, MINIMAX_CONTEXT_BYTE_LIMIT)
+        if shrunk is not None and shrunk != body:
+            log(f"minimax-orch PRE: body {len(body)}b shrink → {len(shrunk)}b, retry fp={chat_fp}")
+            try:
+                up_pre = await forward_minimax(request, shrunk, session)
+                if up_pre.status < 400:
+                    log(f"minimax-orch PRE shrunk OK {up_pre.status} fp={chat_fp}")
+                    return await relay(up_pre, extra_headers={"x-ai-verified": "minimax-m3-shrunk"})
+                try:
+                    await up_pre.release()
+                except Exception:
+                    pass
+            except Exception as e:
+                log(f"minimax-orch PRE shrunk EXC: {e}")
+        # shrunk non basta o fallisce: skip M3 THINK, executor diretto con body shrinked
+        # o errore comprensibile.
+        if shrunk is None:
+            log(f"minimax-orch PRE: body {len(body)}b > limit, shrink n/a → 400 fp={chat_fp}")
+            return web.json_response(
+                {"type": "error", "error": {"type": "context_exceeded",
+                 "message": f"body {len(body)}b > MiniMax limit {MINIMAX_CONTEXT_BYTE_LIMIT}b "
+                            f"e shrink non riesce. Ridurre la cronologia."}},
+                status=400)
+
     # WEB-SEARCH GATE (utente 2026-07-04): in minimax la ricerca web la fa SEMPRE
     # MiniMax via MCP, mai Anthropic. Blocca il server-tool web_search Anthropic.
     if _has_web_search_tool(orig):
@@ -2265,6 +2394,26 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
     except Exception as e:
         log(f"minimax-orch ACT EXC: {e} → executor diretto")
         return await _executor_direct()
+    # FIX 2026-07-08 (BUG-CTX-PRE): intercetta 400 context-exceed (pre-check
+    # sintetico di forward_minimax + risposta reale di MiniMax) → shrink/retry.
+    # Senza questo il 400 finiva al client e bloccava la sessione in tool loop.
+    if up.status == 400:
+        is_ctx_pre = up.headers.get("x-ai-context-exceeded") == "true" if hasattr(up, "headers") else False
+        is_ctx_real, _ = await _is_context_exceed_400(up)
+        # _is_context_exceed_400 sopra ha consumato il body: se NON era context,
+        # non possiamo piu' distinguere oltre. Rimane il marker pre-check.
+        if is_ctx_pre or is_ctx_real:
+            log(f"minimax-orch ACT {executor} 400 context-exceed → shrink/retry fp={chat_fp}")
+            try:
+                await up.release()
+            except Exception:
+                pass
+            return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
+        # NON era context-exceed: 400 di altro tipo. Rilascia e vai rescue generico.
+        try:
+            await up.release()
+        except Exception:
+            pass
     if up.status in FALLBACK_STATUSES:
         log(f"minimax-orch ACT {executor} {up.status} -> executor diretto (rescue)")
         try:
@@ -2467,8 +2616,22 @@ async def _m3_think_iter(request, session, orig, prev_plan, fixes=None, warnings
 
 async def _inverse_rescue_anthropic(request, body, session, relay) -> web.Response:
     """Fallback finale: Anthropic esegue la richiesta originale senza pipeline."""
+    # FIX 2026-07-08 (BUG-CTX-PRE): prima di girare il body intero a Anthropic,
+    # se è troppo grande prova shrink — modello utente 1M regge, ma il path
+    # attraverso forward_anthropic può finire su Haiku (200k) e 400.
     try:
-        up = await forward_anthropic(request, body, session)
+        rescue_body = body
+        if len(body) > MINIMAX_CONTEXT_BYTE_LIMIT:
+            try:
+                orig_dict = json.loads(body)
+            except Exception:
+                orig_dict = None
+            if orig_dict is not None:
+                shrunk = await _try_shrink_body(orig_dict, MINIMAX_CONTEXT_BYTE_LIMIT)
+                if shrunk is not None:
+                    log(f"inverse-rescue: body {len(body)}b shrink → {len(shrunk)}b")
+                    rescue_body = shrunk
+        up = await forward_anthropic(request, rescue_body, session)
         return await relay(up, extra_headers={"x-ai-verified": "inverse-rescue-anthropic"})
     except Exception as e:
         return web.json_response({"type": "error", "error": {"type": "router_error",
@@ -2996,6 +3159,15 @@ async def handle(request):
                     return web.json_response(
                         {"type": "error", "error": {"type": "router_error",
                          "message": f"rescue ko: {e2}"}}, status=502)
+            # FIX 2026-07-08 (BUG-CTX-PRE): intercetta 400 context-exceed → shrink/retry
+            # prima di girare il body intero a Anthropic (modello utente 1M regge, ma
+            # se finisce su Haiku 200k siamo daccapo). Shrink tenta comunque.
+            if up.status == 400:
+                is_ctx_pre = up.headers.get("x-ai-context-exceeded") == "true" if hasattr(up, "headers") else False
+                is_ctx_real, _ = await _is_context_exceed_400(up)
+                if is_ctx_pre or is_ctx_real:
+                    log(f"inverse T1 M3 400 context-exceed → shrink/retry fp={chat_fp}")
+                    return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
             inverse_fail_reset(chat_fp)
             log(f"inverse T0/T1 -> minimax {up.status} {request.path}")
             return await relay(up)
