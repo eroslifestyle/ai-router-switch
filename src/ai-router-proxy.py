@@ -2203,8 +2203,12 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
     # ── Gradino 1: modello originale utente (Fable/Opus/Sonnet — 1M context) ──
     # FIX 2026-07-04: se il body è grande (>750k byte), Haiku fallisce con 400.
     # Proviamo PRIMA il modello dell'utente — ha context 1M, gestisce tutto.
+    user_status = None
+    haiku_status = None
+    haiku_response = None  #FIX 2026-07-08: trattieni per relay 5xx upstream
     try:
         up = await forward_anthropic_direct(request, body_bytes_rescue, session)
+        user_status = up.status
         if up.status < 400:
             mixed_fail_reset(chat_fp)
             log(f"mixed-new ACT rescue: modello utente {up.status} OK fp={chat_fp}")
@@ -2218,6 +2222,7 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
         except Exception:
             pass
     except Exception as e:
+        user_status = None
         log(f"mixed-new ACT rescue modello utente EXC: {e} → Haiku")
 
     # ── Gradino 2: Haiku (fallback, context 200k) ──
@@ -2240,12 +2245,17 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
             haiku_body_bytes = shrunk_h
             log(f"mixed-new ACT rescue: shrink Haiku OK → {len(haiku_body_bytes)}b fp={chat_fp}")
         up_h = await forward_anthropic(request, haiku_body_bytes, session)
+        haiku_status = up_h.status
         if up_h.status < 400:
             mixed_fail_reset(chat_fp)
             log(f"mixed-new ACT rescue Haiku OK fp={chat_fp}")
             return await relay(up_h, extra_headers={"x-ai-verified": "haiku-rescue-act"})
         if up_h.status == 429:  # FIX 2026-07-04: 429 Haiku → relay 429, non 502
             log(f"mixed-new ACT rescue Haiku 429 Rate Limit → relay subito fp={chat_fp}")
+            return await relay(up_h)
+        # FIX 2026-07-08: 5xx upstream → relay il body reale, non 502 generico
+        if up_h.status >= 500:
+            log(f"mixed-new ACT rescue: Haiku {up_h.status}, relay upstream body fp={chat_fp}")
             return await relay(up_h)
         log(f"mixed-new ACT rescue Haiku {up_h.status} → 502")
         try:
@@ -2255,9 +2265,14 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
     except Exception as e:
         log(f"mixed-new ACT rescue Haiku EXC: {e} → 502")
 
+    # FIX 2026-07-08: messaggio informativo con gli step falliti e status reali
+    detail = f"user={user_status}, haiku={haiku_status}" if user_status or haiku_status else "unknown"
+    log(f"mixed-new ACT rescue giving 502 — {detail} fp={chat_fp}")
     return web.json_response(
         {"type": "error", "error": {"type": "router_error",
-         "message": "mixed: Haiku rescue + superiore falliti"}}, status=502)
+         "message": f"Haiku rescue failed: user_model={user_status}, Haiku={haiku_status}. "
+                    f"Possibili cause: rate-limit upstream, body troppo grande, o API key problem."}},
+        status=502)
 
 
 # ── MINIMAX redesign 2026-07-02: M3 ORCHESTRA (mai esegue) → executor inferiore ACT ──
