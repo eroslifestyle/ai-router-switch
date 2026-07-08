@@ -1949,6 +1949,23 @@ def _has_server_tools(orig: dict) -> bool:
                for t in orig.get("tools") or [])
 
 
+def _body_has_images(orig: dict) -> bool:
+    """FIX 2026-07-08 BUG-VISION-400: True se il body contiene image block.
+    Usato per bypassare _serve_minimax_vision: M3 allucina le immagini (test: dice
+    "black" per PNG blue) e restituisce 400 per immagini grandi/strane, 400 perso
+    senza rescue. Anthropic gestisce le immagini correttamente → bypass diretto."""
+    try:
+        for msg in (orig.get("messages") or []):
+            content = msg.get("content")
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "image":
+                        return True
+    except Exception:
+        pass
+    return False
+
+
 def _has_web_search_tool(orig: dict) -> bool:
     """web_search server-tool Anthropic nel body. In mixed/minimax la ricerca web
     la esegue SEMPRE MiniMax via MCP, mai Anthropic -> gate 400 (utente 2026-07-04)."""
@@ -2154,6 +2171,12 @@ async def _serve_minimax_vision(request, orig: dict, session, chat_fp: str, rela
     Ordine gate: server-tool vince (immagine+web_search → None → Anthropic).
     Context troppo grande → None (screenshot >750KB → no 400 nudo)."""
     if _has_server_tools(orig):
+        return None
+    # FIX 2026-07-08 BUG-VISION-400: MiniMax-M3 allucina le immagini (test: dice "black"
+    # per un PNG blue) e restituisce 400 per immagini grandi/strane senza fare rescue.
+    # Anthropic processa le immagini correttamente. Bypass diretto → caller rescue.
+    if _body_has_images(orig):
+        log(f"minimax-vision: body ha immagini → bypass diretto Anthropic fp={chat_fp}")
         return None
     orig2 = dict(orig)
     orig_model = (orig2.get("model") or "").strip()
