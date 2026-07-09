@@ -7,10 +7,12 @@ updated: 2026-06-29
 
 # Project Global TOD — ai-router-switch
 
-**Main HEAD**: 8b616ce · **Branch**: main · **Updated**: 2026-07-04 21:10
+**Main HEAD**: 22445f9 · **Branch**: main · **Updated**: 2026-07-09
 
 ## ✅ Done (recenti, evidence-gated)
 
+- [x] **DEBUG-SYSTEM + BUG-ORPHAN-BLOCK** — Sistema debug permanente (/debug/last|errors|stats, logs/debug-errors.jsonl in chiaro gzip-decompresso) `e056993` + root cause finale 502: `_repair_message_sequence` rimuoveva interi messaggi solo se TUTTI block=tool_result, falliva su messaggi misti [tool_result,text] → orfano → Anthropic 400. Fix v2 rimuove blocchi orfani + scarta role=system iniettati `22445f9`. Verificato replay body reale 502→200 (2026-07-09)
+- [x] **BUG-502-MIXED** — Catena di 3 root cause del 502 mixed mode: (1) 502 mascherato `df0acd7`, (2) vision→Anthropic `cdcdb41`, (3a) shrink role:system `6e2ffda`, (3b) shrink spaia tool_use/tool_result → `_repair_message_sequence` `c21b67d`. Verificato main: big_tool_body 502→200, worst-case thinking+tool+cache 200, no regressioni (2026-07-09)
 - [x] **CARD-FIX-9988** — Fix pulsanti switch card GUI: puntavano a proxy `:9988` rimosso → ora `POST :8787/admin/mode/{mode}` + mode da `GET /health` · commit `cb2c4f1` pushato, round-trip curl verificato + test utente live (2026-07-03)
 - [x] **BUG-SHRINK-SYSTEM-LIST** — Fix crash `_shrink_and_retry_minimax` linea 1821: `system` field può essere `list` (non solo `str`) → TypeError `can only concatenate list not str`. Normalizza a str con `isinstance` check. Stessa logica già in `_smart_truncate:1715` · commit `098cb48` pushato, health OK, zero errori post-restart · hotfix live 2026-07-04
 - [x] **C1/H1/H2/M1/M3/L7/M2/L1/L3/L4/L6a/OPPOSE** — Audit 4-modi + 12 fix P0-P4 (3 crash/bug reali, escalation coerenza, pulizia 7 orfane, OPPOSE modello utente) · commits `4762406` `9813e5a` `334760c` (2026-07-02 20:30-20:50)

@@ -1056,7 +1056,7 @@ MINIMAX_MIN_MAX_TOKENS = int(os.environ.get("AIROUTER_MINIMAX_MIN_MAX_TOKENS", "
 # 'anthropic-beta: context-management-2025-06-27'. Senza quel header,
 # api.anthropic.com restituisce 400 "Extra inputs are not permitted".
 # Lo strippiamo a monte per evitare il 400 (il client può inviarlo).
-ANTHROPIC_UNSUPPORTED_FIELDS = ("context_management",)
+ANTHROPIC_UNSUPPORTED_FIELDS = ("context_management", "thinking", "output_config")
 
 
 def strip_unsupported_fields(raw: bytes, fields: tuple) -> bytes:
