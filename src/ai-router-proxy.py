@@ -1849,6 +1849,9 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
         system_str = system_val or ""
     system_content = system_str + "\n\n" + summary_content if "system" in orig_dict else summary_content
     shrunk["messages"] = tail_msgs
+    # ponytail: ripara coppie tool troncate
+    tail_msgs = _repair_message_sequence(tail_msgs)
+    shrunk["messages"] = tail_msgs
     if system_content:
         shrunk["system"] = system_content
 
@@ -1890,6 +1893,59 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
         return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
 
 
+def _repair_message_sequence(messages: list) -> list:
+    """FIX 2026-07-09 BUG-SHRINK-TOOL: ripara una sequenza di messaggi dopo troncamento
+    per renderla strutturalmente valida per l'API Anthropic.
+
+    Problema: SHRINK_KEEP_TAIL puo' troncare a meta' una coppia tool_use/tool_result.
+    Soluzione: strip orfani dall'inizio, strip tool_use finale orfano, assicura
+    che il primo messaggio sia role=user con contenuto testuale."""
+    if not messages:
+        return messages
+
+    msgs = list(messages)
+
+    # 1. Rimuovi tool_result orfani all'inizio
+    while (len(msgs) >= 1 and
+           msgs[0].get("role") == "user" and
+           isinstance(msgs[0].get("content"), list) and
+           all(c.get("type") == "tool_result" for c in msgs[0].get("content", []) if isinstance(c, dict))):
+        msgs.pop(0)
+
+    if not msgs:
+        return []
+
+    # 2. Rimuovi tool_use orfano dall'ultimo messaggio se e' un assistant con solo tool_use finali
+    last = msgs[-1]
+    if last.get("role") == "assistant":
+        content = last.get("content")
+        if isinstance(content, list):
+            # Rimuovi solo i blocchi tool_result orfani (sequenza non chiusa)
+            # Se ends with tool_use block -> rimuovilo
+            clean = [c for c in content if not (isinstance(c, dict) and c.get("type") == "tool_use")]
+            if len(clean) < len(content):
+                last = dict(last)
+                msgs[-1] = last
+                if clean:
+                    last["content"] = clean
+                else:
+                    msgs.pop()
+
+    if not msgs:
+        return []
+
+    # 3. Rimuovi eventuali thinking blocks orfani se il contesto e' spezzato
+    last = msgs[-1]
+    if last.get("role") == "assistant" and isinstance(last.get("content"), list):
+        # Se il primo content block e' un text vuoto dopo rimozione -> strip
+        content = last.get("content", [])
+        if content and isinstance(content[0], dict) and content[0].get("type") == "text":
+            if not content[0].get("text", "").strip() and len(content) == 1:
+                msgs.pop()
+
+    return msgs
+
+
 async def _try_shrink_body(orig: dict, target_bytes: int) -> "bytes | None":
     """FIX 2026-07-08 (BUG-CTX-PRE): riusa l'algoritmo di _shrink_and_retry_minimax
     senza retry. Ritorna i bytes shrinkati se ci stanno in target_bytes,
@@ -1914,6 +1970,9 @@ async def _try_shrink_body(orig: dict, target_bytes: int) -> "bytes | None":
         system_content = system_str + "\n\n" + summary_content if system_str else summary_content
         shrunk = dict(orig)
         shrunk["messages"] = tail_msgs
+        # ponytail: ripara coppie tool troncate
+        tail_msgs = _repair_message_sequence(tail_msgs)
+        shrunk["messages"] = tail_msgs
         if system_content:
             shrunk["system"] = system_content
         shrunk.pop("thinking", None)
@@ -1922,6 +1981,8 @@ async def _try_shrink_body(orig: dict, target_bytes: int) -> "bytes | None":
             return shrunk_bytes
         # shrink non basta: prova tail aggressivo
         tail2 = msgs[-2:] if len(msgs) >= 2 else msgs
+        # ponytail: ripara coppie tool troncate
+        tail2 = _repair_message_sequence(tail2)
         shrunk2 = dict(orig)
         shrunk2["messages"] = tail2
         if system_str:
@@ -2252,6 +2313,18 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
         if up.status == 400:
             try:
                 raw = await up.read()
+                # FIX 2026-07-09 DIAG: decomprimi gzip/brotli prima di loggare
+                try:
+                    if raw[:2] == b"\x1f\x8b":
+                        raw = gzip.decompress(raw)
+                    elif raw[:2] == b"br":
+                        try:
+                            import brotli as _br
+                            raw = _br.decompress(raw)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
                 user_body = raw[:5000]
                 log(f"mixed-new ACT rescue: Anthropic 400 body={user_body[:500]} fp={chat_fp}")
             except Exception:
@@ -2313,6 +2386,18 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
         if up_h.status == 400:
             try:
                 raw_h = await up_h.read()
+                # FIX 2026-07-09 DIAG: decomprimi gzip/brotli prima di loggare
+                try:
+                    if raw_h[:2] == b"\x1f\x8b":
+                        raw_h = gzip.decompress(raw_h)
+                    elif raw_h[:2] == b"br":
+                        try:
+                            import brotli as _br
+                            raw_h = _br.decompress(raw_h)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
                 haiku_body = raw_h[:5000]
                 log(f"mixed-new ACT rescue: Haiku 400 body={haiku_body[:500]} fp={chat_fp}")
             except Exception:
@@ -3698,6 +3783,21 @@ async def _run_multiport():
             await r.cleanup()
         await session.close()  # chiude anche il connector associato
         log("shutdown complete")
+
+
+if __name__ == "__main__":
+    # Self-check: _repair_message_sequence ripara coppie tool troncate
+    broken = [
+        {"role": "user", "content": [{"type": "tool_result", "id": "t1", "content": "res1"}]},  # orfano
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "think"},
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "t2", "name": "foo"}]},  # orfano
+    ]
+    fixed = _repair_message_sequence(broken)
+    assert fixed[0]["role"] == "user" and fixed[0]["content"] == "hello", f"FAIL: {fixed[0]}"
+    assert all(c["type"] != "tool_use" for c in fixed[-1].get("content", []) if isinstance(c, dict)), f"FAIL tool_use orfano: {fixed[-1]}"
+    assert not any(m.get("content") == [{"type": "tool_result", "id": "t1", "content": "res1"}] for m in fixed), f"FAIL: tool_result orfano ancora presente"
+    print("OK: _repair_message_sequence test passed")
 
 
 def main():
