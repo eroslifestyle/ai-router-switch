@@ -2068,50 +2068,69 @@ def _repair_message_sequence(messages: list) -> list:
     """FIX 2026-07-09 BUG-SHRINK-TOOL: ripara una sequenza di messaggi dopo troncamento
     per renderla strutturalmente valida per l'API Anthropic.
 
-    Problema: SHRINK_KEEP_TAIL puo' troncare a meta' una coppia tool_use/tool_result.
-    Soluzione: strip orfani dall'inizio, strip tool_use finale orfano, assicura
-    che il primo messaggio sia role=user con contenuto testuale."""
+    Problema: SHRINK_KEEP_TAIL puo' troncare a meta' una coppia tool_use/tool_result,
+    lasciando un tool_result il cui tool_use e' stato tagliato → Anthropic 400
+    "unexpected tool_use_id found in tool_result blocks".
+
+    FIX 2026-07-09 v2 (BUG-ORPHAN-BLOCK, evidence /debug/last): la v1 rimuoveva
+    l'intero messaggio solo se TUTTI i suoi blocchi erano tool_result. Ma il caso
+    reale ha messaggi MISTI [tool_result, text] → all() False → orfano NON rimosso.
+    La v2 rimuove i singoli BLOCCHI tool_result orfani (tool_use_id mai visto in un
+    tool_use precedente), conservando gli altri blocchi. Gestisce anche i role=system
+    iniettati in messages (formato MiniMax, Anthropic li rifiuta)."""
     if not messages:
         return messages
 
-    msgs = list(messages)
-
-    # 1. Rimuovi tool_result orfani all'inizio
-    while (len(msgs) >= 1 and
-           msgs[0].get("role") == "user" and
-           isinstance(msgs[0].get("content"), list) and
-           all(c.get("type") == "tool_result" for c in msgs[0].get("content", []) if isinstance(c, dict))):
-        msgs.pop(0)
-
-    if not msgs:
-        return []
-
-    # 2. Rimuovi tool_use orfano dall'ultimo messaggio se e' un assistant con solo tool_use finali
-    last = msgs[-1]
-    if last.get("role") == "assistant":
-        content = last.get("content")
+    seen_tool_use = set()
+    repaired = []
+    for m in messages:
+        role = m.get("role")
+        # role=system dentro messages: formato MiniMax/OpenAI, Anthropic lo rifiuta.
+        # Lo scartiamo (il system vero e' gia' al top-level dopo lo shrink).
+        if role == "system":
+            continue
+        content = m.get("content")
         if isinstance(content, list):
-            # Rimuovi solo i blocchi tool_result orfani (sequenza non chiusa)
-            # Se ends with tool_use block -> rimuovilo
-            clean = [c for c in content if not (isinstance(c, dict) and c.get("type") == "tool_use")]
-            if len(clean) < len(content):
-                last = dict(last)
-                msgs[-1] = last
-                if clean:
-                    last["content"] = clean
+            new_content = []
+            for b in content:
+                if isinstance(b, dict) and b.get("type") == "tool_result":
+                    if b.get("tool_use_id") in seen_tool_use:
+                        new_content.append(b)  # coppia valida
+                    # else: orfano → scarta il singolo blocco
                 else:
-                    msgs.pop()
+                    new_content.append(b)
+            # registra i tool_use di QUESTO messaggio per i tool_result successivi
+            for b in content:
+                if isinstance(b, dict) and b.get("type") == "tool_use":
+                    seen_tool_use.add(b.get("id"))
+            if new_content:
+                mm = dict(m)
+                mm["content"] = new_content
+                repaired.append(mm)
+            # messaggio svuotato (era solo tool_result orfani) → scartato
+        else:
+            repaired.append(m)
 
+    msgs = repaired
     if not msgs:
         return []
 
-    # 3. Rimuovi eventuali thinking blocks orfani se il contesto e' spezzato
+    # Anthropic esige che il primo messaggio sia role=user. Rimuovi eventuali
+    # assistant iniziali rimasti scoperti dopo lo scarto degli orfani.
+    while msgs and msgs[0].get("role") != "user":
+        msgs.pop(0)
+    if not msgs:
+        return []
+
+    # Rimuovi un tool_use finale orfano (il suo tool_result e' oltre il taglio)
     last = msgs[-1]
     if last.get("role") == "assistant" and isinstance(last.get("content"), list):
-        # Se il primo content block e' un text vuoto dopo rimozione -> strip
-        content = last.get("content", [])
-        if content and isinstance(content[0], dict) and content[0].get("type") == "text":
-            if not content[0].get("text", "").strip() and len(content) == 1:
+        clean = [c for c in last["content"]
+                 if not (isinstance(c, dict) and c.get("type") == "tool_use")]
+        if len(clean) < len(last["content"]):
+            if clean:
+                mm = dict(last); mm["content"] = clean; msgs[-1] = mm
+            else:
                 msgs.pop()
 
     return msgs
