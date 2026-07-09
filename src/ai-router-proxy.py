@@ -15,6 +15,7 @@ Claude Code punta qui: ANTHROPIC_BASE_URL=http://127.0.0.1:8787
 Gestisce streaming SSE. Backend diretto (nessun proxy intermedio).
 """
 import asyncio
+import gzip
 import json
 import os
 import random
@@ -27,7 +28,177 @@ from pathlib import Path
 
 from aiohttp import web, ClientSession, ClientTimeout, TCPConnector
 
-# ── Modulo resilienza (RESILIENZA 2026-06-30) ────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SISTEMA DI DEBUG — cattura errori upstream in chiaro ( mai più gzip illeggibile)
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _decompress_upstream(raw: bytes, content_encoding: str = "") -> str:
+    """Decomprime gzip/brotli/deflate un body upstream in testo leggibile UTF-8."""
+    if not raw:
+        return ""
+    try:
+        enc = (content_encoding or "").lower()
+        if raw[:2] == b"\x1f\x8b" or "gzip" in enc:
+            raw = gzip.decompress(raw)
+        elif "br" in enc or "brotli" in enc:
+            try:
+                import brotli
+                raw = brotli.decompress(raw)
+            except Exception:
+                pass
+        elif "deflate" in enc:
+            import zlib
+            try:
+                raw = zlib.decompress(raw, -zlib.MAX_WBITS)
+            except Exception:
+                raw = zlib.decompress(raw)
+    except Exception:
+        pass
+    return raw.decode("utf-8", errors="replace")
+
+
+def _body_has_images(data: dict) -> bool:
+    """True se il body request contiene blocchi immagine."""
+    for m in (data or {}).get("messages", []):
+        c = m.get("content", [])
+        if isinstance(c, list):
+            for b in c:
+                if isinstance(b, dict) and b.get("type") == "image":
+                    return True
+    return False
+
+
+def _orig_flags(orig: dict | None) -> dict:
+    """Estrae flags diagnostici dal body richiesta originale."""
+    if not orig:
+        return {}
+    msgs = orig.get("messages", [])
+    img_count = 0
+    for m in msgs:
+        c = m.get("content", [])
+        if isinstance(c, list):
+            for b in c:
+                if isinstance(b, dict) and b.get("type") == "image":
+                    img_count += 1
+    return {
+        "msg_count": len(msgs),
+        "has_tools": bool(orig.get("tools")),
+        "has_images": img_count > 0,
+        "has_thinking": bool(orig.get("thinking")),
+        "cache_control_count": img_count,
+        "system_is_list": isinstance(orig.get("system"), list),
+    }
+
+
+# ── Debug event store ──────────────────────────────────────────────────────────
+
+_DEBUG_PROJECT_ROOT = Path(__file__).resolve().parent.parent  # src/ai-router-proxy.py → project root
+_DEBUG_LOGS_DIR = _DEBUG_PROJECT_ROOT / "logs"
+_DEBUG_LOGS_DIR.mkdir(exist_ok=True)
+_DEBUG_JSONL = _DEBUG_LOGS_DIR / "debug-errors.jsonl"
+_DEBUG_LAST_REQ = _DEBUG_LOGS_DIR / "debug-last-request.json"
+DEBUG_EVENTS: deque = deque(maxlen=100)
+
+
+def _rotated_jsonl_path() -> Path:
+    """Ritorna il path del JSONL: .1 se .0 supera 10MB."""
+    p = _DEBUG_JSONL
+    try:
+        if p.exists() and p.stat().st_size > 10 * 1024 * 1024:
+            rot = p.with_suffix(".jsonl.1")
+            try:
+                rot.unlink()
+            except Exception:
+                pass
+            p.rename(rot)
+    except Exception:
+        pass
+    return p
+
+
+def debug_capture(*, kind: str, request=None, fp: str = "", client_model: str = "",
+                  upstream_model: str = "", status: int | None = None, stage: str = "",
+                  upstream_status: int | None = None, upstream_raw: bytes = b"",
+                  upstream_encoding: str = "", sent_bytes: int = 0, orig: dict | None = None,
+                  note: str = "") -> None:
+    """Registra un evento di errore in RAM + JSONL. Decomprime il body upstream.
+    Mai loggare Authorization / x-api-key / Bearer token."""
+    try:
+        err_text = _decompress_upstream(upstream_raw, upstream_encoding)
+        flags = _orig_flags(orig)
+        record = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "kind": kind,
+            "fp": fp,
+            "mode": get_file_mode(),
+            "path": getattr(request, "path", "") if request else "",
+            "client_model": client_model,
+            "upstream_model": upstream_model,
+            "status": status,
+            "stage": stage,
+            "upstream_status": upstream_status,
+            "upstream_error": err_text[:2000],
+            "sent_bytes": sent_bytes,
+            "flags": flags,
+            "note": note,
+        }
+        DEBUG_EVENTS.append(record)
+        p = _rotated_jsonl_path()
+        try:
+            with open(p, "a") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+        if orig:
+            req_copy = dict(orig)
+            for m in req_copy.get("messages", []):
+                c = m.get("content", [])
+                if isinstance(c, list):
+                    for b in c:
+                        if isinstance(b, dict) and b.get("type") == "image":
+                            d = b.get("data", "")
+                            if len(d) > 200:
+                                b["data"] = d[:200] + f"... [TRUNCATED {len(d) - 200} chars]"
+            try:
+                with open(_DEBUG_LAST_REQ, "w") as f:
+                    json.dump(req_copy, f, ensure_ascii=False)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+async def debug_errors(request) -> web.Response:
+    """GET /debug/errors?n=20 → ultimi N eventi dal ring buffer (JSON)."""
+    n = int(request.query.get("n", "20"))
+    return web.json_response(list(DEBUG_EVENTS)[-n:])
+
+
+async def debug_last(request) -> web.Response:
+    """GET /debug/last → ultimo evento formattato leggibile (text/plain)."""
+    if not DEBUG_EVENTS:
+        return web.Response(text="No errors captured yet.", content_type="text/plain")
+    ev = DEBUG_EVENTS[-1]
+    lines = [f"{k}: {json.dumps(v, ensure_ascii=False)}" for k, v in ev.items()]
+    return web.Response(text="\n".join(lines), content_type="text/plain")
+
+
+async def debug_stats(request) -> web.Response:
+    """GET /debug/stats → conteggio per status/stage/kind."""
+    from collections import Counter
+    c_kind = Counter(e.get("kind") for e in DEBUG_EVENTS)
+    c_stage = Counter(e.get("stage") for e in DEBUG_EVENTS)
+    c_upstream = Counter(str(e.get("upstream_status")) for e in DEBUG_EVENTS)
+    return web.json_response({
+        "total": len(DEBUG_EVENTS),
+        "by_kind": dict(c_kind),
+        "by_stage": dict(c_stage),
+        "by_upstream_status": dict(c_upstream),
+    })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Aggiunge: OAuth self-test al boot, modalità DEGRADED quando OAuth manca,
 # auto-recovery quando l'utente fa `claude login` (refresh creds.json),
 # crash dump su SIGTERM, heartbeat watchdog per freeze-watchdog esterno.
@@ -2193,6 +2364,20 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
         if up.status in MINIMAX_FALLBACK_STATUSES:
             n = mixed_fail_inc(chat_fp)
             log(f"mixed-new ACT {exe} {up.status} ({n}/{MIXED_FAIL_THRESHOLD})")
+            # cattura body per debug prima del continue
+            _raw = b""
+            try:
+                _raw = await up.read()
+            except Exception:
+                pass
+            debug_capture(
+                kind="minimax_fallback_5xx", request=request, fp=chat_fp,
+                client_model=orig.get("model", ""), upstream_model=exe,
+                status=up.status, stage="act_loop",
+                upstream_status=up.status, upstream_raw=_raw,
+                upstream_encoding=up.headers.get("Content-Encoding", ""),
+                orig=orig, note=f"{exe} status {up.status}",
+            )
             try:
                 await up.release()
             except Exception:
@@ -2204,6 +2389,14 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
         is_ctx, _ctx_raw = await _is_context_exceed_400(up)
         if is_ctx:
             log(f"mixed-new ACT {exe} 400 context-exceed → rescue modello utente fp={chat_fp}")
+            debug_capture(
+                kind="minimax_context_exceed", request=request, fp=chat_fp,
+                client_model=orig.get("model", ""), upstream_model=exe,
+                status=400, stage="act_loop",
+                upstream_status=400, upstream_raw=_ctx_raw or b"",
+                upstream_encoding="gzip",
+                orig=orig, note=f"{exe} context-exceed 400",
+            )
             try:
                 await up.release()
             except Exception:
@@ -2269,9 +2462,25 @@ async def _serve_minimax_vision(request, orig: dict, session, chat_fp: str, rela
     if up.status in MINIMAX_FALLBACK_STATUSES:  # 5xx (429 già gestito interno)
         log(f"minimax-vision {up.status} → fallback caller fp={chat_fp}")
         try:
+            raw = await up.read()
+        except Exception:
+            raw = b""
+        try:
             await up.release()
         except Exception:
             pass
+        debug_capture(
+            kind="minimax_vision_fallback",
+            request=request, fp=chat_fp,
+            client_model=orig.get("model", ""),
+            upstream_model="MiniMax-M3",
+            status=up.status, stage="minimax_vision",
+            upstream_status=up.status,
+            upstream_raw=raw,
+            upstream_encoding=up.headers.get("Content-Encoding", ""),
+            orig=orig,
+            note=f"status {up.status} → caller fallback",
+        )
         return None
     log(f"minimax-vision M3 OK {up.status} fp={chat_fp}")
     return await relay(up, extra_headers={"x-ai-verified": "minimax-m3-vision"})
@@ -2299,9 +2508,9 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
     # FIX 2026-07-04: se il body è grande (>750k byte), Haiku fallisce con 400.
     # Proviamo PRIMA il modello dell'utente — ha context 1M, gestisce tutto.
     user_status = None
-    user_body = None
+    user_raw = b""
     haiku_status = None
-    haiku_body = None
+    haiku_raw = b""
     try:
         up = await forward_anthropic_direct(request, body_bytes_rescue, session)
         user_status = up.status
@@ -2309,50 +2518,26 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
             mixed_fail_reset(chat_fp)
             log(f"mixed-new ACT rescue: modello utente {up.status} OK fp={chat_fp}")
             return await relay(up)
-        # FIX 2026-07-09 DIAG: cattura body 400 per capire COSA Anthropic rifiuta
+        # Cattura il body upstream per debug_capture
         if up.status == 400:
             try:
-                raw = await up.read()
-                # FIX 2026-07-09 DIAG: decomprimi gzip/brotli prima di loggare
-                try:
-                    if raw[:2] == b"\x1f\x8b":
-                        raw = gzip.decompress(raw)
-                    elif raw[:2] == b"br":
-                        try:
-                            import brotli as _br
-                            raw = _br.decompress(raw)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-                user_body = raw[:5000]
-                log(f"mixed-new ACT rescue: Anthropic 400 body={user_body[:500]} fp={chat_fp}")
+                user_raw = await up.read()
             except Exception:
                 pass
             try:
                 await up.release()
             except Exception:
                 pass
-            # Dump diagnostico su file per analisi post-mortem
-            try:
-                dump = {
-                    "step": "user_model",
-                    "status": up.status,
-                    "body_chars": len(user_body) if user_body else 0,
-                    "body_preview": (user_body.decode(errors="replace") if user_body else "")[:2000],
-                }
-                with open(f"/tmp/ai-router-400-dump-{chat_fp}.json", "w") as df:
-                    json.dump(dump, df)
-            except Exception:
-                pass
-        if up.status == 429:  # FIX 2026-07-04: 429 → relay subito (Retry-After), no hammering Haiku
+        elif up.status == 429:
             log(f"mixed-new ACT rescue: modello utente 429 Rate Limit → relay subito fp={chat_fp}")
             return await relay(up)
-        log(f"mixed-new ACT rescue: modello utente {up.status} → Haiku")
-        try:
-            await up.release()
-        except Exception:
-            pass
+        else:
+            try:
+                await up.release()
+            except Exception:
+                pass
+        if up.status not in (400, 429):
+            log(f"mixed-new ACT rescue: modello utente {up.status} → Haiku")
     except Exception as e:
         user_status = None
         log(f"mixed-new ACT rescue modello utente EXC: {e} → Haiku")
@@ -2360,6 +2545,8 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
     # ── Gradino 2: Haiku (fallback, context 200k) ──
     try:
         haiku_body_dict = dict(orig)
+        haiku_status = None
+        haiku_raw = b""
         haiku_body_dict["model"] = THINK_MODEL
         haiku_body_bytes = json.dumps(haiku_body_dict).encode()
         # FIX 2026-07-08 (BUG-CTX-PRE): Haiku ha 200k context. Se ancora >limite
@@ -2382,81 +2569,74 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
             mixed_fail_reset(chat_fp)
             log(f"mixed-new ACT rescue Haiku OK fp={chat_fp}")
             return await relay(up_h, extra_headers={"x-ai-verified": "haiku-rescue-act"})
-        # FIX 2026-07-09 DIAG: cattura body 400 Haiku
+        # Cattura il body upstream per debug_capture
+        haiku_raw = b""
         if up_h.status == 400:
             try:
-                raw_h = await up_h.read()
-                # FIX 2026-07-09 DIAG: decomprimi gzip/brotli prima di loggare
-                try:
-                    if raw_h[:2] == b"\x1f\x8b":
-                        raw_h = gzip.decompress(raw_h)
-                    elif raw_h[:2] == b"br":
-                        try:
-                            import brotli as _br
-                            raw_h = _br.decompress(raw_h)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-                haiku_body = raw_h[:5000]
-                log(f"mixed-new ACT rescue: Haiku 400 body={haiku_body[:500]} fp={chat_fp}")
+                haiku_raw = await up_h.read()
             except Exception:
                 pass
             try:
                 await up_h.release()
             except Exception:
                 pass
-            # Dump diagnostico su file
-            try:
-                dump = {
-                    "step": "haiku",
-                    "status": up_h.status,
-                    "body_chars": len(haiku_body) if haiku_body else 0,
-                    "body_preview": (haiku_body.decode(errors="replace") if haiku_body else "")[:2000],
-                }
-                with open(f"/tmp/ai-router-400-dump-{chat_fp}.json", "w") as df:
-                    json.dump(dump, df)
-            except Exception:
-                pass
-        if up_h.status == 429:  # FIX 2026-07-04: 429 Haiku → relay 429, non 502
+        elif up_h.status == 429:
             log(f"mixed-new ACT rescue Haiku 429 Rate Limit → relay subito fp={chat_fp}")
             return await relay(up_h)
-        # FIX 2026-07-08: 5xx upstream → relay il body reale, non 502 generico
-        if up_h.status >= 500:
+        elif up_h.status >= 500:
             log(f"mixed-new ACT rescue: Haiku {up_h.status}, relay upstream body fp={chat_fp}")
             return await relay(up_h)
-        log(f"mixed-new ACT rescue Haiku {up_h.status} → 502")
-        try:
-            await up_h.release()
-        except Exception:
-            pass
+        else:
+            try:
+                await up_h.release()
+            except Exception:
+                pass
+        haiku_status = up_h.status
     except Exception as e:
         log(f"mixed-new ACT rescue Haiku EXC: {e} → 502")
 
-    # FIX 2026-07-09 DIAG: messaggio informativo che include il body 400 reale di Anthropic
-    detail = f"user={user_status}, haiku={haiku_status}"
-    user_preview = (user_body.decode(errors="replace") if user_body else "")[:500]
-    haiku_preview = (haiku_body.decode(errors="replace") if haiku_body else "")[:500]
-    log(f"mixed-new ACT rescue giving 502 — {detail} | user_body={user_preview} | haiku_body={haiku_preview} fp={chat_fp}")
-    # Costruisci messaggio 502 informativo con il body Anthropic
-    msgs = []
-    if user_body:
-        try:
-            msgs.append(f"user_model Anthropic 400: {user_body.decode(errors='replace')[:500]}")
-        except Exception:
-            msgs.append(f"user_model Anthropic 400: {user_preview}")
-    if haiku_body:
-        try:
-            msgs.append(f"Haiku Anthropic 400: {haiku_body.decode(errors='replace')[:500]}")
-        except Exception:
-            msgs.append(f"Haiku Anthropic 400: {haiku_preview}")
-    msg_parts = [f"Haiku rescue failed: user_model={user_status}, Haiku={haiku_status}."]
-    if msgs:
-        msg_parts.append("Error details: " + " | ".join(msgs))
-    msg_parts.append("Possibili cause: rate-limit upstream, body non valido, o API key problem.")
+    # ── DEBUG: cattura TUTTO in chiaro prima del 502 ──────────────────────
+    # cattura il body richiesta che è stato effettivamente mandato (post-shrink se applicato)
+    req_bytes_debug = json.dumps(dict(orig)).encode()
+    debug_capture(
+        kind="mixed_rescue_502",
+        request=request,
+        fp=chat_fp,
+        client_model=orig.get("model", ""),
+        status=502,
+        stage="user_model",
+        upstream_status=user_status or 0,
+        upstream_raw=user_raw,
+        upstream_encoding="gzip",  # upstream sempre gzip su 400
+        sent_bytes=len(req_bytes_debug),
+        orig=orig,
+        note=f"haiku_stage={haiku_status}",
+    )
+    debug_capture(
+        kind="mixed_rescue_502",
+        request=request,
+        fp=chat_fp,
+        client_model=orig.get("model", ""),
+        status=502,
+        stage="haiku",
+        upstream_status=haiku_status or 0,
+        upstream_raw=haiku_raw,
+        upstream_encoding="gzip",
+        sent_bytes=len(req_bytes_debug),
+        orig=orig,
+        note="final_502",
+    )
+
+    # Messaggio informativo al client col body Anthropic in chiaro
+    err_parts = [f"Haiku rescue failed: user_model={user_status}, Haiku={haiku_status}."]
+    if user_raw:
+        err_parts.append("user_model: " + _decompress_upstream(user_raw)[:300])
+    if haiku_raw:
+        err_parts.append("haiku: " + _decompress_upstream(haiku_raw)[:300])
+    err_parts.append("Dettagli: /debug/last")
     return web.json_response(
         {"type": "error", "error": {"type": "router_error",
-         "message": " | ".join(msg_parts)}},
+         "message": " | ".join(err_parts)}},
         status=502)
 
 
@@ -2965,7 +3145,8 @@ async def handle(request):
     # FIX #1: Health-check e probe watchdog interni: risposta locale 200.
     # Evita che /, /readyz, /livez, /health, /stats, /status vadano all'upstream
     # e causino cascate 404/405 infinite che bloccano l'utente.
-    _HC = {"/", "/readyz", "/livez", "/health", "/stats", "/metrics", "/status"}
+    _HC = {"/", "/readyz", "/livez", "/health", "/stats", "/metrics", "/status",
+           "/debug/errors", "/debug/last", "/debug/stats"}
     if request.path in _HC:
         return web.Response(status=200, text="ok")
 
@@ -2994,6 +3175,7 @@ async def handle(request):
         probe_paths = {
             "/", "/health", "/readyz", "/livez", "/stats", "/metrics", "/status",
             "/__router_health", "/__resilience",
+            "/debug/errors", "/debug/last", "/debug/stats",
         }
         if request.path not in probe_paths:
             log(f"DEGRADED: rifiuto {request.path} (OAuth {RESILIENCE_INST.state()})")
@@ -3043,6 +3225,40 @@ async def handle(request):
             _pending = [k for k in _request_orig_model if k != "__remap__"]
             if len(_pending) == 1:
                 orig_model = _request_orig_model.pop(_pending[0])
+        # DEBUG: per errori 4xx/5xx (NON 429 rate-limit), cattura body in chiaro.
+        # Per gli errori il body è piccolo e non streaming — lo logghiamo e poi
+        # lo mandiamo diretto senza passare dal loop iter_any() (che consumerebbe
+        # il body già letto). Il 200 OK prosegue normalmente nel loop streaming.
+        if upstream.status >= 400 and upstream.status not in {429}:
+            try:
+                _raw = await upstream.read()
+            except Exception:
+                _raw = b""
+            _enc = upstream.headers.get("Content-Encoding", "")
+            debug_capture(
+                kind=f"relay_error_{upstream.status}",
+                request=request, fp=chat_fp_for_rewrite,
+                client_model=orig_model or "",
+                status=upstream.status, stage="relay",
+                upstream_status=upstream.status,
+                upstream_raw=_raw,
+                upstream_encoding=_enc,
+                orig=orig,
+                note=f"extra_headers={list((extra_headers or {}).keys())}",
+            )
+            # Invia l'errore direttamente: body già letto, costruisci web.Response
+            upstream.release()
+            err_headers = {}
+            for k, v in upstream.headers.items():
+                lk = k.lower()
+                if lk in HOP_HEADERS:
+                    continue
+                if lk == "content-length":
+                    continue
+                err_headers[k] = v
+            if extra_headers:
+                err_headers.update(extra_headers)
+            return web.Response(body=_raw, status=upstream.status, headers=err_headers)
         # FIX SSE: rileva text/event-stream per applicare flush immediato + no-buffering
         is_sse = "text/event-stream" in (upstream.headers.get("content-type") or "").lower()
         resp = web.StreamResponse(status=upstream.status)
@@ -3699,6 +3915,9 @@ def _make_app(session, forced_mode):
 
     app.router.add_get("/health", healthz)
     app.router.add_get("/__resilience", resiliencez)
+    app.router.add_get("/debug/errors", debug_errors)
+    app.router.add_get("/debug/last", debug_last)
+    app.router.add_get("/debug/stats", debug_stats)
     app.router.add_post("/admin/mode/{mode}", admin_mode_switch)
     # catch-all: tutto il routing path-level passa da handle().
     # NB: route literal con '*' NON funziona in aiohttp; il catch-all e'

@@ -8,6 +8,8 @@ secrets*
 .env
 graphify-out/
 src/graphify-out/
+logs/*.jsonl
+logs/*.json
 .graphifyignore
 .graphify_root
 
