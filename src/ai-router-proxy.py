@@ -1848,7 +1848,9 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
     else:
         system_str = system_val or ""
     system_content = system_str + "\n\n" + summary_content if "system" in orig_dict else summary_content
-    shrunk["messages"] = [{"role": "system", "content": system_content}] + tail_msgs
+    shrunk["messages"] = tail_msgs
+    if system_content:
+        shrunk["system"] = system_content
 
     # Rimuovi thinking se presente (mangia budget)
     shrunk.pop("thinking", None)
@@ -1904,9 +1906,16 @@ async def _try_shrink_body(orig: dict, target_bytes: int) -> "bytes | None":
             system_str = "\n\n".join(json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else v for v in system_val)
         else:
             system_str = system_val or ""
-        system_content = system_str + "\n\n" + summary_content if "system" in orig else summary_content
+        # FIX 2026-07-09 ROOT-CAUDE: `role:system` in messages è formato OpenAI/MiniMax.
+        # Anthropic rifiuta con 400: "use the top-level 'system' parameter".
+        # Il fix: metti il system al LIVELLO TOP (parametro system), non in messages.
+        # Questo è valido sia per Anthropic (dove è l'unico formato accettato)
+        # che per MiniMax (che accetta entrambi).
+        system_content = system_str + "\n\n" + summary_content if system_str else summary_content
         shrunk = dict(orig)
-        shrunk["messages"] = [{"role": "system", "content": system_content}] + tail_msgs
+        shrunk["messages"] = tail_msgs
+        if system_content:
+            shrunk["system"] = system_content
         shrunk.pop("thinking", None)
         shrunk_bytes = json.dumps(shrunk).encode()
         if len(shrunk_bytes) <= target_bytes:
@@ -1914,7 +1923,9 @@ async def _try_shrink_body(orig: dict, target_bytes: int) -> "bytes | None":
         # shrink non basta: prova tail aggressivo
         tail2 = msgs[-2:] if len(msgs) >= 2 else msgs
         shrunk2 = dict(orig)
-        shrunk2["messages"] = [{"role": "system", "content": summary_content}] + tail2
+        shrunk2["messages"] = tail2
+        if system_str:
+            shrunk2["system"] = system_str
         shrunk2.pop("thinking", None)
         shrunk2_bytes = json.dumps(shrunk2).encode()
         if len(shrunk2_bytes) <= target_bytes:
@@ -2227,8 +2238,9 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
     # FIX 2026-07-04: se il body è grande (>750k byte), Haiku fallisce con 400.
     # Proviamo PRIMA il modello dell'utente — ha context 1M, gestisce tutto.
     user_status = None
+    user_body = None
     haiku_status = None
-    haiku_response = None  #FIX 2026-07-08: trattieni per relay 5xx upstream
+    haiku_body = None
     try:
         up = await forward_anthropic_direct(request, body_bytes_rescue, session)
         user_status = up.status
@@ -2236,6 +2248,30 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
             mixed_fail_reset(chat_fp)
             log(f"mixed-new ACT rescue: modello utente {up.status} OK fp={chat_fp}")
             return await relay(up)
+        # FIX 2026-07-09 DIAG: cattura body 400 per capire COSA Anthropic rifiuta
+        if up.status == 400:
+            try:
+                raw = await up.read()
+                user_body = raw[:5000]
+                log(f"mixed-new ACT rescue: Anthropic 400 body={user_body[:500]} fp={chat_fp}")
+            except Exception:
+                pass
+            try:
+                await up.release()
+            except Exception:
+                pass
+            # Dump diagnostico su file per analisi post-mortem
+            try:
+                dump = {
+                    "step": "user_model",
+                    "status": up.status,
+                    "body_chars": len(user_body) if user_body else 0,
+                    "body_preview": (user_body.decode(errors="replace") if user_body else "")[:2000],
+                }
+                with open(f"/tmp/ai-router-400-dump-{chat_fp}.json", "w") as df:
+                    json.dump(dump, df)
+            except Exception:
+                pass
         if up.status == 429:  # FIX 2026-07-04: 429 → relay subito (Retry-After), no hammering Haiku
             log(f"mixed-new ACT rescue: modello utente 429 Rate Limit → relay subito fp={chat_fp}")
             return await relay(up)
@@ -2250,13 +2286,13 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
 
     # ── Gradino 2: Haiku (fallback, context 200k) ──
     try:
-        haiku_body = dict(orig)
-        haiku_body["model"] = THINK_MODEL
-        haiku_body_bytes = json.dumps(haiku_body).encode()
+        haiku_body_dict = dict(orig)
+        haiku_body_dict["model"] = THINK_MODEL
+        haiku_body_bytes = json.dumps(haiku_body_dict).encode()
         # FIX 2026-07-08 (BUG-CTX-PRE): Haiku ha 200k context. Se ancora >limite
         # anche dopo shrink sopra, shrink ulteriore per Haiku — o skippa.
         if len(haiku_body_bytes) > MINIMAX_CONTEXT_BYTE_LIMIT:
-            shrunk_h = await _try_shrink_body(haiku_body, MINIMAX_CONTEXT_BYTE_LIMIT)
+            shrunk_h = await _try_shrink_body(haiku_body_dict, MINIMAX_CONTEXT_BYTE_LIMIT)
             if shrunk_h is None:
                 log(f"mixed-new ACT rescue: body {len(haiku_body_bytes)}b > Haiku limit, skip fp={chat_fp}")
                 return web.json_response(
@@ -2273,6 +2309,30 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
             mixed_fail_reset(chat_fp)
             log(f"mixed-new ACT rescue Haiku OK fp={chat_fp}")
             return await relay(up_h, extra_headers={"x-ai-verified": "haiku-rescue-act"})
+        # FIX 2026-07-09 DIAG: cattura body 400 Haiku
+        if up_h.status == 400:
+            try:
+                raw_h = await up_h.read()
+                haiku_body = raw_h[:5000]
+                log(f"mixed-new ACT rescue: Haiku 400 body={haiku_body[:500]} fp={chat_fp}")
+            except Exception:
+                pass
+            try:
+                await up_h.release()
+            except Exception:
+                pass
+            # Dump diagnostico su file
+            try:
+                dump = {
+                    "step": "haiku",
+                    "status": up_h.status,
+                    "body_chars": len(haiku_body) if haiku_body else 0,
+                    "body_preview": (haiku_body.decode(errors="replace") if haiku_body else "")[:2000],
+                }
+                with open(f"/tmp/ai-router-400-dump-{chat_fp}.json", "w") as df:
+                    json.dump(dump, df)
+            except Exception:
+                pass
         if up_h.status == 429:  # FIX 2026-07-04: 429 Haiku → relay 429, non 502
             log(f"mixed-new ACT rescue Haiku 429 Rate Limit → relay subito fp={chat_fp}")
             return await relay(up_h)
@@ -2288,13 +2348,30 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
     except Exception as e:
         log(f"mixed-new ACT rescue Haiku EXC: {e} → 502")
 
-    # FIX 2026-07-08: messaggio informativo con gli step falliti e status reali
-    detail = f"user={user_status}, haiku={haiku_status}" if user_status or haiku_status else "unknown"
-    log(f"mixed-new ACT rescue giving 502 — {detail} fp={chat_fp}")
+    # FIX 2026-07-09 DIAG: messaggio informativo che include il body 400 reale di Anthropic
+    detail = f"user={user_status}, haiku={haiku_status}"
+    user_preview = (user_body.decode(errors="replace") if user_body else "")[:500]
+    haiku_preview = (haiku_body.decode(errors="replace") if haiku_body else "")[:500]
+    log(f"mixed-new ACT rescue giving 502 — {detail} | user_body={user_preview} | haiku_body={haiku_preview} fp={chat_fp}")
+    # Costruisci messaggio 502 informativo con il body Anthropic
+    msgs = []
+    if user_body:
+        try:
+            msgs.append(f"user_model Anthropic 400: {user_body.decode(errors='replace')[:500]}")
+        except Exception:
+            msgs.append(f"user_model Anthropic 400: {user_preview}")
+    if haiku_body:
+        try:
+            msgs.append(f"Haiku Anthropic 400: {haiku_body.decode(errors='replace')[:500]}")
+        except Exception:
+            msgs.append(f"Haiku Anthropic 400: {haiku_preview}")
+    msg_parts = [f"Haiku rescue failed: user_model={user_status}, Haiku={haiku_status}."]
+    if msgs:
+        msg_parts.append("Error details: " + " | ".join(msgs))
+    msg_parts.append("Possibili cause: rate-limit upstream, body non valido, o API key problem.")
     return web.json_response(
         {"type": "error", "error": {"type": "router_error",
-         "message": f"Haiku rescue failed: user_model={user_status}, Haiku={haiku_status}. "
-                    f"Possibili cause: rate-limit upstream, body troppo grande, o API key problem."}},
+         "message": " | ".join(msg_parts)}},
         status=502)
 
 
