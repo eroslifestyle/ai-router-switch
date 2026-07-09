@@ -98,7 +98,118 @@ _DEBUG_LOGS_DIR = _DEBUG_PROJECT_ROOT / "logs"
 _DEBUG_LOGS_DIR.mkdir(exist_ok=True)
 _DEBUG_JSONL = _DEBUG_LOGS_DIR / "debug-errors.jsonl"
 _DEBUG_LAST_REQ = _DEBUG_LOGS_DIR / "debug-last-request.json"
+_DEBUG_LAST_SENT = _DEBUG_LOGS_DIR / "debug-last-sent.json"
+_DEBUG_REPAIR_TRACE = _DEBUG_LOGS_DIR / "debug-repair-trace.json"
 DEBUG_EVENTS: deque = deque(maxlen=100)
+# Ring buffer: ultime 50 analisi del body SENT ad Anthropic
+SENT_ANALYSIS: deque = deque(maxlen=50)
+
+
+def _analyze_body_structure(body: "dict | bytes") -> dict:
+    """Diagnostica profondo di un body request — rileva orfani, anomalie strutturali.
+
+    Regola orfano (come Anthropic): un tool_result in messages[i] è valido SOLO se
+    messages[i-1] (role=assistant) contiene un tool_use con lo stesso id.
+    Se è in messages[0] o il precedente non ha quel tool_use → orfano."""
+    size_bytes = len(body) if isinstance(body, bytes) else len(json.dumps(body).encode())
+    data = json.loads(body) if isinstance(body, bytes) else body
+    msgs = data.get("messages", []) or []
+
+    def _block_types(msg: dict) -> list:
+        c = msg.get("content")
+        if isinstance(c, list):
+            return [b.get("type", "?") for b in c if isinstance(b, dict)]
+        return []
+
+    first = msgs[0] if msgs else {}
+    last = msgs[-1] if msgs else {}
+
+    # ── Orphan tool_results: regola "messaggio immediatamente precedente" ──
+    orphan_tool_results = []
+    tool_use_ids = []
+    tool_result_ids = []
+    for i, m in enumerate(msgs):
+        c = m.get("content")
+        if isinstance(c, list):
+            for b in c:
+                if isinstance(b, dict):
+                    t = b.get("type", "")
+                    if t == "tool_use":
+                        tool_use_ids.append(b.get("id", ""))
+                    elif t == "tool_result":
+                        tool_result_ids.append(b.get("tool_use_id", ""))
+                        tid = b.get("tool_use_id", "")
+                        # Controlla: messages[i-1] deve essere assistant con tool_use[tid]
+                        prev = msgs[i - 1] if i > 0 else None
+                        valid = (
+                            prev is not None
+                            and prev.get("role") == "assistant"
+                            and any(
+                                isinstance(pb, dict) and pb.get("type") == "tool_use" and pb.get("id") == tid
+                                for pb in (prev.get("content") or [])
+                                if isinstance(pb, dict)
+                            )
+                        )
+                        orphan_tool_results.append({
+                            "msg_index": i,
+                            "tool_use_id": tid,
+                            "reason": "first_message" if i == 0 else ("no_prior_tool_use" if not valid else "valid"),
+                        })
+
+    # Filtra: considera orfano solo se reason != valid
+    orphan_tool_results = [o for o in orphan_tool_results if o.get("reason") != "valid"]
+
+    # ── Dangling tool_uses: tool_use senza tool_result nel messaggio SUCCESSIVO ──
+    dangling_tool_uses = []
+    for i, m in enumerate(msgs):
+        if m.get("role") != "assistant":
+            continue
+        c = m.get("content")
+        if not isinstance(c, list):
+            continue
+        for b in c:
+            if isinstance(b, dict) and b.get("type") == "tool_use":
+                tid = b.get("id", "")
+                # Cerca se il SUCCESSIVO messaggio ha tool_result per questo tid
+                next_m = msgs[i + 1] if i + 1 < len(msgs) else None
+                has_result = (
+                    next_m is not None
+                    and isinstance(next_m.get("content"), list)
+                    and any(
+                        isinstance(rb, dict) and rb.get("type") == "tool_result" and rb.get("tool_use_id") == tid
+                        for rb in next_m.get("content")
+                    )
+                )
+                if not has_result:
+                    dangling_tool_uses.append({"msg_index": i, "tool_use_id": tid})
+
+    # ── role=system dentro messages (anomalo per Anthropic) ──
+    role_system_in_messages = sum(1 for m in msgs if m.get("role") == "system")
+
+    # ── immagini ──
+    has_images = False
+    for m in msgs:
+        c = m.get("content")
+        if isinstance(c, list):
+            for b in c:
+                if isinstance(b, dict) and b.get("type") == "image":
+                    has_images = True
+                    break
+        if has_images:
+            break
+
+    return {
+        "size_bytes": size_bytes,
+        "msg_count": len(msgs),
+        "first_msg": {"role": first.get("role"), "block_types": _block_types(first)},
+        "last_msg": {"role": last.get("role"), "block_types": _block_types(last)},
+        "role_system_in_messages": role_system_in_messages,
+        "orphan_tool_results": orphan_tool_results,
+        "dangling_tool_uses": dangling_tool_uses,
+        "has_images": has_images,
+        "tool_use_ids": len(tool_use_ids),
+        "tool_result_ids": len(tool_result_ids),
+    }
 
 
 def _rotated_jsonl_path() -> Path:
@@ -121,7 +232,7 @@ def debug_capture(*, kind: str, request=None, fp: str = "", client_model: str = 
                   upstream_model: str = "", status: int | None = None, stage: str = "",
                   upstream_status: int | None = None, upstream_raw: bytes = b"",
                   upstream_encoding: str = "", sent_bytes: int = 0, orig: dict | None = None,
-                  note: str = "") -> None:
+                  sent_analysis: dict | None = None, note: str = "") -> None:
     """Registra un evento di errore in RAM + JSONL. Decomprime il body upstream.
     Mai loggare Authorization / x-api-key / Bearer token."""
     try:
@@ -140,6 +251,7 @@ def debug_capture(*, kind: str, request=None, fp: str = "", client_model: str = 
             "upstream_status": upstream_status,
             "upstream_error": err_text[:2000],
             "sent_bytes": sent_bytes,
+            "sent_analysis": sent_analysis,
             "flags": flags,
             "note": note,
         }
@@ -196,6 +308,38 @@ async def debug_stats(request) -> web.Response:
         "by_stage": dict(c_stage),
         "by_upstream_status": dict(c_upstream),
     })
+
+
+async def debug_trace(request) -> web.Response:
+    """GET /debug/trace → confronto orig_analysis vs sent_analysis dell'ultimo errore.
+    Mostra il body ORIGINALE vs quello EFFETTIVAMENTE inviato ad Anthropic,
+    più il repair-trace se presente."""
+    # Ultimo evento
+    ev = DEBUG_EVENTS[-1] if DEBUG_EVENTS else None
+    # Ultimo body sent salvato
+    last_sent = None
+    try:
+        if _DEBUG_LAST_SENT.exists():
+            last_sent = json.loads(_DEBUG_LAST_SENT.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    # Repair trace se esiste
+    repair_trace = None
+    try:
+        if _DEBUG_REPAIR_TRACE.exists():
+            repair_trace = json.loads(_DEBUG_REPAIR_TRACE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    # Ultime 10 analisi dal ring buffer
+    recent_analysis = list(SENT_ANALYSIS)[-10:]
+
+    resp = {
+        "last_event": ev,
+        "last_sent": last_sent,
+        "repair_trace": repair_trace,
+        "recent_sent_analysis": recent_analysis,
+    }
+    return web.json_response(resp)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1180,6 +1324,55 @@ async def forward_anthropic(request, body, session):
     # da solo per non rompere.
     if "/v1/messages" in request.path:
         headers.setdefault("anthropic-version", "2023-06-01")
+    # ══ SANITIZZAZIONE FINALE (ROOT CAUSE FIX): ogni body verso Anthropic passa
+    # dal repair — elimina role=system da messages e tool_result orfani residuali.
+    # Il repair è idempotente: body già validi restano identici.
+    if "/v1/messages" in request.path:
+        try:
+            body_dict = json.loads(safe_body)
+            msgs = body_dict.get("messages", [])
+            role_sys = sum(1 for m in msgs if m.get("role") == "system")
+            if role_sys > 0 or msgs:
+                repaired = _repair_message_sequence(msgs)
+                body_dict["messages"] = repaired
+                safe_body = json.dumps(body_dict).encode()
+        except Exception:
+            pass  # non rompere se il parsing fallisce
+    # ── DEEP-DEBUG: analizza il body che sta per essere inviato ad Anthropic ──
+    _fn = "forward_anthropic"
+    try:
+        sent_body_for_analysis = safe_body  # bytes
+        analysis = _analyze_body_structure(sent_body_for_analysis)
+        # Ring buffer
+        SENT_ANALYSIS.append({
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "fn": _fn, "path": request.path,
+            "sent_bytes": analysis["size_bytes"],
+            "analysis": analysis,
+        })
+        # Salva SEMPRE l'ultimo body sent (immagini troncate)
+        try:
+            body_dict = json.loads(sent_body_for_analysis)
+            for m in body_dict.get("messages", []):
+                c = m.get("content", [])
+                if isinstance(c, list):
+                    for b in c:
+                        if isinstance(b, dict) and b.get("type") == "image":
+                            d = b.get("data", "")
+                            if len(d) > 200:
+                                b["data"] = d[:200] + f"... [TRUNCATED {len(d) - 200} chars]"
+            with open(_DEBUG_LAST_SENT, "w") as f:
+                json.dump({"sent_body": body_dict, "analysis": analysis}, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+        # WARNING se anomalie strutturali trovate
+        if analysis["orphan_tool_results"] or analysis["role_system_in_messages"] > 0:
+            log(f"[DEEP-DEBUG-WARN] {_fn}: orphans={len(analysis['orphan_tool_results'])} "
+                f"role_system_msgs={analysis['role_system_in_messages']} "
+                f"path={request.path} size={analysis['size_bytes']}b "
+                f"orphans={analysis['orphan_tool_results']}")
+    except Exception:
+        pass
     return await session.request(
         request.method, url, data=safe_body, headers=headers, allow_redirects=False
     )
@@ -1476,6 +1669,51 @@ async def forward_anthropic_direct(request, body, session):
     # Strip campi beta che api.anthropic.com rifiuta senza il beta header opportuno
     safe_body = strip_unsupported_fields(body, ANTHROPIC_UNSUPPORTED_FIELDS) \
         if "/v1/messages" in request.path else body  # FIX audit v5 #4: copri count_tokens
+    # ══ SANITIZZAZIONE FINALE (ROOT CAUSE FIX): ogni body verso Anthropic passa
+    # dal repair — elimina role=system da messages e tool_result orfani residuali.
+    # Il repair è idempotente: body già validi restano identici.
+    if "/v1/messages" in request.path:
+        try:
+            body_dict = json.loads(safe_body)
+            msgs = body_dict.get("messages", [])
+            role_sys = sum(1 for m in msgs if m.get("role") == "system")
+            if role_sys > 0 or msgs:
+                repaired = _repair_message_sequence(msgs)
+                body_dict["messages"] = repaired
+                safe_body = json.dumps(body_dict).encode()
+        except Exception:
+            pass
+    # ── DEEP-DEBUG: analizza il body che sta per essere inviato ad Anthropic ──
+    _fn = "forward_anthropic_direct"
+    try:
+        analysis = _analyze_body_structure(safe_body)
+        SENT_ANALYSIS.append({
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "fn": _fn, "path": request.path,
+            "sent_bytes": analysis["size_bytes"],
+            "analysis": analysis,
+        })
+        try:
+            body_dict = json.loads(safe_body)
+            for m in body_dict.get("messages", []):
+                c = m.get("content", [])
+                if isinstance(c, list):
+                    for b in c:
+                        if isinstance(b, dict) and b.get("type") == "image":
+                            d = b.get("data", "")
+                            if len(d) > 200:
+                                b["data"] = d[:200] + f"... [TRUNCATED {len(d) - 200} chars]"
+            with open(_DEBUG_LAST_SENT, "w") as f:
+                json.dump({"sent_body": body_dict, "analysis": analysis}, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+        if analysis["orphan_tool_results"] or analysis["role_system_in_messages"] > 0:
+            log(f"[DEEP-DEBUG-WARN] {_fn}: orphans={len(analysis['orphan_tool_results'])} "
+                f"role_system_msgs={analysis['role_system_in_messages']} "
+                f"path={request.path} size={analysis['size_bytes']}b "
+                f"orphans={analysis['orphan_tool_results']}")
+    except Exception:
+        pass
     return await session.request(
         request.method, url, data=safe_body, headers=headers, allow_redirects=False
     )
@@ -2072,66 +2310,108 @@ def _repair_message_sequence(messages: list) -> list:
     lasciando un tool_result il cui tool_use e' stato tagliato → Anthropic 400
     "unexpected tool_use_id found in tool_result blocks".
 
-    FIX 2026-07-09 v2 (BUG-ORPHAN-BLOCK, evidence /debug/last): la v1 rimuoveva
-    l'intero messaggio solo se TUTTI i suoi blocchi erano tool_result. Ma il caso
-    reale ha messaggi MISTI [tool_result, text] → all() False → orfano NON rimosso.
-    La v2 rimuove i singoli BLOCCHI tool_result orfani (tool_use_id mai visto in un
-    tool_use precedente), conservando gli altri blocchi. Gestisce anche i role=system
-    iniettati in messages (formato MiniMax, Anthropic li rifiuta)."""
+    FIX 2026-07-09 v2 (BUG-ORPHAN-BLOCK): rimuove i singoli BLOCCHI tool_result
+    orfani, non l'intero messaggio, e scarta i role=system iniettati.
+
+    FIX 2026-07-09 v3 (BUG-LEADING-ASSISTANT, evidence isolamento): la v2 rimuoveva
+    gli assistant iniziali con un pass finale `while msgs[0].role != user: pop`,
+    MA quell'assistant conteneva il tool_use di un tool_result successivo → lo
+    trasformava in orfano. Es: [assistant(tool_use X), user(tool_result X)] (coppia
+    valida) → pop assistant → [user(tool_result X)] → X ora orfano → Anthropic 400.
+    La v3 itera: rimuove leading non-user, poi ricomputa gli orfani da capo, finche'
+    stabile. Se la sequenza resta vuota o inizia con contenuto tool, antepone un
+    messaggio user testuale placeholder (Anthropic esige primo msg=user, no orfani)."""
     if not messages:
         return messages
 
-    seen_tool_use = set()
-    repaired = []
-    for m in messages:
-        role = m.get("role")
-        # role=system dentro messages: formato MiniMax/OpenAI, Anthropic lo rifiuta.
-        # Lo scartiamo (il system vero e' gia' al top-level dopo lo shrink).
-        if role == "system":
-            continue
-        content = m.get("content")
-        if isinstance(content, list):
-            new_content = []
-            for b in content:
-                if isinstance(b, dict) and b.get("type") == "tool_result":
-                    if b.get("tool_use_id") in seen_tool_use:
-                        new_content.append(b)  # coppia valida
-                    # else: orfano → scarta il singolo blocco
+    # scarta role=system (formato MiniMax, Anthropic li rifiuta in messages)
+    msgs = [dict(m) for m in messages if m.get("role") != "system"]
+
+    changed = True
+    while changed and msgs:
+        changed = False
+        # 1. primo msg deve essere user: rimuovi leading assistant/altro
+        while msgs and msgs[0].get("role") != "user":
+            msgs.pop(0)
+            changed = True
+        if not msgs:
+            break
+        # 2. ricomputa da zero: rimuovi i BLOCCHI tool_result senza tool_use visto
+        #    in un messaggio precedente (i tool_use rimossi al giro 1 ora mancano)
+        seen = set()
+        new_msgs = []
+        for m in msgs:
+            content = m.get("content")
+            if isinstance(content, list):
+                nc = []
+                for b in content:
+                    if isinstance(b, dict) and b.get("type") == "tool_result":
+                        if b.get("tool_use_id") in seen:
+                            nc.append(b)
+                        else:
+                            changed = True  # orfano → scarta blocco
+                    else:
+                        nc.append(b)
+                for b in content:
+                    if isinstance(b, dict) and b.get("type") == "tool_use":
+                        seen.add(b.get("id"))
+                if nc:
+                    m["content"] = nc
+                    new_msgs.append(m)
                 else:
-                    new_content.append(b)
-            # registra i tool_use di QUESTO messaggio per i tool_result successivi
-            for b in content:
-                if isinstance(b, dict) and b.get("type") == "tool_use":
-                    seen_tool_use.add(b.get("id"))
-            if new_content:
-                mm = dict(m)
-                mm["content"] = new_content
-                repaired.append(mm)
-            # messaggio svuotato (era solo tool_result orfani) → scartato
-        else:
-            repaired.append(m)
-
-    msgs = repaired
-    if not msgs:
-        return []
-
-    # Anthropic esige che il primo messaggio sia role=user. Rimuovi eventuali
-    # assistant iniziali rimasti scoperti dopo lo scarto degli orfani.
-    while msgs and msgs[0].get("role") != "user":
-        msgs.pop(0)
-    if not msgs:
-        return []
+                    changed = True  # messaggio svuotato → scartato
+            else:
+                new_msgs.append(m)
+        msgs = new_msgs
 
     # Rimuovi un tool_use finale orfano (il suo tool_result e' oltre il taglio)
-    last = msgs[-1]
-    if last.get("role") == "assistant" and isinstance(last.get("content"), list):
-        clean = [c for c in last["content"]
+    if msgs and msgs[-1].get("role") == "assistant" and isinstance(msgs[-1].get("content"), list):
+        clean = [c for c in msgs[-1]["content"]
                  if not (isinstance(c, dict) and c.get("type") == "tool_use")]
-        if len(clean) < len(last["content"]):
+        if len(clean) < len(msgs[-1]["content"]):
             if clean:
-                mm = dict(last); mm["content"] = clean; msgs[-1] = mm
+                msgs[-1]["content"] = clean
             else:
                 msgs.pop()
+
+    # Rete di sicurezza: garantisci SEMPRE un primo messaggio user testuale valido.
+    # Se vuoto, o il primo user contiene ancora un tool_result (mai deve, ma
+    # difensivo), antepone un placeholder testuale.
+    def _first_is_clean_user(ms):
+        if not ms or ms[0].get("role") != "user":
+            return False
+        c = ms[0].get("content")
+        if isinstance(c, list):
+            return not any(isinstance(b, dict) and b.get("type") == "tool_result" for b in c)
+        return True
+    if not _first_is_clean_user(msgs):
+        msgs.insert(0, {"role": "user", "content": "(cronologia precedente troncata)"})
+
+    # ── DEEP-DEBUG: se INPUT aveva orfani e OUTPUT li ha ancora → WARNING + trace ──
+    try:
+        inp_analysis = _analyze_body_structure(messages)
+        out_analysis = _analyze_body_structure(msgs)
+        if inp_analysis["orphan_tool_results"] and out_analysis["orphan_tool_results"]:
+            orphans_before = len(inp_analysis["orphan_tool_results"])
+            orphans_after = len(out_analysis["orphan_tool_results"])
+            log(f"[DEEP-DEBUG-WARN] _repair_message_sequence: repair FAILED to remove orphans: "
+                f"before={orphans_before} after={orphans_after} "
+                f"orphans_before={inp_analysis['orphan_tool_results']} "
+                f"orphans_after={out_analysis['orphan_tool_results']}")
+            try:
+                with open(_DEBUG_REPAIR_TRACE, "w") as f:
+                    json.dump({
+                        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "function": "_repair_message_sequence",
+                        "orphans_before": inp_analysis["orphan_tool_results"],
+                        "orphans_after": out_analysis["orphan_tool_results"],
+                        "input_analysis": inp_analysis,
+                        "output_analysis": out_analysis,
+                    }, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
     return msgs
 
@@ -2161,7 +2441,18 @@ async def _try_shrink_body(orig: dict, target_bytes: int) -> "bytes | None":
         shrunk = dict(orig)
         shrunk["messages"] = tail_msgs
         # ponytail: ripara coppie tool troncate
+        # DEEP-DEBUG: log input → output analysis
+        inp_analysis = _analyze_body_structure({"messages": tail_msgs})
         tail_msgs = _repair_message_sequence(tail_msgs)
+        out_analysis = _analyze_body_structure({"messages": tail_msgs})
+        if inp_analysis["orphan_tool_results"] or out_analysis["orphan_tool_results"]:
+            log(f"[DEEP-DEBUG] _try_shrink_body path1: "
+                f"in_msgs={len(tail_msgs)} orphan_in={len(inp_analysis['orphan_tool_results'])} "
+                f"orphan_out={len(out_analysis['orphan_tool_results'])} "
+                f"orphans_out={out_analysis['orphan_tool_results']}")
+        if out_analysis["orphan_tool_results"]:
+            log(f"[DEEP-DEBUG-WARN] _try_shrink_body path1: shrink produced ORPHANS: "
+                f"{out_analysis['orphan_tool_results']}")
         shrunk["messages"] = tail_msgs
         if system_content:
             shrunk["system"] = system_content
@@ -2172,7 +2463,12 @@ async def _try_shrink_body(orig: dict, target_bytes: int) -> "bytes | None":
         # shrink non basta: prova tail aggressivo
         tail2 = msgs[-2:] if len(msgs) >= 2 else msgs
         # ponytail: ripara coppie tool troncate
+        inp2 = _analyze_body_structure({"messages": tail2})
         tail2 = _repair_message_sequence(tail2)
+        out2 = _analyze_body_structure({"messages": tail2})
+        if out2["orphan_tool_results"]:
+            log(f"[DEEP-DEBUG-WARN] _try_shrink_body path2: shrink produced ORPHANS: "
+                f"{out2['orphan_tool_results']}")
         shrunk2 = dict(orig)
         shrunk2["messages"] = tail2
         if system_str:
@@ -2615,8 +2911,10 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
         log(f"mixed-new ACT rescue Haiku EXC: {e} → 502")
 
     # ── DEBUG: cattura TUTTO in chiaro prima del 502 ──────────────────────
-    # cattura il body richiesta che è stato effettivamente mandato (post-shrink se applicato)
-    req_bytes_debug = json.dumps(dict(orig)).encode()
+    # orig_analysis: body originale; sent_analysis: body EFFETTIVAMENTE inviato (post-shrink)
+    orig_analysis = _analyze_body_structure(orig)
+    user_sent_analysis = _analyze_body_structure(body_bytes_rescue)
+    haiku_sent_analysis = _analyze_body_structure(haiku_body_bytes)
     debug_capture(
         kind="mixed_rescue_502",
         request=request,
@@ -2626,9 +2924,10 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
         stage="user_model",
         upstream_status=user_status or 0,
         upstream_raw=user_raw,
-        upstream_encoding="gzip",  # upstream sempre gzip su 400
-        sent_bytes=len(req_bytes_debug),
+        upstream_encoding="gzip",
+        sent_bytes=len(body_bytes_rescue),
         orig=orig,
+        sent_analysis={"orig": orig_analysis, "sent": user_sent_analysis},
         note=f"haiku_stage={haiku_status}",
     )
     debug_capture(
@@ -2641,8 +2940,9 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
         upstream_status=haiku_status or 0,
         upstream_raw=haiku_raw,
         upstream_encoding="gzip",
-        sent_bytes=len(req_bytes_debug),
+        sent_bytes=len(haiku_body_bytes),
         orig=orig,
+        sent_analysis={"orig": orig_analysis, "sent": haiku_sent_analysis},
         note="final_502",
     )
 
@@ -3165,7 +3465,7 @@ async def handle(request):
     # Evita che /, /readyz, /livez, /health, /stats, /status vadano all'upstream
     # e causino cascate 404/405 infinite che bloccano l'utente.
     _HC = {"/", "/readyz", "/livez", "/health", "/stats", "/metrics", "/status",
-           "/debug/errors", "/debug/last", "/debug/stats"}
+           "/debug/errors", "/debug/last", "/debug/stats", "/debug/trace"}
     if request.path in _HC:
         return web.Response(status=200, text="ok")
 
@@ -3194,7 +3494,7 @@ async def handle(request):
         probe_paths = {
             "/", "/health", "/readyz", "/livez", "/stats", "/metrics", "/status",
             "/__router_health", "/__resilience",
-            "/debug/errors", "/debug/last", "/debug/stats",
+            "/debug/errors", "/debug/last", "/debug/stats", "/debug/trace", "/debug/trace",
         }
         if request.path not in probe_paths:
             log(f"DEGRADED: rifiuto {request.path} (OAuth {RESILIENCE_INST.state()})")
@@ -3937,6 +4237,7 @@ def _make_app(session, forced_mode):
     app.router.add_get("/debug/errors", debug_errors)
     app.router.add_get("/debug/last", debug_last)
     app.router.add_get("/debug/stats", debug_stats)
+    app.router.add_get("/debug/trace", debug_trace)
     app.router.add_post("/admin/mode/{mode}", admin_mode_switch)
     # catch-all: tutto il routing path-level passa da handle().
     # NB: route literal con '*' NON funziona in aiohttp; il catch-all e'
