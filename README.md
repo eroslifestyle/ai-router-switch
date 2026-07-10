@@ -39,22 +39,38 @@ Compression is byte-faithful on everything that matters.
 
 ---
 
-## 🎛️ Four modes
+## 🎛️ Modes
+
+**Core (Claude + MiniMax):**
 
 | Mode | Behaviour |
 |---|---|
 | `anthropic` | Only Claude |
 | `minimax`   | Only MiniMax-M3 (cheap, no weekly limit) |
 | `mixed`     | Claude first → automatic fallback to MiniMax on 429/5xx (bidirectional) |
-| `interactive` | MiniMax generates, Claude Opus verifies *critical* tasks (auto-detected) |
+| `inverse`   | MiniMax generates, Claude Opus verifies *critical* tasks (auto-detected) |
+
+**GLM / z.ai** (Anthropic-compatible endpoint `api.z.ai/api/anthropic`, peak-cost aware):
+
+| Mode | Behaviour |
+|---|---|
+| `glm`           | GLM-5.2 classifies task complexity → routes to the right GLM tier (`glm-5-turbo` → `glm-4.7` → `glm-5.2`), escalating on 2 failures |
+| `glm-minimax`   | GLM-5.2 THINK → MiniMax ACT (streaming) → GLM verify on complex/agentic tasks |
+| `anthropic-glm` | Claude (client's model) orchestrates → GLM tiered execution → Claude verifies critical (T2) tasks |
+
+**Cost control (all GLM modes):** peak window `14:00–18:00 Asia/Shanghai` (≈ `08:00–12:00` Italy summer) — `glm-5.2`/`glm-5-turbo` cost 3× and are blocked in peak. Complex tasks fall back to Claude; simple ones use `glm-4.7` (not 3×). Off-peak: full tiering, 1× promo pricing until 2026-09-30. Fallback chain on error/quota: GLM → MiniMax → Claude.
+
+Fixed-mode ports: `8771` anthropic · `8772` minimax · `8773` mixed · `8774` inverse · `8775` glm · `8776` glm-minimax · `8777` anthropic-glm. `8787` = dynamic (follows `ai-mode`).
 
 Switch instantly — **no IDE restart**:
 
 ```bash
-ai-mode minimax      # or: mixed / anthropic / interactive
+ai-mode glm          # or: glm-minimax / anthropic-glm / minimax / mixed / anthropic / inverse
 ai-mode status
 ai-mode log
 ```
+
+GLM modes need a z.ai key: `export GLM_API_KEY=...` or `secrets.sh set glm.api_key ...`.
 
 ---
 

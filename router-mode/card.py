@@ -51,6 +51,9 @@ MODES = [
     {"id": "minimax",   "icon": "🟠", "label": "MiniMax",    "exec": "M3 orch · M2.7 act"},
     {"id": "mixed",     "icon": "🔷", "label": "Mixed",      "exec": "Anthropic orch · M2.7 act"},
     {"id": "inverse",   "icon": "🔶", "label": "Inverse",    "exec": "M3 think · Opus OPPOSE · M2.7 act"},
+    {"id": "glm",           "icon": "🟢", "label": "GLM",           "exec": "GLM-5.2 orch · tiering"},
+    {"id": "glm-minimax",   "icon": "🟢", "label": "GLM+MiniMax",   "exec": "GLM-5.2 think · M2.7 act"},
+    {"id": "anthropic-glm", "icon": "🟢", "label": "Anthropic+GLM", "exec": "Anthropic orch · GLM act"},
 ]
 
 

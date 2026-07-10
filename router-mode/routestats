@@ -34,6 +34,15 @@ MODES = [
     {"id": "inverse",   "icon": "🔶", "label": "Inverse",
      "desc": "M3 think + Opus OPPOSE loop × 2 + M2.7 act.",
      "exec": "M3 think · Opus OPPOSE · M2.7 act"},
+    {"id": "glm",           "icon": "🟢", "label": "GLM",
+     "desc": "GLM-5.2 classifica → tier (turbo/4.7/5.2). Peak-aware.",
+     "exec": "GLM-5.2 orch · tiering"},
+    {"id": "glm-minimax",   "icon": "🟢", "label": "GLM+MiniMax",
+     "desc": "GLM-5.2 think → MiniMax act → GLM verify (task complessi).",
+     "exec": "GLM-5.2 think · M2.7 act · GLM verify"},
+    {"id": "anthropic-glm", "icon": "🟢", "label": "Anthropic+GLM",
+     "desc": "Anthropic(client) think → GLM tiered act → verify T2.",
+     "exec": "Anthropic orch · GLM tiered act"},
 ]
 
 

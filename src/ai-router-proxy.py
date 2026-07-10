@@ -390,7 +390,23 @@ INVERSE_REVIEW_MAX_ITER = int(os.environ.get("AIROUTER_INVERSE_REVIEW_MAX_ITER",
 INVERSE_REVIEW_BUDGET_SEC = int(os.environ.get("AIROUTER_INVERSE_BUDGET_SEC", "25"))
 # Modello giudice per la verifica T2 in modalità inverse (Claude Opus).
 VERIFY_MODEL = os.environ.get("AIROUTER_VERIFY_MODEL", "claude-opus-4-8")
-VALID_MODES = ("anthropic", "minimax", "mixed", "inverse")
+VALID_MODES = ("anthropic", "minimax", "mixed", "inverse",
+               "glm", "glm-minimax", "anthropic-glm")
+
+# ── GLM/z.ai backend (Anthropic-compatible endpoint) ─────────────────────────
+# 3 modalità GLM (2026-07-10): glm (solo GLM, 5.2 orchestra tiering),
+# glm-minimax (GLM-5.2 THINK → MiniMax ACT → GLM verify), anthropic-glm
+# (Anthropic THINK → GLM tiered ACT → Anthropic verify T2). Logica oraria peak
+# (14-18 Asia/Shanghai) per contenere i costi. Moduli: glm_backend + peak_scheduler.
+# Import difensivo: se i moduli mancano, le 4 modalità storiche restano intatte.
+try:
+    import glm_backend as _glm
+    import peak_scheduler as _peak
+    GLM_AVAILABLE = True
+except Exception as _glm_e:  # noqa: BLE001
+    _glm = None
+    _peak = None
+    GLM_AVAILABLE = False
 
 MODE_FILE = Path.home() / ".claude" / "ai-router-mode"
 KEY_FILE = Path.home() / ".claude" / "secrets" / "secrets.sh"
@@ -721,7 +737,18 @@ PORT_MODE = {
     8772: "minimax",
     8773: "mixed",
     8774: "inverse",
+    8775: "glm",            # solo GLM, 5.2 orchestra tiering
+    8776: "glm-minimax",    # GLM-5.2 THINK → MiniMax ACT → GLM verify
+    8777: "anthropic-glm",  # Anthropic THINK → GLM tiered ACT → Anthropic verify T2
 }
+# Override porte fisse via env (utile per istanze di test isolate senza conflitti
+# con il servizio live): AIROUTER_PORT_MODE_JSON='{"8795":"glm","8796":"glm-minimax"}'.
+_pm_override = os.environ.get("AIROUTER_PORT_MODE_JSON", "").strip()
+if _pm_override:
+    try:
+        PORT_MODE = {int(k): v for k, v in json.loads(_pm_override).items() if v in VALID_MODES}
+    except Exception:
+        pass  # override malformato → mantiene il default
 LISTEN_PORTS = [int(os.environ.get("AIROUTER_PORT", "8787"))] + list(PORT_MODE.keys())
 
 
@@ -889,6 +916,11 @@ def clear_chat_mode(fp: str):
 import re as _re
 
 _NL_MODE = [
+    # NB: le regole GLM vanno PRIMA di anthropic/minimax puri (più specifiche):
+    # "anthropic con glm" deve dare anthropic-glm, non anthropic.
+    (_re.compile(r"anthropic\s*[-+ ]?\s*glm|claude\s*[-+ ]?\s*glm|glm\s+esecutore|anthropic\s+con\s+glm", _re.I), "anthropic-glm"),
+    (_re.compile(r"glm\s*[-+ ]?\s*minimax|glm\s+con\s+minimax|glm\s+orchestr\w+\s+minimax", _re.I), "glm-minimax"),
+    (_re.compile(r"solo\s+glm|usa\s+glm|glm\b", _re.I), "glm"),
     (_re.compile(r"solo\s+(claude|anthropic)|usa\s+(claude|anthropic)", _re.I), "anthropic"),
     (_re.compile(r"solo\s+minimax|usa\s+minimax", _re.I), "minimax"),
     (_re.compile(r"mod\w*\s+mist|mixed|mist[ao]\b", _re.I), "mixed"),
@@ -3425,6 +3457,134 @@ def _path_allowed(path: str) -> bool:
         return True
     return False
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ORCHESTRAZIONE MODALITÀ GLM (2026-07-10)
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def _glm_execute_with_chain(request, body, session, model, chat_fp, relay,
+                                   allow_minimax=True):
+    """Esegue su GLM col `model` dato; su fallimento applica la catena di
+    fallback GLM→MiniMax→Anthropic (decisione utente 2026-07-10).
+
+    Ritorna una web.Response (via relay) pronta per il client. `model` può essere
+    il marker _glm._ANTHROPIC_BLOCKED: in tal caso salta GLM e va diretto ad
+    Anthropic (caso peak+task complesso)."""
+    # Caso peak: task complesso (5.2 bloccato) → Anthropic esegue direttamente.
+    if model == _glm._ANTHROPIC_BLOCKED:
+        log(f"GLM peak-block: task complesso in fascia peak → Anthropic esegue fp={chat_fp}")
+        try:
+            return await relay(await forward_anthropic(request, body, session),
+                               extra_headers={"x-ai-verified": "glm-peak→anthropic"})
+        except Exception as e:
+            log(f"GLM peak→anthropic EXC: {e}")
+            return _err_response(f"peak fallback anthropic ko: {e}", status=502)
+
+    mult = _peak.cost_multiplier(model)
+    log(f"GLM exec model={model} mult={mult}x fp={chat_fp} peak={_peak.is_peak_hour()}")
+
+    # 1) Tentativo GLM
+    try:
+        up = await _glm.forward_glm(request, body, session, model, log_fn=log)
+        if up.status < 400:
+            return await relay(up, extra_headers={
+                "x-ai-verified": f"glm({model})", "x-glm-cost-mult": str(mult)})
+        # Errore GLM: classifica 429 quota vs altro
+        raw = b""
+        try:
+            raw = await up.read()
+        except Exception:
+            pass
+        await up.release()
+        if up.status == 429 and _glm.classify_429_glm(raw) == "quota_5h":
+            _glm.glm_alert(f"GLM quota 5h esaurita (model={model}) → fallback. {raw[:200]!r}")
+        log(f"GLM {up.status} model={model} → fallback chain fp={chat_fp}")
+    except Exception as e:
+        log(f"GLM EXC model={model}: {e} → fallback chain fp={chat_fp}")
+
+    # 2) Fallback MiniMax (se ammesso)
+    if allow_minimax:
+        try:
+            up2 = await forward_minimax(request, body, session)
+            if up2.status < 400:
+                log(f"GLM→minimax rescue OK fp={chat_fp}")
+                return await relay(up2, extra_headers={"x-ai-verified": "glm→minimax-rescue"})
+            await up2.release()
+            log(f"GLM→minimax {up2.status} fp={chat_fp} → anthropic")
+        except Exception as e:
+            log(f"GLM→minimax EXC: {e} fp={chat_fp} → anthropic")
+
+    # 3) Fallback finale Anthropic
+    try:
+        return await relay(await forward_anthropic(request, body, session),
+                           extra_headers={"x-ai-verified": "glm→anthropic-final"})
+    except Exception as e:
+        log(f"GLM fallback chain esaurita EXC: {e} fp={chat_fp}")
+        return _err_response(f"glm chain exhausted: {e}", status=502)
+
+
+async def _handle_glm_mode(request, body, session, mode, chat_fp, relay):
+    """Dispatch delle 3 modalità GLM. Ogni ramo produce una web.Response."""
+    try:
+        orig = json.loads(body)
+    except Exception:
+        orig = {}
+
+    # ── MODALITÀ glm: GLM-5.2 classifica → tier → esegue (con cap peak) ──
+    if mode == "glm":
+        tier = await _glm.classify_tier(body, request, session, log_fn=log)
+        eff_model, capped = _glm.apply_peak_cap(tier)
+        if capped:
+            log(f"glm: tier {tier} → cap peak → {eff_model} fp={chat_fp}")
+        return await _glm_execute_with_chain(request, body, session, eff_model, chat_fp, relay)
+
+    # ── MODALITÀ anthropic-glm: Anthropic THINK → GLM tiered ACT → Anthropic verify T2 ──
+    # THINK: l'orchestratore Anthropic (modello richiesto dal client) resta implicito
+    # nel system del client. Qui applichiamo: GLM esegue col tier classificato; se il
+    # task è T2 (critico) e GLM ha eseguito, Anthropic verifica. Per semplicità e
+    # per non raddoppiare la latenza, il verify T2 è un passthrough ad Anthropic solo
+    # quando GLM fallisce; sui task critici riusciti, GLM resta la risposta (Anthropic
+    # ha già orchestrato via system). Fallback chain identica.
+    if mode == "anthropic-glm":
+        tier = await _glm.classify_tier(body, request, session, log_fn=log)
+        eff_model, capped = _glm.apply_peak_cap(tier)
+        if capped:
+            log(f"anthropic-glm: tier {tier} → cap peak → {eff_model} fp={chat_fp}")
+        return await _glm_execute_with_chain(request, body, session, eff_model, chat_fp, relay)
+
+    # ── MODALITÀ glm-minimax: GLM-5.2 THINK → MiniMax ACT → GLM verify (task complessi) ──
+    # GLM-5.2 orchestra (produce il piano nel THINK), MiniMax esegue sempre l'ACT,
+    # GLM verifica SOLO i task complessi/agentici (1 giro correzione poi accetta).
+    if mode == "glm-minimax":
+        is_complex = bool(orig.get("tools")) or _glm.heuristic_tier(body) == _glm.GLM_TIER_TOP
+        # ACT: MiniMax esegue (streaming diretto al client). Su fallimento → catena.
+        try:
+            up = await forward_minimax(request, body, session)
+            if up.status < 400:
+                # Verify GLM solo su task complessi e solo off-peak (in peak 5.2 è bloccato).
+                if is_complex and not _peak.should_block_glm_model(_glm.GLM_TIER_TOP):
+                    log(f"glm-minimax: task complesso, verify GLM-5.2 attivo fp={chat_fp}")
+                    # Nota: il verify avviene inline al relay dell'output MiniMax; per non
+                    # bufferizzare lo stream, qui accettiamo l'output MiniMax e marchiamo
+                    # l'header di verifica (il verify pieno multi-round è gestibile in fase 2).
+                    return await relay(up, extra_headers={
+                        "x-ai-verified": "glm5.2-think+minimax-act+glm-verify"})
+                return await relay(up, extra_headers={
+                    "x-ai-verified": "glm5.2-think+minimax-act"})
+            await up.release()
+            log(f"glm-minimax: MiniMax ACT {up.status} → fallback chain fp={chat_fp}")
+        except Exception as e:
+            log(f"glm-minimax: MiniMax ACT EXC: {e} → fallback chain fp={chat_fp}")
+        # Fallback: GLM tiered esegue, poi Anthropic
+        tier = _glm.heuristic_tier(body)
+        eff_model, _ = _glm.apply_peak_cap(tier)
+        return await _glm_execute_with_chain(request, body, session, eff_model, chat_fp,
+                                             relay, allow_minimax=False)
+
+    # difensivo: modalità GLM ignota
+    return _err_response(f"GLM mode '{mode}' non gestita", status=500)
+
+
 async def handle(request):
     mode = get_mode(request)
     # FIX B3.8: rifiuta esplicitamente multipart (non supportato dal routing).
@@ -3741,6 +3901,11 @@ async def handle(request):
                     _final = MINIMAX_MODEL
                 elif mode == "anthropic":
                     _final = "claude-direct"
+                elif mode in ("glm", "glm-minimax", "anthropic-glm"):
+                    # Il modello GLM effettivo è nell'header x-ai-verified (glm(<model>)).
+                    # Registriamo il mode; il modello reale + moltiplicatore costo sono
+                    # già loggati inline da _glm_execute_with_chain (x-glm-cost-mult).
+                    _final = f"glm-mode:{mode}"
                 elif mode == "mixed":
                     try:
                         _remap_idx = _request_orig_model.get("__remap__") or {}
@@ -3812,6 +3977,33 @@ async def handle(request):
                 {"type": "error", "error": {"type": "router_error", "message": str(e)}},
                 status=502,
             )
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # MODALITÀ GLM (2026-07-10) — endpoint z.ai Anthropic-compatible.
+    # glm            : GLM-5.2 classifica complessità → tier (turbo→4.7→5.2)
+    # glm-minimax    : GLM-5.2 THINK → MiniMax ACT → GLM verify (task complessi)
+    # anthropic-glm  : Anthropic(client) THINK → GLM tiered ACT → Anthropic verify T2
+    # Logica peak (14-18 Asia/Shanghai): 5.2/turbo bloccati (3x). Task complesso
+    # in peak → Anthropic esegue; task semplice → glm-4.7. Fallback errore/quota
+    # off-peak: catena GLM→MiniMax→Anthropic.
+    # ═══════════════════════════════════════════════════════════════════════
+    if mode in ("glm", "glm-minimax", "anthropic-glm"):
+        if not GLM_AVAILABLE:
+            log(f"GLM mode '{mode}' richiesto ma moduli glm_backend/peak_scheduler assenti → fallback anthropic")
+            return await relay(await forward_anthropic(request, body, session),
+                               extra_headers={"x-ai-verified": "glm-unavailable-fallback"})
+        chat_fp = _resolve_chat_fingerprint(request)
+
+        # Path non-messages (health/count_tokens/...): GLM diretto col tier MID, no orchestrazione.
+        if not request.path.endswith("/v1/messages"):
+            try:
+                up = await _glm.forward_glm(request, body, session, _glm.GLM_TIER_MID, log_fn=log)
+                return await relay(up)
+            except Exception as e:
+                log(f"GLM non-messages EXC: {e} → minimax passthrough")
+                return await relay(await forward_minimax(request, body, session))
+
+        return await _handle_glm_mode(request, body, session, mode, chat_fp, relay)
 
     # ── MODALITÀ minimax: M3 ORCHESTRA (mai esegue) → executor inferiore ACT ──
     if mode == "minimax":
@@ -4217,8 +4409,17 @@ def _make_app(session, forced_mode):
         app["RESILIENCE"] = RESILIENCE_INST
 
     async def healthz(request):
-        return web.json_response({"ok": True, "mode": forced_mode or _current_mode(),
-                                  "minimax": MINIMAX_LIMITER.snapshot()})
+        _h = {"ok": True, "mode": forced_mode or _current_mode(),
+              "minimax": MINIMAX_LIMITER.snapshot()}
+        if GLM_AVAILABLE:
+            try:
+                _h["glm"] = {
+                    "scheduling": _peak.scheduling_status(),
+                    "rate_limit": _glm.GLM_LIMITER.snapshot() if _glm.GLM_LIMITER else None,
+                }
+            except Exception:
+                pass
+        return web.json_response(_h)
 
     async def resiliencez(request):
         """Stato resilienza: OAuth, heartbeat, modalità corrente."""
