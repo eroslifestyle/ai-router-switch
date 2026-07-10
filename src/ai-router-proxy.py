@@ -3532,6 +3532,13 @@ async def handle(request):
 
     session = request.app["session"]
 
+    # FIX 2026-07-09 UnboundLocalError: `orig` è assegnato solo in alcuni rami
+    # (mixed/minimax/inverse via json.loads), ma la closure `relay` sotto lo
+    # referenzia per debug_capture. Nei path anthropic-pure/mixed che chiamano
+    # relay senza mai assegnare orig, Python lo tratta come locale non inizializzata
+    # → "cannot access free variable 'orig'". Inizializzalo a None qui a monte.
+    orig = None
+
     async def relay(upstream, chat_fp_for_rewrite: str = "default", extra_headers: dict | None = None):
         # FIX E: leggi e rimuovi orig_model da riscrivere nello SSE/non-stream
         # NB: i call site passano spesso chat_fp sbagliato (es 'default' vs IP reale).
