@@ -256,7 +256,7 @@ class ModeCard(QWidget):
         self._on_switch = on_switch
         self._active = False
         self._switching = False
-        self.setFixedSize(138, 108)
+        self.setFixedSize(148, 62)
         self._build_ui()
 
     def _build_ui(self):
@@ -409,40 +409,43 @@ class Card(QWidget):
         self._hero = HeroWidget(self)
         body_layout.addWidget(self._hero)
 
-        # Section label CORE
-        hint = QLabel("CORE · CLAUDE + MINIMAX")
-        hint.setFont(QFont("Sans", 9, QFont.Weight.Bold))
-        hint.setStyleSheet(f"background:transparent;color:{C['faint']}")
-        body_layout.addWidget(hint)
+        # ── Sezione SOLO (3 card full-width, 60px ciascuna) ──────────────────
+        solo_label = QLabel("SOLO")
+        solo_label.setFont(QFont("Sans", 9, QFont.Weight.Bold))
+        solo_label.setStyleSheet(f"background:transparent;color:{C['faint']}")
+        body_layout.addWidget(solo_label)
 
-        # CORE grid: 2 colonne (prime 2 di una griglia 3-col), 4 modalità in 2+2
-        core_ids = {"anthropic", "minimax", "mixed", "inverse"}
-        core_modes = [m for m in MODES if m["id"] in core_ids]
+        solo_ids = ["anthropic", "minimax", "glm"]
+        solo_grid = QGridLayout()
+        solo_grid.setSpacing(6)
         self._cards = {}
-        core_grid = QGridLayout()
-        core_grid.setSpacing(8)
-        for i, m in enumerate(core_modes):
+        for i, mid in enumerate(solo_ids):
+            m = next(x for x in MODES if x["id"] == mid)
             card = ModeCard(m, self._do_switch)
-            self._cards[m["id"]] = card
-            core_grid.addWidget(card, i // 2, i % 2)
-        body_layout.addLayout(core_grid)
+            self._cards[mid] = card
+            solo_grid.addWidget(card, 0, i)
+        body_layout.addLayout(solo_grid)
 
-        # Section label GLM
-        hint2 = QLabel("GLM / Z.AI")
-        hint2.setFont(QFont("Sans", 9, QFont.Weight.Bold))
-        hint2.setStyleSheet(f"background:transparent;color:{C['faint']}")
-        body_layout.addWidget(hint2)
+        # Spacer
+        spacer = QWidget()
+        spacer.setFixedHeight(8)
+        body_layout.addWidget(spacer)
 
-        # GLM grid: 3 colonne, 3 modalità su 1 riga
-        glm_ids = {"glm", "glm-minimax", "anthropic-glm"}
-        glm_modes = [m for m in MODES if m["id"] in glm_ids]
-        glm_grid = QGridLayout()
-        glm_grid.setSpacing(8)
-        for i, m in enumerate(glm_modes):
+        # ── Sezione MIX (4 card full-width, 60px ciascuna) ───────────────────
+        mix_label = QLabel("MIX")
+        mix_label.setFont(QFont("Sans", 9, QFont.Weight.Bold))
+        mix_label.setStyleSheet(f"background:transparent;color:{C['faint']}")
+        body_layout.addWidget(mix_label)
+
+        mix_ids = ["mixed", "inverse", "glm-minimax", "anthropic-glm"]
+        mix_grid = QGridLayout()
+        mix_grid.setSpacing(6)
+        for i, mid in enumerate(mix_ids):
+            m = next(x for x in MODES if x["id"] == mid)
             card = ModeCard(m, self._do_switch)
-            self._cards[m["id"]] = card
-            glm_grid.addWidget(card, 0, i)
-        body_layout.addLayout(glm_grid)
+            self._cards[mid] = card
+            mix_grid.addWidget(card, 0, i)
+        body_layout.addLayout(mix_grid)
 
         # Footer
         footer = QLabel("trascina per spostare  ·  X o Esc per chiudere")
