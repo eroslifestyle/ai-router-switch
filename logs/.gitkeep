@@ -1,0 +1,3 @@
+# Debug log files — created at runtime, never committed
+*.jsonl
+*.json

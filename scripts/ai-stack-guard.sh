@@ -33,8 +33,16 @@ ensure(){
   up "$port" && note "  ✓ $name ripristinato via nohup" || note "  ✗ $name ANCORA giù"
 }
 
-# ai-router (8787)
+# ai-router (8787) — porta primaria dinamica. Lo STESSO processo multiport apre
+# anche le porte a modalità fissa: 8771-8774 (anthropic/minimax/mixed/inverse) e
+# 8775-8777 (glm/glm-minimax/anthropic-glm). Se :8787 è up, lo sono tutte (stesso PID).
 ensure "ai-router" 8787 "ai-router.service" \
   /usr/bin/python3 "$ROUTER"
+
+# Diagnostica non-bloccante: verifica che le porte GLM fisse siano effettivamente
+# in ascolto (stesso processo). Se :8787 è su ma una GLM manca, segnala anomalia.
+for gp in 8775 8776 8777; do
+  up 8787 && ! up "$gp" && note "WARN: :8787 up ma porta GLM :$gp non in ascolto (verifica binding multiport)"
+done
 
 exit 0

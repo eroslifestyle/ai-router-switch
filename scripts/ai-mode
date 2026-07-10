@@ -41,16 +41,22 @@ status(){
 }
 
 case "${1:-status}" in
-  anthropic|minimax|mixed|interactive)
+  anthropic|minimax|mixed|interactive|glm|glm-minimax|anthropic-glm)
     echo "$1" > "$MODE_FILE"
     echo "modalità → $1"
     is_running || { echo "(proxy non attivo: avvio…)"; start; }
     echo "Nota: il cambio è immediato per le NUOVE richieste."
+    case "$1" in
+      glm|glm-minimax|anthropic-glm)
+        echo "ℹ️  GLM/z.ai attivo. Fascia peak 14-18 Asia/Shanghai (08-12 IT estate):"
+        echo "    glm-5.2/glm-5-turbo bloccati (3x) → task complessi su Anthropic, semplici su glm-4.7."
+        ;;
+    esac
     ;;
   status) status ;;
   start)   start ;;
   stop)    stop ;;
   restart) stop; sleep 1; start ;;
   log)     tail -n 40 "$LOG" 2>/dev/null || echo "(nessun log)";;
-  *) echo "uso: ai-mode [anthropic|minimax|mixed|interactive|status|start|stop|restart|log]"; exit 1;;
+  *) echo "uso: ai-mode [anthropic|minimax|mixed|interactive|glm|glm-minimax|anthropic-glm|status|start|stop|restart|log]"; exit 1;;
 esac
