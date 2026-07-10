@@ -51,9 +51,9 @@ MODES = [
     {"id": "minimax",   "icon": "🟠", "label": "MiniMax",    "exec": "M3 orch · M2.7 act"},
     {"id": "mixed",     "icon": "🔷", "label": "Mixed",      "exec": "Anthropic orch · M2.7 act"},
     {"id": "inverse",   "icon": "🔶", "label": "Inverse",    "exec": "M3 think · Opus OPPOSE · M2.7 act"},
-    {"id": "glm",           "icon": "🟢", "label": "GLM",           "exec": "GLM-5.2 orch · tiering"},
-    {"id": "glm-minimax",   "icon": "🟢", "label": "GLM+MiniMax",   "exec": "GLM-5.2 think · M2.7 act"},
-    {"id": "anthropic-glm", "icon": "🟢", "label": "Anthropic+GLM", "exec": "Anthropic orch · GLM act"},
+    {"id": "glm", "icon": "🟢", "label": "GLM", "exec": "GLM-5.2 orch · tiering"},
+    {"id": "glm-minimax", "icon": "🟢🟠", "label": "GLM + MM", "exec": "GLM-5.2 think · M2.7 act"},
+    {"id": "anthropic-glm", "icon": "🔵🟢", "label": "Ant + GLM", "exec": "Anthropic orch · GLM act"},
 ]
 
 
@@ -256,7 +256,7 @@ class ModeCard(QWidget):
         self._on_switch = on_switch
         self._active = False
         self._switching = False
-        self.setFixedSize(168, 124)
+        self.setFixedSize(138, 108)
         self._build_ui()
 
     def _build_ui(self):
@@ -353,8 +353,8 @@ class ModeCard(QWidget):
 
 # ── Main Card ─────────────────────────────────────────────────────────────
 class Card(QWidget):
-    W = 440
-    H = 470
+    W = 480
+    H = 600
 
     def __init__(self):
         super().__init__()
@@ -409,21 +409,40 @@ class Card(QWidget):
         self._hero = HeroWidget(self)
         body_layout.addWidget(self._hero)
 
-        # Section label
-        hint = QLabel("MODALITÀ")
+        # Section label CORE
+        hint = QLabel("CORE · CLAUDE + MINIMAX")
         hint.setFont(QFont("Sans", 9, QFont.Weight.Bold))
         hint.setStyleSheet(f"background:transparent;color:{C['faint']}")
         body_layout.addWidget(hint)
 
-        # Modes grid
+        # CORE grid: 2 colonne (prime 2 di una griglia 3-col), 4 modalità in 2+2
+        core_ids = {"anthropic", "minimax", "mixed", "inverse"}
+        core_modes = [m for m in MODES if m["id"] in core_ids]
         self._cards = {}
-        grid = QGridLayout()
-        grid.setSpacing(8)
-        for i, m in enumerate(MODES):
+        core_grid = QGridLayout()
+        core_grid.setSpacing(8)
+        for i, m in enumerate(core_modes):
             card = ModeCard(m, self._do_switch)
             self._cards[m["id"]] = card
-            grid.addWidget(card, i // 2, i % 2)
-        body_layout.addLayout(grid)
+            core_grid.addWidget(card, i // 2, i % 2)
+        body_layout.addLayout(core_grid)
+
+        # Section label GLM
+        hint2 = QLabel("GLM / Z.AI")
+        hint2.setFont(QFont("Sans", 9, QFont.Weight.Bold))
+        hint2.setStyleSheet(f"background:transparent;color:{C['faint']}")
+        body_layout.addWidget(hint2)
+
+        # GLM grid: 3 colonne, 3 modalità su 1 riga
+        glm_ids = {"glm", "glm-minimax", "anthropic-glm"}
+        glm_modes = [m for m in MODES if m["id"] in glm_ids]
+        glm_grid = QGridLayout()
+        glm_grid.setSpacing(8)
+        for i, m in enumerate(glm_modes):
+            card = ModeCard(m, self._do_switch)
+            self._cards[m["id"]] = card
+            glm_grid.addWidget(card, 0, i)
+        body_layout.addLayout(glm_grid)
 
         # Footer
         footer = QLabel("trascina per spostare  ·  X o Esc per chiudere")
