@@ -2721,6 +2721,32 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
         log(f"mixed-new: vision M3 fallback → Anthropic fp={chat_fp}")
         return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
 
+        # D45 BYPASS-THINK: per task leggeri (nessun tool, messaggio singolo, <200 char),
+    # skippa il THINK Anthropic e vai direttamente all'ACT. Risparmia ~3-5s di latenza.
+    LIGHT_MSG_THRESHOLD = 200
+    msgs = orig.get('messages') or []
+    user_msgs = [m for m in msgs if m.get('role') == 'user']
+    content_len = 0
+    if user_msgs:
+        last = user_msgs[-1].get('content', '')
+        content_len = len(last) if isinstance(last, str) else len(str(last))
+    is_light = (
+        not orig.get('tools')
+        and len(user_msgs) == 1
+        and content_len < LIGHT_MSG_THRESHOLD
+    )
+    if is_light:
+        orig_model = (orig.get('model') or '').strip()
+        try:
+            if orig_model.lower().startswith('minimax'):
+                up = await forward_minimax(request, body, session)
+            else:
+                up = await forward_anthropic(request, body, session)
+            mixed_fail_reset(chat_fp)
+            log(f'mixed BYPASS-THINK direct (light, {content_len}c) fp={chat_fp}')
+            return await relay(up)
+        except Exception as e:
+            log(f'mixed BYPASS-THINK EXC: {e} -> fallthrough')
     # THINK: Anthropic produce piano self-reviewed (JSON puro, no streaming).
     # REGOLA VINCOLANTE (utente 2026-07-03): mixed = il MODELLO SELEZIONATO
     # dall'utente (Fable/Opus/Sonnet) è l'UNICO orchestratore e NON esegue MAI.
