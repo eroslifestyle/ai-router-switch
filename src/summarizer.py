@@ -2,7 +2,7 @@
 
 import json, os, time, aiohttp, logging
 from typing import Optional
-from .model_context_map import get_summary_budget
+from model_context_map import get_summary_budget
 
 log = logging.getLogger(__name__)
 

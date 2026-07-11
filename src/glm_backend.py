@@ -14,6 +14,34 @@ from typing import Optional, Dict, Any, List, Tuple
 
 from peak_scheduler import is_peak_hour, peak_tier_cap, cost_multiplier, should_block_glm_model
 
+# Context window mapping per modelli GLM (LAYER 1: context-aware routing)
+GLM_CONTEXT_MAP = {
+    "glm-5-turbo": 1_000_000,
+    "glm-5.2": 1_000_000,
+    "glm-4.7": 128_000,
+    "glm-4": 128_000,
+    "glm-4v": 128_000,
+}
+GLM_BUFFER_PERCENT = 20  # 20% libero per output
+
+def get_glm_context_limit(model: str) -> int:
+    """Restituisce il context window per un modello GLM."""
+    return GLM_CONTEXT_MAP.get(model.lower(), 128_000)
+
+def get_glm_safe_limit(model: str) -> int:
+    """Limite sicuro input: context - buffer%."""
+    ctx = get_glm_context_limit(model)
+    return ctx - int(ctx * GLM_BUFFER_PERCENT / 100)
+
+def is_glm_body_too_large(body: bytes, model: str) -> bool:
+    """Check se il body eccede il limite sicuro per il modello GLM target."""
+    try:
+        body_str = body.decode('utf-8', errors='replace')
+        token_est = max(len(body_str) // 4, 1)
+        return token_est > get_glm_safe_limit(model)
+    except Exception:
+        return False
+
 GLM_UPSTREAM = os.getenv("AIROUTER_GLM_UPSTREAM", "https://api.z.ai/api/anthropic")
 GLM_TIER_TURBO = os.getenv("AIROUTER_GLM_TIER_TURBO", "glm-5-turbo")
 GLM_TIER_MID = os.getenv("AIROUTER_GLM_TIER_MID", "glm-4.7")

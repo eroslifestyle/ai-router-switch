@@ -2,8 +2,8 @@
 
 import json, logging, os
 from typing import Tuple
-from .token_counter import estimate_tokens
-from .model_context_map import get_safe_input_limit
+from token_counter import estimate_tokens
+from model_context_map import get_safe_input_limit
 
 log = logging.getLogger(__name__)
 

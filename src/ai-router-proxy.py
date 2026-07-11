@@ -29,10 +29,10 @@ from pathlib import Path
 from aiohttp import web, ClientSession, ClientTimeout, TCPConnector
 
 # Context window fix imports (LAYER 1: intelligent rewrite)
-from src.token_counter import estimate_tokens, count_tokens
-from src.model_context_map import get_safe_input_limit, get_context_limit, get_summary_budget
-from src.context_rewrite import rewrite_for_context
-from src.summarizer import summarize_old_messages
+from token_counter import estimate_tokens, count_tokens
+from model_context_map import get_safe_input_limit, get_context_limit, get_summary_budget
+from context_rewrite import rewrite_for_context
+from summarizer import summarize_old_messages
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2345,8 +2345,34 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
     log(f"shrink: {len(body)}b → {len(shrunk_bytes)}b (budget {MINIMAX_CONTEXT_BYTE_LIMIT}) fp={chat_fp}")
 
     if len(shrunk_bytes) > MINIMAX_CONTEXT_BYTE_LIMIT:
-        # Anche dopo shrink non ci sta: fallback diretto a Haiku (nessun token Anthropic)
-        log(f"shrink: anche compresso troppo grande → Haiku diretto fp={chat_fp}")
+        # CONTEXT FIX: prova LLM summarization prima di scartare su Haiku.
+        # Il modello stesso che ha fallito riassume i messaggi vecchi con budget
+        # calibrato per il modello target. Se anche questo fallisce → Haiku.
+        log(f"shrink: body ancora grande dopo shrink → LLM summarization fp={chat_fp}")
+        summary_msgs = await summarize_old_messages(
+            messages=messages,
+            model=MINIMAX_MODEL,
+            fp=chat_fp,
+            upstream_url=MINIMAX_UPSTREAM + "/v1/messages",
+            api_key=(await get_minimax_key()) or ""
+        )
+        if summary_msgs is not None:
+            summ_shrunk = dict(orig_dict)
+            summ_shrunk["messages"] = summary_msgs
+            summ_shrunk.pop("thinking", None)
+            summ_bytes = json.dumps(summ_shrunk).encode()
+            log(f"shrink: LLM summary {len(messages)} msgs → {len(summ_bytes)}b fp={chat_fp}")
+            if len(summ_bytes) <= MINIMAX_CONTEXT_BYTE_LIMIT:
+                try:
+                    up = await forward_minimax(request, summ_bytes, session)
+                    if up.status < 400:
+                        log(f"shrink: LLM summary SUCCESS fp={chat_fp}")
+                        return await relay(up, extra_headers={"x-ai-verified": "m3-llm-summary"})
+                    await up.release()
+                except Exception as e:
+                    log(f"shrink: LLM summary MiniMax EXC {e} fp={chat_fp}")
+        # Anche LLM summary fallito: fallback Haiku
+        log(f"shrink: LLM summary failed or still too big → Haiku fp={chat_fp}")
         return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
 
     # Ritenta MiniMax con body compresso
@@ -3523,6 +3549,25 @@ async def _glm_execute_with_chain(request, body, session, model, chat_fp, relay,
 
     mult = _peak.cost_multiplier(model)
     log(f"GLM exec model={model} mult={mult}x fp={chat_fp} peak={_peak.is_peak_hour()}")
+
+    # CONTEXT FIX LAYER 2: pre-check context per modello GLM target.
+    # Se il body eccede il limite sicuro per questo modello, skip GLM
+    # e vai direttamente a fallback chain (MiniMax→Anthropic).
+    if _glm.is_glm_body_too_large(body, model):
+        log(f"GLM ctx-limit: body too large for {model} → direct to fallback fp={chat_fp}")
+        if allow_minimax:
+            try:
+                up2 = await forward_minimax(request, body, session)
+                if up2.status < 400:
+                    return await relay(up2, extra_headers={"x-ai-verified": "glm-ctx→minimax"})
+                await up2.release()
+            except Exception as e:
+                log(f"GLM ctx→minimax EXC: {e}")
+        try:
+            return await relay(await forward_anthropic(request, body, session),
+                               extra_headers={"x-ai-verified": "glm-ctx→anthropic"})
+        except Exception as e:
+            return _err_response(f"glm chain exhausted: {e}", status=502)
 
     # 1) Tentativo GLM
     try:
