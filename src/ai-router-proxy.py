@@ -1572,6 +1572,13 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
             # body NON letto: streaming preservato per relay()
             MINIMAX_LIMITER.record(entry, est, success=True)
             MINIMAX_LIMITER.on_success()
+            # D41: propaga l'entry mutabile del limiter al relay per delta-correction
+            # TPM (correggere entry[1]=stima con i token reali nel relay finally).
+            try:
+                up._airouter_limiter_entry = entry
+                up._airouter_limiter_est = est
+            except Exception:
+                pass
             return up
         # ── 429: consuma il body, classifica, backoff ──────────────────────
         try:
@@ -1661,6 +1668,13 @@ async def _forward_minimax_generative(request, body: bytes, session,
         if up.status != 429:
             MINIMAX_LIMITER.record(entry, est_tokens, success=True)
             MINIMAX_LIMITER.on_success()
+            # D41: attach entry (path generative non usa relay(); resta sulla stima —
+            # accettabile, volume basso). L'attach è innocuo e coerente con MOD 1.
+            try:
+                up._airouter_limiter_entry = entry
+                up._airouter_limiter_est = est_tokens
+            except Exception:
+                pass
             raw = b""
             async for chunk in up.content.iter_chunked(65536):
                 raw += chunk
@@ -3973,6 +3987,20 @@ async def handle(request):
                         _usage["input_tokens"] = max(1, _chars // 4)
                     except Exception:
                         _usage["input_tokens"] = max(1, len(body) // 4)
+                # D41: delta-correction TPM — riconcilia la stima del rate limiter con
+                # i token reali (input+output). _lim_entry è la STESSA lista mutabile
+                # nella finestra del limiter; correggerla aggiusta il TPM percepito.
+                # Clamp alla stima già prenotata (evita sforo del budget validato in acquire).
+                try:
+                    _lim_entry = getattr(upstream, "_airouter_limiter_entry", None)
+                    if _lim_entry is not None:
+                        _real_total = int(_usage.get("input_tokens", 0)) + int(_usage.get("output_tokens", 0))
+                        _est_reserved = getattr(upstream, "_airouter_limiter_est", _real_total)
+                        if _real_total > 0:
+                            _lim_entry[1] = min(_real_total, _est_reserved)
+                            log(f"D41 TPM delta-correct: est={_est_reserved} real={_real_total} -> {_lim_entry[1]}")
+                except Exception as _e:
+                    log(f"D41 TPM delta-correct skip: {_e}")
                 # FIX bug stats: passa il FINAL reale (risolto da remap) + fallback al
                 # model nel body della request se orig_model (chat_fp-mismatch) è vuoto.
                 try:
