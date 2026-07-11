@@ -7,10 +7,12 @@ updated: 2026-06-29
 
 # Project Global TOD — ai-router-switch
 
-**Main HEAD**: 22445f9 · **Branch**: main · **Updated**: 2026-07-09
+**Main HEAD**: 3d35c1a · **Branch**: main · **Updated**: 2026-07-11
 
 ## ✅ Done (recenti, evidence-gated)
 
+- [x] **GLM-MODES** — 3 nuove modalità GLM/z.ai (endpoint Anthropic-compatible api.z.ai/api/anthropic): `glm` (:8775, tiering turbo→4.7→5.2 via GLM-5.2 classifier, peak-aware 14-18 Shanghai), `glm-minimax` (:8776, GLM-5.2 THINK → MiniMax ACT → verify), `anthropic-glm` (:8777, Anthropic orch → GLM tiered ACT → verify T2). Moduli glm_backend.py + peak_scheduler.py. Fallback catena GLM→MiniMax→Anthropic. Fallimento peak: blocca 5.2/turbo (3x) → Anthropic. Commit `6cc058c` pushato · 12/12 test PASS · 8 porte live · secrets.sh glm.api_key configurato · systemd aggiornato. (2026-07-11)
+- [x] **GUI-CARD-REORGANIZE** — Widget card.py riorganizzato (demo 1: card verticali, 2 sezioni SOLO/MIX, pulsanti ON centrati, descrizioni complete). Commits `008e6e5`→`3d35c1a`. Fix: truncamento testi, glyph, spacing. (2026-07-11)
 - [x] **DEBUG-SYSTEM + BUG-ORPHAN-BLOCK** — Sistema debug permanente (/debug/last|errors|stats, logs/debug-errors.jsonl in chiaro gzip-decompresso) `e056993` + root cause finale 502: `_repair_message_sequence` rimuoveva interi messaggi solo se TUTTI block=tool_result, falliva su messaggi misti [tool_result,text] → orfano → Anthropic 400. Fix v2 rimuove blocchi orfani + scarta role=system iniettati `22445f9`. Verificato replay body reale 502→200 (2026-07-09)
 - [x] **BUG-502-MIXED** — Catena di 3 root cause del 502 mixed mode: (1) 502 mascherato `df0acd7`, (2) vision→Anthropic `cdcdb41`, (3a) shrink role:system `6e2ffda`, (3b) shrink spaia tool_use/tool_result → `_repair_message_sequence` `c21b67d`. Verificato main: big_tool_body 502→200, worst-case thinking+tool+cache 200, no regressioni (2026-07-09)
 - [x] **CARD-FIX-9988** — Fix pulsanti switch card GUI: puntavano a proxy `:9988` rimosso → ora `POST :8787/admin/mode/{mode}` + mode da `GET /health` · commit `cb2c4f1` pushato, round-trip curl verificato + test utente live (2026-07-03)
