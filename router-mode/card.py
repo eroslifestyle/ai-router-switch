@@ -48,13 +48,20 @@ ICON_PATH = Path.home() / ".claude" / "scripts" / "router-mode-icon.png"
 DESKTOP_NAME = "router-mode-panel"
 
 MODES = [
-    {"id": "anthropic",    "icon": "🔵",  "label": "Anthropic",    "exec": "→ Opus / Sonnet"},
-    {"id": "minimax",      "icon": "🟠",  "label": "MiniMax",      "exec": "M3 orch · M2.7 act"},
-    {"id": "mixed",        "icon": "🔷",  "label": "Mixed",        "exec": "Anthropic orch · M2.7 act"},
-    {"id": "inverse",      "icon": "🔶",  "label": "Inverse",       "exec": "M3 think · Opus OPPOSE · M2.7 act"},
-    {"id": "glm",          "icon": "🟢",  "label": "GLM",          "exec": "GLM-5.2 orch · tiering"},
-    {"id": "glm-minimax",  "icon": "🟢🟠","label": "GLM + MM",      "exec": "GLM-5.2 think · M2.7 act"},
-    {"id": "anthropic-glm","icon": "🔵🟢","label": "Ant + GLM",      "exec": "Anthropic orch · GLM act"},
+    {"id": "anthropic", "icon": "🔵", "label": "Anthropic",
+     "exec": "Claude Opus/Sonnet puro. Nessun routing."},
+    {"id": "minimax", "icon": "🟠", "label": "MiniMax",
+     "exec": "M3 orchestratore + M2.7 esecutore. Economia senza limiti."},
+    {"id": "mixed", "icon": "🔷", "label": "Mixed",
+     "exec": "Anthropic orchestra → MiniMax esegue. Bidirezionale."},
+    {"id": "inverse", "icon": "🔶", "label": "Inverse",
+     "exec": "M3 think · Opus OPPOSE loop × 2 · M2.7 act."},
+    {"id": "glm", "icon": "🟢", "label": "GLM",
+     "exec": "GLM-5.2 classifica → tier turbo/4.7/5.2. Peak-aware."},
+    {"id": "glm-minimax", "icon": "🟢🟠", "label": "GLM + MM",
+     "exec": "GLM-5.2 think → MiniMax act → GLM verify."},
+    {"id": "anthropic-glm", "icon": "🔵🟢", "label": "Ant + GLM",
+     "exec": "Anthropic orchestra → GLM tiered act → verify T2."},
 ]
 
 
@@ -166,7 +173,7 @@ class HeroWidget(QWidget):
         self._mode = "?"
         self._exec_text = ""
         self._health = False
-        self.setFixedHeight(82)
+        self.setFixedHeight(72)
         self._timer = QTimer()
         self._timer.timeout.connect(self._blink)
         self._timer.start(900)
@@ -194,7 +201,7 @@ class HeroWidget(QWidget):
         info = QVBoxLayout()
         info.setSpacing(2)
         self._mode_lbl = QLabel("—")
-        self._mode_lbl.setFont(QFont("Sans", 22, QFont.Weight.Bold))
+        self._mode_lbl.setFont(QFont("Sans", 28, QFont.Weight.Bold))
         self._mode_lbl.setStyleSheet(f"background:transparent;color:{C['accent']}")
         self._exec_lbl = QLabel("")
         self._exec_lbl.setFont(QFont("Sans", 9))
@@ -249,7 +256,7 @@ class ModeCard(QWidget):
         self._on_switch = on_switch
         self._active = False
         self._switching = False
-        self.setFixedSize(140, 110)
+        self.setFixedSize(140, 90)
         self._build_ui()
 
     def _build_ui(self):
@@ -257,39 +264,40 @@ class ModeCard(QWidget):
         self.setStyleSheet(f"""
             QWidget#modecard {{
                 background: {C['bg1']};
-                border: 1px solid {C['border']};
+                border: 1.5px solid {C['border']};
                 border-radius: 10px;
             }}
         """)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 6)
+        layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(2)
 
-        # Header: icon + label + spacer
+        # Riga 1: emoji 16pt + nome bold 11pt + spacer + pulsante 70x26
         header = QHBoxLayout()
         header.setSpacing(4)
         header.setContentsMargins(0, 0, 0, 0)
         icon_lbl = QLabel(self._m["icon"])
-        icon_lbl.setFont(QFont("Sans", 12))
+        icon_lbl.setFont(QFont("Sans", 14))
         icon_lbl.setStyleSheet("background:transparent")
         lbl_lbl = QLabel(self._m["label"])
-        lbl_lbl.setFont(QFont("Sans", 10, QFont.Weight.Bold))
+        lbl_lbl.setFont(QFont("Sans", 11, QFont.Weight.Bold))
         lbl_lbl.setStyleSheet(f"background:transparent;color:{C['txt']}")
         header.addWidget(icon_lbl)
         header.addWidget(lbl_lbl)
         header.addStretch()
         layout.addLayout(header)
 
-        # Exec
+        # Riga 2: exec text 8pt faint, 2 righe max
         exec_lbl = QLabel(self._m["exec"])
         exec_lbl.setFont(QFont("Sans", 8))
         exec_lbl.setWordWrap(True)
         exec_lbl.setMinimumHeight(28)
+        exec_lbl.setMaximumHeight(32)
         exec_lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         exec_lbl.setStyleSheet(f"background:transparent;color:{C['faint']}")
         layout.addWidget(exec_lbl, 1)
 
-        # Button stretto 70x26
+        # Riga 3: pulsante 70x26 allineato a destra
         self._btn = QPushButton("ON")
         self._btn.setFont(QFont("Sans", 9, QFont.Weight.Bold))
         self._btn.setCursor(Qt.PointingHandCursor)
@@ -300,7 +308,7 @@ class ModeCard(QWidget):
 
     def _update_style(self):
         if self._active:
-            self._btn.setText("✓ ATTIVO")
+            self._btn.setText("ON")
             self._btn.setStyleSheet(f"""
                 QPushButton {{
                     background: {C['green_btn']};
@@ -308,12 +316,13 @@ class ModeCard(QWidget):
                     border: none;
                     border-radius: 6px;
                     font-weight: bold;
+                    font-size: 9pt;
                 }}
             """)
             self.setStyleSheet(f"""
                 QWidget#modecard {{
                     background: {C['accent_bg']};
-                    border: 1px solid {C['green_btn']};
+                    border: 1.5px solid {C['green_btn']};
                     border-radius: 10px;
                 }}
             """)
@@ -326,6 +335,7 @@ class ModeCard(QWidget):
                     border: 1px solid {C['border']};
                     border-radius: 6px;
                     font-weight: bold;
+                    font-size: 9pt;
                 }}
                 QPushButton:hover {{
                     border-color: {C['blue']};
@@ -335,7 +345,7 @@ class ModeCard(QWidget):
             self.setStyleSheet(f"""
                 QWidget#modecard {{
                     background: {C['bg1']};
-                    border: 1px solid {C['border']};
+                    border: 1.5px solid {C['border']};
                     border-radius: 10px;
                 }}
             """)
@@ -348,7 +358,7 @@ class ModeCard(QWidget):
 # ── Main Card ─────────────────────────────────────────────────────────────
 class Card(QWidget):
     W = 480
-    H = 600
+    H = 580
 
     def __init__(self):
         super().__init__()
@@ -399,32 +409,58 @@ class Card(QWidget):
         self._hero = HeroWidget(self)
         body_layout.addWidget(self._hero)
 
-        # ── Sezione CORE ──────────────────────────────────────────────────
-        core_label = QLabel("CORE · CLAUDE + MINIMAX")
-        core_label.setFont(QFont("Sans", 9, QFont.Weight.Bold))
-        core_label.setStyleSheet("background:transparent;color:#8b949e")
-        body_layout.addWidget(core_label)
+        # Spacer 12px
+        spacer_hero = QWidget()
+        spacer_hero.setFixedHeight(12)
+        body_layout.addWidget(spacer_hero)
 
-        core_grid = QGridLayout()
-        core_grid.setSpacing(8)
-        core_modes = ["anthropic", "minimax", "mixed", "inverse"]
+        # ── Sezione ANTHROPIC ────────────────────────────────────────────
+        anthropic_label = QLabel("ANTHROPIC")
+        anthropic_label.setFont(QFont("Sans", 9, QFont.Weight.Bold))
+        anthropic_label.setStyleSheet("background:transparent;color:#5a6470")
+        body_layout.addWidget(anthropic_label)
+
+        anthropic_grid = QGridLayout()
+        anthropic_grid.setSpacing(8)
+        anthropic_modes = ["anthropic"]
         self._cards = {}
-        for i, mid in enumerate(core_modes):
+        for i, mid in enumerate(anthropic_modes):
             m = next(x for x in MODES if x["id"] == mid)
             card = ModeCard(m, self._do_switch)
             self._cards[mid] = card
-            core_grid.addWidget(card, i // 3, i % 3)
-        body_layout.addLayout(core_grid)
+            anthropic_grid.addWidget(card, 0, i)
+        body_layout.addLayout(anthropic_grid)
 
-        # ── Spacer ────────────────────────────────────────────────────────
-        spacer = QWidget()
-        spacer.setFixedHeight(10)
-        body_layout.addWidget(spacer)
+        # Spacer 10px
+        spacer1 = QWidget()
+        spacer1.setFixedHeight(10)
+        body_layout.addWidget(spacer1)
 
-        # ── Sezione GLM ──────────────────────────────────────────────────
+        # ── Sezione MINIMAX ──────────────────────────────────────────────
+        minimax_label = QLabel("MINIMAX")
+        minimax_label.setFont(QFont("Sans", 9, QFont.Weight.Bold))
+        minimax_label.setStyleSheet("background:transparent;color:#5a6470")
+        body_layout.addWidget(minimax_label)
+
+        minimax_grid = QGridLayout()
+        minimax_grid.setSpacing(8)
+        minimax_modes = ["minimax"]
+        for i, mid in enumerate(minimax_modes):
+            m = next(x for x in MODES if x["id"] == mid)
+            card = ModeCard(m, self._do_switch)
+            self._cards[mid] = card
+            minimax_grid.addWidget(card, 0, i)
+        body_layout.addLayout(minimax_grid)
+
+        # Spacer 10px
+        spacer2 = QWidget()
+        spacer2.setFixedHeight(10)
+        body_layout.addWidget(spacer2)
+
+        # ── Sezione GLM / Z.AI ──────────────────────────────────────────
         glm_label = QLabel("GLM / Z.AI")
         glm_label.setFont(QFont("Sans", 9, QFont.Weight.Bold))
-        glm_label.setStyleSheet("background:transparent;color:#8b949e")
+        glm_label.setStyleSheet("background:transparent;color:#5a6470")
         body_layout.addWidget(glm_label)
 
         glm_grid = QGridLayout()
@@ -437,12 +473,26 @@ class Card(QWidget):
             glm_grid.addWidget(card, 0, i)
         body_layout.addLayout(glm_grid)
 
-        # Footer
-        footer = QLabel("trascina per spostare  ·  X o Esc per chiudere")
-        footer.setFont(QFont("Sans", 9))
-        footer.setAlignment(Qt.AlignCenter)
-        footer.setStyleSheet(f"background:transparent;color:{C['faint']};font-style:italic")
-        body_layout.addWidget(footer)
+        # Spacer 10px
+        spacer3 = QWidget()
+        spacer3.setFixedHeight(10)
+        body_layout.addWidget(spacer3)
+
+        # ── Sezione MIX ──────────────────────────────────────────────────
+        mix_label = QLabel("MIX")
+        mix_label.setFont(QFont("Sans", 9, QFont.Weight.Bold))
+        mix_label.setStyleSheet("background:transparent;color:#5a6470")
+        body_layout.addWidget(mix_label)
+
+        mix_grid = QGridLayout()
+        mix_grid.setSpacing(8)
+        mix_modes = ["mixed", "inverse"]
+        for i, mid in enumerate(mix_modes):
+            m = next(x for x in MODES if x["id"] == mid)
+            card = ModeCard(m, self._do_switch)
+            self._cards[mid] = card
+            mix_grid.addWidget(card, 0, i)
+        body_layout.addLayout(mix_grid)
 
         inner.addWidget(body)
 
