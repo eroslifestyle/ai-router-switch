@@ -28,6 +28,12 @@ from pathlib import Path
 
 from aiohttp import web, ClientSession, ClientTimeout, TCPConnector
 
+# Context window fix imports (LAYER 1: intelligent rewrite)
+from src.token_counter import estimate_tokens, count_tokens
+from src.model_context_map import get_safe_input_limit, get_context_limit, get_summary_budget
+from src.context_rewrite import rewrite_for_context
+from src.summarizer import summarize_old_messages
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SISTEMA DI DEBUG — cattura errori upstream in chiaro ( mai più gzip illeggibile)
@@ -1345,6 +1351,30 @@ async def forward_anthropic(request, body, session):
             pass
         # Altrimenti: nessuna auth = proxy trasparente, sarà upstream a rifiutare con 401
 
+    # LAYER 3 FIX #68727: strip context-1m-2025-08-07 da beta header per Sonnet/Haiku.
+    # Fork-subagent eredita 1M beta dal padre Opus e crasha con "Extra usage required".
+    # Estrae il modello dal body per decidere se fare strip.
+    beta = headers.get("anthropic-beta", "") or headers.get("Anthropic-Beta", "")
+    if beta and "context-1m" in beta.lower():
+        try:
+            body_dict = json.loads(body)
+            model_str = (body_dict.get("model") or "").lower()
+            is_small = any(m in model_str for m in ("sonnet", "haiku")) and "opus" not in model_str
+            if is_small:
+                # Rimuovi solo il token problematico, mantieni altri beta flags
+                new_beta = ",".join(
+                    tok.strip() for tok in beta.split(",")
+                    if "context-1m" not in tok.lower()
+                )
+                if new_beta:
+                    headers["anthropic-beta"] = new_beta
+                else:
+                    headers.pop("anthropic-beta", None)
+                    headers.pop("Anthropic-Beta", None)
+                log(f"[#68727] stripped 1m beta for {model_str} fp={fp}")
+        except Exception:
+            pass
+
     # Strip campi beta che api.anthropic.com rifiuta senza il beta header opportuno.
     # FIX audit v5 #4: copri anche /v1/messages/count_tokens (sub-path), non solo
     # il path esatto, altrimenti context_management su count_tokens -> 400.
@@ -1489,10 +1519,21 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
     THINK ecc.) passano retry_budget_sec basso."""
     if retry_budget_sec is None:
         retry_budget_sec = MINIMAX_RETRY_CAP_SEC
-    # FIX 2026-07-08 (BUG-CTX-PRE): pre-check sintetico per body > limite MiniMax.
-    # Evita di spendere il round-trip che ritornerebbe 400 context-exceed (2013).
-    # Call site che NON hanno già il shrink integrato (minimax-orchestrate, inverse
-    # T1) intercettano questo marker e applicano shrink prima del 400 al client.
+    # FIX 2026-07-11 CONTEXT-WINDOW: pre-check intelligente per body > limite MiniMax.
+    # Pipeline: rewrite (tool pruning + head+tail) PRIMA di scartare con synthetic 400.
+    # Questo dà al modello la possibilità di continuare con contesto compresso.
+    _orig_body = body
+    fp = _resolve_chat_fingerprint(request) if '_resolve_chat_fingerprint' in dir() else ""
+    try:
+        if len(body) > 400_000:  # 400KB heuristic: attiva rewrite per richieste grandi
+            model = MINIMAX_MODEL
+            rewritten, was_rewritten = rewrite_for_context(body, model, fp)
+            if was_rewritten:
+                body = rewritten
+                log(f"[ctx-fix] rewrite {len(_orig_body)}b→{len(body)}b fp={fp}")
+    except Exception as e:
+        log(f"[ctx-fix] rewrite failed: {e}")
+    #合成 400 per body che eccede ancora il limite dopo rewrite
     try:
         if len(body) > MINIMAX_CONTEXT_BYTE_LIMIT:
             return _synthetic_context_exceed(body)
