@@ -4407,11 +4407,25 @@ async def handle(request):
     # NEW PIPELINE redesign 2026-07-01: Anthropic THINK + self-review + M3 ACT.
     # Scatta per TUTTE le /v1/messages in mode=mixed (incluso agentico con tools),
     # tranne quando M3 è in escalation (anthropic_leads). Abroga T0/T1/T2.
+    # FAST-PATH (D44): se il modello è già MiniMax, skippa THINK Anthropic ridondante
+    # e fai passthrough diretto — MiniMax ha già il suo think interno.
+    # L'unico overhead mixed-mode diventa il classification T2 locale (micro-secondi).
     if NEW_PIPELINE and is_messages and not anthropic_leads:
         try:
             orig = json.loads(body)
         except Exception:
             orig = {}
+        orig_model = (orig.get("model") or "").strip()
+        if orig_model.lower().startswith("minimax"):
+            # Fast-path: passthrough MiniMax diretto, no THINK Anthropic.
+            # L'unico overhead mixed è il classification T2 (micro-sec).
+            try:
+                up = await forward_minimax(request, body, session)
+                mixed_fail_reset(chat_fp)
+                log(f"mixed FAST-PATH MiniMax direct fp={chat_fp}")
+                return await relay(up)
+            except Exception as e:
+                log(f"mixed FAST-PATH MiniMax EXC: {e} -> fallthrough to pipeline")
         log(f"mixed-new pipeline attivata fp={chat_fp} tools={bool(orig.get('tools'))}")
         return await _pipeline_think_act(request, body, session, orig, relay)
 
