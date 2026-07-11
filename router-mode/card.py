@@ -179,7 +179,7 @@ class HeroWidget(QWidget):
 
 # ── Mode Card (148x90, pulsante 70x26 a destra) ──────────────────────────
 class ModeCard(QWidget):
-    CARD_W = 148
+    CARD_W = 140
     CARD_H = 90
     BTN_W = 70
     BTN_H = 26
@@ -198,9 +198,9 @@ class ModeCard(QWidget):
         self.setStyleSheet(f"QWidget#modecard {{ background: {C['bg1']}; border: 1.5px solid {C['border']}; border-radius: 10px; }}")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(2)
+        layout.setSpacing(4)
 
-        # Riga 1: emoji + nome + spacer + pulsante
+        # Riga 1: emoji + nome
         header = QHBoxLayout()
         header.setSpacing(4)
         header.setContentsMargins(0, 0, 0, 0)
@@ -213,22 +213,29 @@ class ModeCard(QWidget):
         header.addWidget(icon_lbl)
         header.addWidget(lbl_lbl)
         header.addStretch()
-
-        self._btn = QPushButton("ON")
-        self._btn.setFont(QFont("Sans", 9, QFont.Weight.Bold))
-        self._btn.setCursor(Qt.PointingHandCursor)
-        self._btn.setFixedSize(self.BTN_W, self.BTN_H)
-        self._btn.clicked.connect(lambda: self._on_switch(self._m["id"]))
-        header.addWidget(self._btn)
         layout.addLayout(header)
 
-        # Riga 2: exec text 8pt
+        # Riga 2: exec text 8pt faint
         exec_lbl = QLabel(self._m["exec"])
         exec_lbl.setFont(QFont("Sans", 8))
         exec_lbl.setWordWrap(True)
         exec_lbl.setStyleSheet(f"background:transparent;color:{C['faint']}")
         exec_lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         layout.addWidget(exec_lbl, 1)
+
+        # Riga 3: pulsante ON centrato
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(0)
+        btn_row.setContentsMargins(0, 0, 0, 0)
+        btn_row.addStretch()
+        self._btn = QPushButton("ON")
+        self._btn.setFont(QFont("Sans", 9, QFont.Weight.Bold))
+        self._btn.setCursor(Qt.PointingHandCursor)
+        self._btn.setFixedSize(self.BTN_W, self.BTN_H)
+        self._btn.clicked.connect(lambda: self._on_switch(self._m["id"]))
+        btn_row.addWidget(self._btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
 
         self._update_style()
 
@@ -245,8 +252,6 @@ class ModeCard(QWidget):
     def set_active(self, active):
         self._active = active
         self._update_style()
-
-# ── Main Card (480x540, 2 sezioni su 3 colonne) ────────────────────────
 class Card(QWidget):
     def __init__(self):
         super().__init__()
