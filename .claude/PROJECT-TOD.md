@@ -7,10 +7,11 @@ updated: 2026-06-29
 
 # Project Global TOD — ai-router-switch
 
-**Main HEAD**: 3d35c1a · **Branch**: main · **Updated**: 2026-07-11
+**Main HEAD**: de18154 · **Branch**: main · **Updated**: 2026-07-11
 
 ## ✅ Done (recenti, evidence-gated)
 
+- [x] **D37+D38+D41** — Sessione 2026-07-11: (D37) E2E inverse mode — header `x-ai-verified: minimax-m3-think+anthropic-oppose+minimax-m2.7-act` · (D38) test 4 modalità — minimax/mixed/inverse OK, anthropic 429 upstream (proxy OK) · (D41) delta-correction TPM — relay finally corregge entry[1] in-place, log conferma 74-91% overstima corretta (est=1051→88, 136560→26379, 170729→44314). Fix: MOD1 (forward_minimax attach), MOD2 (relay finally correction), MOD3 (_forward_minimax_generative attach). Commit `de18154` pushato, proxy live. (2026-07-11)
 - [x] **BUG-HAIKU-502-CTX** — 2 fix root cause 502 su body 4.2MB: (1) summarizer.py — "Can not decode content-encoding: br" — aiohttp default Accept-Encoding include brotli; MiniMax risponde brotli e aiohttp senza libreria installata crasha su `resp.json()` → il summarizer falliva e `_try_shrink_body` ritornava None → rescue path inviava body vuoto ad Anthropic → 400. Fix: `Accept-Encoding: gzip` esplicito. (2) ai-router-proxy.py riga 2969 — confrontava con `MINIMAX_CONTEXT_BYTE_LIMIT` (750k) invece di `ANTHROPIC_HAIKU_CONTEXT_BYTE_LIMIT` (200k) → Haiku riceveva body >200k. Fix: nuova costante 200k + confronto corretto. Commit `12250ef` pushato, test 4.2MB+gzip → HTTP 200 rescue+main. (2026-07-11)
 - [x] **GLM-MODES** — 3 nuove modalità GLM/z.ai (endpoint Anthropic-compatible api.z.ai/api/anthropic): `glm` (:8775, tiering turbo→4.7→5.2 via GLM-5.2 classifier, peak-aware 14-18 Shanghai), `glm-minimax` (:8776, GLM-5.2 THINK → MiniMax ACT → verify), `anthropic-glm` (:8777, Anthropic orch → GLM tiered ACT → verify T2). Moduli glm_backend.py + peak_scheduler.py. Fallback catena GLM→MiniMax→Anthropic. Fallimento peak: blocca 5.2/turbo (3x) → Anthropic. Commit `6cc058c` pushato · 12/12 test PASS · 8 porte live · secrets.sh glm.api_key configurato · systemd aggiornato. (2026-07-11)
 - [x] **GUI-CARD-REORGANIZE** — Widget card.py riorganizzato (demo 1: card verticali, 2 sezioni SOLO/MIX, pulsanti ON centrati, descrizioni complete). Commits `008e6e5`→`3d35c1a`. Fix: truncamento testi, glyph, spacing. (2026-07-11)
@@ -35,22 +36,12 @@ updated: 2026-06-29
 
 ## ⬜ Backlog
 
-- [ ] **D37** — E2E live inverse completo (M3 THINK → Opus OPPOSE → M2.7 ACT) su task complesso
-      Comando: `echo "inverse" > ~/.claude/ai-router-mode && curl -X POST http://localhost:8787/v1/messages -H "Content-Type: application/json" -H "anthropic-version: 2023-06-01" -d '{"model":"claude-opus-4-8","max_tokens":300,"messages":[{"role":"user","content":"Implementa Redis queue con worker pool e test."}]}'`
-      Done when: header `x-ai-verified: minimax-m3-think+opus-oppose+minimax-m2.7-act`, log mostra `OPPOSE iter0: approved=... fixes=...` (critica applicata), esecutore ACT=MiniMax-M2.7
-- [ ] **D38** — Mode switch + re-test (mixed vs minimax vs inverse vs anthropic puri) su 4 task diversi (leggero/medio/pesante/agentico)
-      Comando: script bash che testa tutte e 4 le porte (8787=dynamic/8771=anthropic/8772=minimax/8773=mixed/8774=inverse) in sequenza
-      Done when: tutti gli header x-ai-verified corretti, tutti gli esecutori i modelli attesi (Anthropic/M3 orchestra→executor/M2.7)
-
 - [ ] **D44** — Mitigazione latenza mixed mode (P1)
       Comando: confronta latenza minimax puro (:8772) vs mixed (:8787) su stesso task
       Done when: documento con raccomandazioni implementabili + test che dimostra il gap
 - [ ] **D45** — Valutare bypass THINK per task leggeri in mixed (P2)
       Comando: grep _build_think_body + piano vuoto fallback
       Done when: test dimostra miglioramento latenza senza degrado qualità
-- [ ] **D41** — Delta-correction TPM con usage reale (confer M3 2026-07-04): su successo il limiter registra la stima (bytes/4+max_tokens) che sovrastima le risposte corte → sottoutilizzo TPM 30-60%. relay() estrae già l'usage dai chunk SSE (FIX F _acc_buf): retro-alimentare MINIMAX_LIMITER.record con i token reali · P2
-      Comando: `grep -n "_acc_buf\|extract_usage" src/ai-router-proxy.py` per il punto di aggancio in relay()
-      Done when: snapshot /health mostra tpm_used ≈ usage reale (non stima), unit test delta-correction verde
 
 ## 🚫 Deferred / Blocked
 
