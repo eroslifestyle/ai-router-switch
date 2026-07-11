@@ -34,13 +34,13 @@ HERO_H = 56
 SPACING = 8
 
 MODES = [
-    {"id": "anthropic", "icon": "🔵", "label": "Anthropic", "exec": "Claude Opus/Sonnet puro. Nessun routing."},
-    {"id": "minimax", "icon": "🟠", "label": "MiniMax", "exec": "M3 orchestratore + M2.7 esecutore."},
-    {"id": "mixed", "icon": "🔷", "label": "Mixed", "exec": "Anthropic orch · MiniMax ACT."},
-    {"id": "inverse", "icon": "🔶", "label": "Inverse", "exec": "M3 think · Opus OPPOSE · M2.7 act."},
-    {"id": "glm", "icon": "🟢", "label": "GLM", "exec": "GLM-5.2 orchestratore + tiering."},
-    {"id": "glm-minimax", "icon": "🟢🟠", "label": "GLM+MM", "exec": "GLM-5.2 think · M2.7 act."},
-    {"id": "anthropic-glm", "icon": "🔵🟢", "label": "Ant+GLM", "exec": "Anthropic orch · GLM act."},
+    {"id": "anthropic", "icon": "🔵", "label": "Anthropic", "exec": "Claude Opus/Sonnet"},
+    {"id": "minimax", "icon": "🟠", "label": "MiniMax", "exec": "M3 orch / M2.7 act"},
+    {"id": "mixed", "icon": "🔷", "label": "Mixed", "exec": "Anthropic / MiniMax"},
+    {"id": "inverse", "icon": "🔶", "label": "Inverse", "exec": "M3 think / Opus / M2.7"},
+    {"id": "glm", "icon": "🟢", "label": "GLM", "exec": "GLM-5.2 orch / tiering"},
+    {"id": "glm-minimax", "icon": "🟢🟠", "label": "GLM+MM", "exec": "GLM-5.2 / M2.7 act"},
+    {"id": "anthropic-glm", "icon": "🔵🟢", "label": "Ant+GLM", "exec": "Anthropic / GLM"},
 ]
 
 def hex_c(h, a=255):
@@ -197,8 +197,8 @@ class ModeCard(QWidget):
         self.setObjectName("modecard")
         self.setStyleSheet(f"QWidget#modecard {{ background: {C['bg1']}; border: 1.5px solid {C['border']}; border-radius: 10px; }}")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(4)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(6)
 
         # Riga 1: emoji + nome
         header = QHBoxLayout()
@@ -295,9 +295,9 @@ class Card(QWidget):
         self._hero = HeroWidget()
         body_layout.addWidget(self._hero)
 
-        # Spacer 10px
+        # Spacer 6px
         spacer0 = QWidget()
-        spacer0.setFixedHeight(10)
+        spacer0.setFixedHeight(6)
         body_layout.addWidget(spacer0)
 
         # ── Sezione SOLO (3 colonne) ─────────────────────────────────
