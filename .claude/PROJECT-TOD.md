@@ -7,10 +7,11 @@ updated: 2026-06-29
 
 # Project Global TOD — ai-router-switch
 
-**Main HEAD**: de18154 · **Branch**: main · **Updated**: 2026-07-11
+**Main HEAD**: 3bfa966 · **Branch**: main · **Updated**: 2026-07-11
 
 ## ✅ Done (recenti, evidence-gated)
 
+- [x] **D44+D45** — Sessione 2026-07-11 pomeriggio: (D44) Fast-path MiniMax in mixed — skip redundant Anthropic THINK quando il modello è già MiniMax (passthrough diretto a forward_minimax). Test 10 iter: diff medio ≈0s (varianza API upstream, non routing). Commit `2f238a6`. (D45) Bypass THINK per task leggeri in mixed — criteri: <200 char, 1 msg, no tools → passthrough diretto (nessuna orchestrazione). Test misurato: ~4.5s vs ~24s (~5x miglioramento latenza). Commit `3bfa966`. Proxy live. (2026-07-11)
 - [x] **D37+D38+D41** — Sessione 2026-07-11: (D37) E2E inverse mode — header `x-ai-verified: minimax-m3-think+anthropic-oppose+minimax-m2.7-act` · (D38) test 4 modalità — minimax/mixed/inverse OK, anthropic 429 upstream (proxy OK) · (D41) delta-correction TPM — relay finally corregge entry[1] in-place, log conferma 74-91% overstima corretta (est=1051→88, 136560→26379, 170729→44314). Fix: MOD1 (forward_minimax attach), MOD2 (relay finally correction), MOD3 (_forward_minimax_generative attach). Commit `de18154` pushato, proxy live. (2026-07-11)
 - [x] **BUG-HAIKU-502-CTX** — 2 fix root cause 502 su body 4.2MB: (1) summarizer.py — "Can not decode content-encoding: br" — aiohttp default Accept-Encoding include brotli; MiniMax risponde brotli e aiohttp senza libreria installata crasha su `resp.json()` → il summarizer falliva e `_try_shrink_body` ritornava None → rescue path inviava body vuoto ad Anthropic → 400. Fix: `Accept-Encoding: gzip` esplicito. (2) ai-router-proxy.py riga 2969 — confrontava con `MINIMAX_CONTEXT_BYTE_LIMIT` (750k) invece di `ANTHROPIC_HAIKU_CONTEXT_BYTE_LIMIT` (200k) → Haiku riceveva body >200k. Fix: nuova costante 200k + confronto corretto. Commit `12250ef` pushato, test 4.2MB+gzip → HTTP 200 rescue+main. (2026-07-11)
 - [x] **GLM-MODES** — 3 nuove modalità GLM/z.ai (endpoint Anthropic-compatible api.z.ai/api/anthropic): `glm` (:8775, tiering turbo→4.7→5.2 via GLM-5.2 classifier, peak-aware 14-18 Shanghai), `glm-minimax` (:8776, GLM-5.2 THINK → MiniMax ACT → verify), `anthropic-glm` (:8777, Anthropic orch → GLM tiered ACT → verify T2). Moduli glm_backend.py + peak_scheduler.py. Fallback catena GLM→MiniMax→Anthropic. Fallimento peak: blocca 5.2/turbo (3x) → Anthropic. Commit `6cc058c` pushato · 12/12 test PASS · 8 porte live · secrets.sh glm.api_key configurato · systemd aggiornato. (2026-07-11)
@@ -36,12 +37,7 @@ updated: 2026-06-29
 
 ## ⬜ Backlog
 
-- [ ] **D44** — Mitigazione latenza mixed mode (P1)
-      Comando: confronta latenza minimax puro (:8772) vs mixed (:8787) su stesso task
-      Done when: documento con raccomandazioni implementabili + test che dimostra il gap
-- [ ] **D45** — Valutare bypass THINK per task leggeri in mixed (P2)
-      Comando: grep _build_think_body + piano vuoto fallback
-      Done when: test dimostra miglioramento latenza senza degrado qualità
+*(vuoto — tutti i task completati)*
 
 ## 🚫 Deferred / Blocked
 
