@@ -9,7 +9,7 @@ import json
 import urllib.request
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, QPoint, QRectF
+from PySide6.QtCore import Qt, QTimer, QPoint
 from PySide6.QtGui import QColor, QPainter, QPen, QFont, QPainterPath, QGradient, QLinearGradient, QIcon
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
 )
 
 # ── Palette OKLCH-conscious (hex per compatibilità PySide6) ──────────────────
-# Accent: verde caldo
 C = {
     "accent":     "#4ade80",   # verde chiaro
     "accent_dim": "#2d7a4d",   # verde scuro per testo su bg
@@ -37,23 +36,25 @@ C = {
     "txt":        "#e5e7eb",   # testo principale
     "muted":      "#9ca3af",   # testo secondario
     "faint":      "#5a6470",   # testo terziario
+    # per card widget
+    "green_btn":  "#238636",
+    "gray_btn":   "#21262d",
 }
 
 # Punto unico: ai-router :8787 (il proxy :9988 non esiste più)
 ROUTER = "http://localhost:8787"
 MODE_FILE = Path.home() / ".claude" / "ai-router-mode"
 ICON_PATH = Path.home() / ".claude" / "scripts" / "router-mode-icon.png"
-# Deve combaciare col basename di router-mode-panel.desktop → GNOME usa la sua icona in taskbar.
 DESKTOP_NAME = "router-mode-panel"
 
 MODES = [
-    {"id": "anthropic", "icon": "🔵", "label": "Anthropic",  "exec": "→ Opus / Sonnet"},
-    {"id": "minimax",   "icon": "🟠", "label": "MiniMax",    "exec": "M3 orch · M2.7 act"},
-    {"id": "mixed",     "icon": "🔷", "label": "Mixed",      "exec": "Anthropic orch · M2.7 act"},
-    {"id": "inverse",   "icon": "🔶", "label": "Inverse",    "exec": "M3 think · Opus OPPOSE · M2.7 act"},
-    {"id": "glm", "icon": "🟢", "label": "GLM", "exec": "GLM-5.2 orch · tiering"},
-    {"id": "glm-minimax", "icon": "🟢🟠", "label": "GLM + MM", "exec": "GLM-5.2 think · M2.7 act"},
-    {"id": "anthropic-glm", "icon": "🔵🟢", "label": "Ant + GLM", "exec": "Anthropic orch · GLM act"},
+    {"id": "anthropic",    "icon": "🔵",  "label": "Anthropic",    "exec": "→ Opus / Sonnet"},
+    {"id": "minimax",      "icon": "🟠",  "label": "MiniMax",      "exec": "M3 orch · M2.7 act"},
+    {"id": "mixed",        "icon": "🔷",  "label": "Mixed",        "exec": "Anthropic orch · M2.7 act"},
+    {"id": "inverse",      "icon": "🔶",  "label": "Inverse",       "exec": "M3 think · Opus OPPOSE · M2.7 act"},
+    {"id": "glm",          "icon": "🟢",  "label": "GLM",          "exec": "GLM-5.2 orch · tiering"},
+    {"id": "glm-minimax",  "icon": "🟢🟠","label": "GLM + MM",      "exec": "GLM-5.2 think · M2.7 act"},
+    {"id": "anthropic-glm","icon": "🔵🟢","label": "Ant + GLM",      "exec": "Anthropic orch · GLM act"},
 ]
 
 
@@ -100,22 +101,18 @@ class TitleBar(QWidget):
         layout.setContentsMargins(12, 0, 8, 0)
         layout.setSpacing(6)
 
-        # Router icon
         icon_lbl = QLabel("🔀")
         icon_lbl.setFont(QFont("Sans", 13))
         icon_lbl.setStyleSheet(f"background:transparent;color:{C['accent']}")
         layout.addWidget(icon_lbl)
 
-        # Title
         title = QLabel("AI Router")
         title.setFont(QFont("Sans", 13, QFont.Weight.Bold))
         title.setStyleSheet(f"background:transparent;color:{C['txt']}")
         layout.addWidget(title)
 
-        # Spacer
         layout.addStretch()
 
-        # Pulsanti azione
         self._make_btn("─", "minimize", self._minimize, C["muted"], C["txt"]).setFont(QFont("Sans", 13))
         self._make_btn("↻", "restart", parent._restart, C["muted"], C["warn"]).setFont(QFont("Sans", 11))
         self._make_btn("✕", "close", parent.close, C["muted"], C["err"]).setFont(QFont("Sans", 11, QFont.Bold))
@@ -188,14 +185,12 @@ class HeroWidget(QWidget):
         layout.setContentsMargins(14, 10, 14, 10)
         layout.setSpacing(12)
 
-        # Dot
         self._dot = QLabel("●")
         self._dot.setFont(QFont("Sans", 14))
         self._dot.setFixedWidth(18)
         self._dot.setStyleSheet("background:transparent;color:{}".format(C["accent"]))
         layout.addWidget(self._dot)
 
-        # Mode info
         info = QVBoxLayout()
         info.setSpacing(2)
         self._mode_lbl = QLabel("—")
@@ -209,10 +204,8 @@ class HeroWidget(QWidget):
         info.addWidget(self._exec_lbl)
         layout.addLayout(info)
 
-        # Spacer
         layout.addStretch()
 
-        # Health badge
         self._health_lbl = QLabel("OFFLINE")
         self._health_lbl.setFont(QFont("Sans", 9, QFont.Weight.Bold))
         self._health_lbl.setStyleSheet(f"background:transparent;color:{C['err']}")
@@ -256,8 +249,7 @@ class ModeCard(QWidget):
         self._on_switch = on_switch
         self._active = False
         self._switching = False
-        self.setFixedHeight(60)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setFixedSize(140, 110)
         self._build_ui()
 
     def _build_ui(self):
@@ -265,22 +257,23 @@ class ModeCard(QWidget):
         self.setStyleSheet(f"""
             QWidget#modecard {{
                 background: {C['bg1']};
-                border: 1.5px solid {C['border']};
+                border: 1px solid {C['border']};
                 border-radius: 10px;
             }}
         """)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(3)
+        layout.setContentsMargins(8, 8, 8, 6)
+        layout.setSpacing(2)
 
-        # Header
+        # Header: icon + label + spacer
         header = QHBoxLayout()
-        header.setSpacing(6)
+        header.setSpacing(4)
+        header.setContentsMargins(0, 0, 0, 0)
         icon_lbl = QLabel(self._m["icon"])
-        icon_lbl.setFont(QFont("Sans", 14))
+        icon_lbl.setFont(QFont("Sans", 12))
         icon_lbl.setStyleSheet("background:transparent")
         lbl_lbl = QLabel(self._m["label"])
-        lbl_lbl.setFont(QFont("Sans", 11, QFont.Weight.Bold))
+        lbl_lbl.setFont(QFont("Sans", 10, QFont.Weight.Bold))
         lbl_lbl.setStyleSheet(f"background:transparent;color:{C['txt']}")
         header.addWidget(icon_lbl)
         header.addWidget(lbl_lbl)
@@ -291,18 +284,18 @@ class ModeCard(QWidget):
         exec_lbl = QLabel(self._m["exec"])
         exec_lbl.setFont(QFont("Sans", 8))
         exec_lbl.setWordWrap(True)
-        exec_lbl.setMinimumHeight(26)
+        exec_lbl.setMinimumHeight(28)
         exec_lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        exec_lbl.setStyleSheet(f"background:transparent;color:{C['blue']}")
+        exec_lbl.setStyleSheet(f"background:transparent;color:{C['faint']}")
         layout.addWidget(exec_lbl, 1)
 
-        # Button
+        # Button stretto 70x26
         self._btn = QPushButton("ON")
-        self._btn.setFont(QFont("Sans", 10, QFont.Weight.Bold))
+        self._btn.setFont(QFont("Sans", 9, QFont.Weight.Bold))
         self._btn.setCursor(Qt.PointingHandCursor)
-        self._btn.setFixedHeight(28)
+        self._btn.setFixedSize(70, 26)
         self._btn.clicked.connect(lambda: self._on_switch(self._m["id"]))
-        layout.addWidget(self._btn)
+        layout.addWidget(self._btn, 0, Qt.AlignRight)
         self._update_style()
 
     def _update_style(self):
@@ -310,8 +303,8 @@ class ModeCard(QWidget):
             self._btn.setText("✓ ATTIVO")
             self._btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: {C['accent']};
-                    color: #06210f;
+                    background: {C['green_btn']};
+                    color: #ffffff;
                     border: none;
                     border-radius: 6px;
                     font-weight: bold;
@@ -320,7 +313,7 @@ class ModeCard(QWidget):
             self.setStyleSheet(f"""
                 QWidget#modecard {{
                     background: {C['accent_bg']};
-                    border: 1.5px solid {C['accent']};
+                    border: 1px solid {C['green_btn']};
                     border-radius: 10px;
                 }}
             """)
@@ -328,7 +321,7 @@ class ModeCard(QWidget):
             self._btn.setText("ON")
             self._btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: {C['bg3']};
+                    background: {C['gray_btn']};
                     color: {C['muted']};
                     border: 1px solid {C['border']};
                     border-radius: 6px;
@@ -342,7 +335,7 @@ class ModeCard(QWidget):
             self.setStyleSheet(f"""
                 QWidget#modecard {{
                     background: {C['bg1']};
-                    border: 1.5px solid {C['border']};
+                    border: 1px solid {C['border']};
                     border-radius: 10px;
                 }}
             """)
@@ -359,7 +352,6 @@ class Card(QWidget):
 
     def __init__(self):
         super().__init__()
-        # No always-on-top: la finestra può passare dietro le altre (richiesta utente).
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setWindowTitle("AI Router")
@@ -375,7 +367,6 @@ class Card(QWidget):
         shadow.setOffset(0, 6)
         shadow.setColor(QColor(0, 0, 0, 110))
 
-        # Container
         container = QWidget(self)
         container.setObjectName("container")
         container.setGraphicsEffect(shadow)
@@ -395,52 +386,56 @@ class Card(QWidget):
         inner.setContentsMargins(0, 0, 0, 0)
         inner.setSpacing(0)
 
-        # Title bar
         self._titlebar = TitleBar(self)
         inner.addWidget(self._titlebar)
 
-        # Body
         body = QWidget()
         body.setStyleSheet("background:transparent")
         body_layout = QVBoxLayout(body)
         body_layout.setContentsMargins(16, 12, 16, 12)
-        body_layout.setSpacing(12)
+        body_layout.setSpacing(8)
 
         # Hero
         self._hero = HeroWidget(self)
         body_layout.addWidget(self._hero)
 
-        # Sezione "CORE · CLAUDE + MINIMAX"
+        # ── Sezione CORE ──────────────────────────────────────────────────
         core_label = QLabel("CORE · CLAUDE + MINIMAX")
         core_label.setFont(QFont("Sans", 9, QFont.Weight.Bold))
         core_label.setStyleSheet("background:transparent;color:#8b949e")
         body_layout.addWidget(core_label)
 
-        # 4 card VERTICALI (una per riga, full-width)
+        core_grid = QGridLayout()
+        core_grid.setSpacing(8)
+        core_modes = ["anthropic", "minimax", "mixed", "inverse"]
         self._cards = {}
-        for m in MODES:
-            if m["id"] in {"anthropic", "minimax", "mixed", "inverse"}:
-                card = ModeCard(m, self._do_switch)
-                self._cards[m["id"]] = card
-                body_layout.addWidget(card)
+        for i, mid in enumerate(core_modes):
+            m = next(x for x in MODES if x["id"] == mid)
+            card = ModeCard(m, self._do_switch)
+            self._cards[mid] = card
+            core_grid.addWidget(card, i // 3, i % 3)
+        body_layout.addLayout(core_grid)
 
-        # Spacer 8px
+        # ── Spacer ────────────────────────────────────────────────────────
         spacer = QWidget()
-        spacer.setFixedHeight(8)
+        spacer.setFixedHeight(10)
         body_layout.addWidget(spacer)
 
-        # Sezione "GLM / Z.AI"
+        # ── Sezione GLM ──────────────────────────────────────────────────
         glm_label = QLabel("GLM / Z.AI")
         glm_label.setFont(QFont("Sans", 9, QFont.Weight.Bold))
         glm_label.setStyleSheet("background:transparent;color:#8b949e")
         body_layout.addWidget(glm_label)
 
-        # 3 card VERTICALI (una per riga, full-width)
-        for m in MODES:
-            if m["id"] in {"glm", "glm-minimax", "anthropic-glm"}:
-                card = ModeCard(m, self._do_switch)
-                self._cards[m["id"]] = card
-                body_layout.addWidget(card)
+        glm_grid = QGridLayout()
+        glm_grid.setSpacing(8)
+        glm_modes = ["glm", "glm-minimax", "anthropic-glm"]
+        for i, mid in enumerate(glm_modes):
+            m = next(x for x in MODES if x["id"] == mid)
+            card = ModeCard(m, self._do_switch)
+            self._cards[mid] = card
+            glm_grid.addWidget(card, 0, i)
+        body_layout.addLayout(glm_grid)
 
         # Footer
         footer = QLabel("trascina per spostare  ·  X o Esc per chiudere")
@@ -513,8 +508,6 @@ class Card(QWidget):
 
 def main():
     app = QApplication([])
-    # Identità app → GNOME aggancia router-mode-panel.desktop e usa la SUA icona
-    # in taskbar (niente icona anonima del processo), come ogni programma normale.
     app.setApplicationName("AI Router")
     app.setApplicationDisplayName("AI Router")
     app.setDesktopFileName(DESKTOP_NAME)
