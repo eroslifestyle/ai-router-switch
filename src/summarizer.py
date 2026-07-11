@@ -76,6 +76,10 @@ async def summarize_old_messages(
                     "x-api-key": api_key,
                     "anthropic-version": "2023-06-01",
                     "content-type": "application/json",
+                    # Fix 2026-07-11: aiohttp default = gzip,deflate,br; senza brotli
+                    # installato la risposta brotli da MiniMax fa fallire resp.json().
+                    # Forziamo solo gzip (nativamente gestito da aiohttp).
+                    "Accept-Encoding": "gzip",
                 },
                 json={
                     "model": model,

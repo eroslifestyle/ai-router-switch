@@ -2141,6 +2141,7 @@ def _build_act_body(orig: dict, plan: str, tools_to_call: list,
 # ── Context window thresholds (byte → token ≈ /4 per English+code) ────────
 # MiniMax-M2.7 context ≈ 192k token → 750k byte
 MINIMAX_CONTEXT_BYTE_LIMIT = int(os.environ.get("AIROUTER_MINIMAX_CONTEXT_LIMIT", "750000"))
+ANTHROPIC_HAIKU_CONTEXT_BYTE_LIMIT = 200 * 1024  # 200k byte per Haiku
 
 TRIM_STATE_DIR = Path(os.environ.get("AIROUTER_TRIM_DIR", "/tmp/ai-router-trim"))
 TRIM_STATE_DIR.mkdir(exist_ok=True)
@@ -2965,7 +2966,7 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
         haiku_body_bytes = json.dumps(haiku_body_dict).encode()
         # FIX 2026-07-08 (BUG-CTX-PRE): Haiku ha 200k context. Se ancora >limite
         # anche dopo shrink sopra, shrink ulteriore per Haiku — o skippa.
-        if len(haiku_body_bytes) > MINIMAX_CONTEXT_BYTE_LIMIT:
+        if len(haiku_body_bytes) > ANTHROPIC_HAIKU_CONTEXT_BYTE_LIMIT:
             shrunk_h = await _try_shrink_body(haiku_body_dict, MINIMAX_CONTEXT_BYTE_LIMIT)
             if shrunk_h is None:
                 log(f"mixed-new ACT rescue: body {len(haiku_body_bytes)}b > Haiku limit, skip fp={chat_fp}")
