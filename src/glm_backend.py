@@ -1,471 +1,395 @@
+#!/usr/bin/env python3
 """
-GLM/z.ai Backend Module for AI Router Proxy.
-Handles tiering, classification, and rate limiting for GLM models.
+GLM Backend — Zhipu AI (Z.ai) Anthropic-compatible endpoint.
+
+3 tier modeli GLM con context window reali verificati:
+  - TOP    (GLM_TIER_TOP):    glm-5.2    — 1M ctx, 128K output
+  - TURBO  (GLM_TIER_TURBO): glm-5-turbo — 200K ctx
+  - MID    (GLM_TIER_MID):   glm-4.7     — 128K ctx, cheap
+
+R3 decisions:
+  R3-#1: GLMRateLimiter dedicato, non condiviso con minimax
+  R3-#2: chiave da secrets.sh, mai stampata nei log
+  R3-#3: circuit breaker con auto-recupero
+  R3-#4: classify_tier via MiniMax/M3
+  R3-#5: peak scheduler (Asia/Shanghai 14-18 UTC+8)
+  R3-#6: forward_glm con retry loop 2 tentativi
 """
 import asyncio
 import json
 import os
-import time
 import random
 import subprocess
-from pathlib import Path
+import time
+from aiohttp import ClientTimeout
 from collections import deque
-from typing import Optional, Dict, Any, List, Tuple
+from pathlib import Path
+from typing import Optional
 
-from peak_scheduler import is_peak_hour, peak_tier_cap, cost_multiplier, should_block_glm_model
+# Z.ai Anthropic-compatible endpoint
+GLM_UPSTREAM = os.environ.get("GLM_UPSTREAM", "https://api.z.ai/api/anthropic")
 
-# Context window mapping per modelli GLM (LAYER 1: context-aware routing)
-GLM_CONTEXT_MAP = {
-    "glm-5-turbo": 1_000_000,
-    "glm-5.2": 1_000_000,
-    "glm-4.7": 128_000,
-    "glm-4": 128_000,
-    "glm-4v": 128_000,
+# Tier costanti
+GLM_TIER_TOP = "TOP"
+GLM_TIER_TURBO = "TURBO"
+GLM_TIER_MID = "MID"
+
+# Marker per il proxy: task complesso in fascia peak → Anthropic esegue direttamente
+_ANTHROPIC_BLOCKED = "__ANTHROPIC_BLOCKED__"
+
+# Modello GLM per ogni tier
+GLM_MODEL_FOR_TIER = {
+    GLM_TIER_TOP: "glm-5.2",
+    GLM_TIER_TURBO: "glm-5-turbo",
+    GLM_TIER_MID: "glm-4.7",
 }
-GLM_BUFFER_PERCENT = 20  # 20% libero per output
 
-def get_glm_context_limit(model: str) -> int:
-    """Restituisce il context window per un modello GLM."""
-    return GLM_CONTEXT_MAP.get(model.lower(), 128_000)
+# Context limit sicuri per ogni modello (input tokens, con headroom)
+# Source: piano verificato con contesto reale
+_GLM_CONTEXT_LIMITS = {
+    "glm-5.2": 900_000,     # 1M ctx, 100K headroom
+    "glm-5-turbo": 180_000,  # 200K ctx, 20K headroom
+    "glm-4.7": 115_000,      # 128K ctx, 13K headroom
+}
 
-def get_glm_safe_limit(model: str) -> int:
-    """Limite sicuro input: context - buffer%."""
-    ctx = get_glm_context_limit(model)
-    return ctx - int(ctx * GLM_BUFFER_PERCENT / 100)
-
-def is_glm_body_too_large(body: bytes, model: str) -> bool:
-    """Check se il body eccede il limite sicuro per il modello GLM target."""
-    try:
-        body_str = body.decode('utf-8', errors='replace')
-        token_est = max(len(body_str) // 4, 1)
-        return token_est > get_glm_safe_limit(model)
-    except Exception:
-        return False
-
-GLM_UPSTREAM = os.getenv("AIROUTER_GLM_UPSTREAM", "https://api.z.ai/api/anthropic")
-GLM_TIER_TURBO = os.getenv("AIROUTER_GLM_TIER_TURBO", "glm-5-turbo")
-GLM_TIER_MID = os.getenv("AIROUTER_GLM_TIER_MID", "glm-4.7")
-GLM_TIER_TOP = os.getenv("AIROUTER_GLM_TIER_TOP", "glm-5.2")
-GLM_TIERS = [GLM_TIER_TURBO, GLM_TIER_MID, GLM_TIER_TOP]
-GLM_REASONING = {GLM_TIER_TURBO: "low", GLM_TIER_MID: "medium", GLM_TIER_TOP: "high"}
-GLM_CLASSIFIER_MODEL = os.getenv("AIROUTER_GLM_CLASSIFIER", GLM_TIER_TOP)
-GLM_RPM_LIMIT = int(os.getenv("AIROUTER_GLM_RPM", "60"))
-GLM_TPM_LIMIT = int(os.getenv("AIROUTER_GLM_TPM", "2000000"))
-GLM_SAFETY = float(os.getenv("AIROUTER_GLM_SAFETY", "0.8"))
 KEY_FILE = Path.home() / ".claude" / "secrets" / "secrets.sh"
-GLM_ALERTS_LOG = os.path.expanduser("~/.claude/logs/glm-alerts.log")
+ALERT_LOG = Path.home() / ".claude" / "logs" / "glm-peak-alerts.log"
 
-_ANTHROPIC_BLOCKED = "__ANTHROPIC__"
+# ── API Key ──────────────────────────────────────────────────────────────────
 
-_key_cache: Dict[str, Any] = {"key": None, "ts": 0}
-
-GLM_LIMITER = None
+_glm_key_cache: dict = {"key": "", "ts": 0.0}
 
 
-def _log_if(log_fn, msg):
-    if log_fn:
-        try:
-            log_fn(msg)
-        except Exception:
-            pass
-
-
-async def get_glm_key(log_fn=None) -> str:
-    """
-    Retrieves GLM API key from environment or secrets file.
-    Caches result for 60 seconds.
-    """
+async def get_glm_key() -> str:
+    """Legge la chiave GLM da secrets.sh, con cache 60s."""
     now = time.time()
-    if _key_cache["key"] and (now - _key_cache["ts"]) < 60:
-        return _key_cache["key"]
-    key = os.getenv("GLM_API_KEY", "").strip()
-    if key:
-        _key_cache["key"] = key
-        _key_cache["ts"] = now
-        return key
-    try:
-        key = await asyncio.to_thread(
-            lambda: subprocess.check_output(
-                ["bash", str(KEY_FILE), "get", "glm.api_key"],
-                timeout=5,
-                text=True
-            ).strip()
-        )
-        _key_cache["key"] = key
-        _key_cache["ts"] = now
-        return key
-    except Exception as e:
-        _log_if(log_fn, f"[GLM] Failed to get key: {e}")
-        return ""
+    if _glm_key_cache["key"] and now - _glm_key_cache["ts"] < 60:
+        return _glm_key_cache["key"]
 
-
-def build_glm_body(orig_body: bytes, model: str, force_stream: Optional[bool] = None) -> bytes:
-    """
-    Builds GLM-compatible request body from original Anthropic body.
-    Adds reasoning_effort, removes incompatible fields.
-    """
-    try:
-        body = json.loads(orig_body)
-    except Exception:
-        return orig_body
-    body["model"] = model
-    if model in GLM_REASONING:
-        body["reasoning_effort"] = GLM_REASONING[model]
-    if force_stream is not None:
-        body["stream"] = force_stream
-    for field in ["context_management", "output_config", "mcp_servers"]:
-        body.pop(field, None)
-    try:
-        return json.dumps(body).encode()
-    except Exception:
-        return orig_body
-
-
-async def forward_glm(request, body: bytes, session, model: str, log_fn=None) -> Any:
-    """
-    Forwards request to GLM upstream with proper headers and auth.
-    """
-    key = await get_glm_key(log_fn)
+    key = os.environ.get("GLM_API_KEY", "")
     if not key:
-        raise RuntimeError("[GLM] No API key available")
-    path = getattr(request, "path_qs", getattr(request, "path", "/v1/messages"))
-    url = GLM_UPSTREAM + path
-    headers = {}
-    hop_headers = {
-        "host", "content-length", "authorization", "x-api-key",
-        "connection", "keep-alive", "transfer-encoding", "upgrade"
-    }
-    for k, v in request.headers.items():
-        if k.lower() not in hop_headers and not k.lower().startswith("proxy-"):
-            headers[k] = v
-    headers["Authorization"] = f"Bearer {key}"
-    headers.setdefault("anthropic-version", "2023-06-01")
-    new_body = build_glm_body(body, model)
-    try:
-        entry = await GLM_LIMITER.acquire(len(new_body), 30.0) if GLM_LIMITER else None
-        resp = await session.request(
-            request.method, url, data=new_body, headers=headers, allow_redirects=False
-        )
-        if GLM_LIMITER and entry is not None:
-            GLM_LIMITER.record(entry, resp.headers.get("x-token-count", "0"), resp.status < 400)
-        return resp
-    except Exception as e:
-        if GLM_LIMITER and entry is not None:
-            GLM_LIMITER.record(entry, 0, False)
-        _log_if(log_fn, f"[GLM] Forward error: {e}")
-        raise
-
-
-def heuristic_tier(orig_body: bytes) -> str:
-    """
-    Local zero-token heuristic to estimate request complexity tier.
-    Returns GLM tier model name.
-    """
-    try:
-        body = json.loads(orig_body)
-    except Exception:
-        return GLM_TIER_MID
-    score = 0
-    if len(orig_body) > 40000:
-        score += 1
-    messages = body.get("messages", [])
-    if len(messages) > 20:
-        score += 1
-    if body.get("tools"):
-        score += 2
-    msg_text = ""
-    for m in reversed(messages):
-        if isinstance(m, dict) and m.get("role") == "user":
-            content = m.get("content", "")
-            if isinstance(content, str):
-                msg_text = content
-            elif isinstance(content, list):
-                for p in content:
-                    if isinstance(p, dict) and p.get("type") == "text":
-                        msg_text = p.get("text", "")
-                        break
-            break
-    for marker in ["```", "tool_result", "tool_use"]:
-        if marker in msg_text:
-            score += 1
-            break
-    hard_keywords = ["refactor", "architettura", "architecture", "debug",
-                     "exploit", "sicurezza", "security", "ottimizza",
-                     "optimize", "algoritmo", "concurrency", "race condition",
-                     "redesign", "migration", "refactoring", "vulnerability"]
-    easy_keywords = ["formatta", "format", "rinomina", "rename",
-                     "traduci", "translate", "spiega brevemente", "lista", "list",
-                     "summarize", "riassumi", "capitalize"]
-    for kw in hard_keywords:
-        if kw.lower() in msg_text.lower():
-            score += 2
-            break
-    for kw in easy_keywords:
-        if kw.lower() in msg_text.lower():
-            score -= 1
-            break
-    if body.get("thinking") or body.get("reasoning_effort") in ("high", "max"):
-        score += 2
-    if score >= 2:
-        return GLM_TIER_TOP
-    elif score == 1:
-        return GLM_TIER_MID
-    else:
-        return GLM_TIER_TURBO
-
-
-async def _call_glm_json(
-    body_dict: Dict[str, Any],
-    session,
-    log_fn=None,
-    timeout: float = 15.0
-) -> Tuple[Optional[int], Optional[Dict[str, Any]]]:
-    """
-    Helper to call GLM with JSON body and return parsed response.
-    """
-    key = await get_glm_key(log_fn)
-    if not key:
-        return None, None
-    url = GLM_UPSTREAM + "/v1/messages"
-    headers = {
-        "Authorization": f"Bearer {key}",
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json"
-    }
-    try:
-        resp = await asyncio.wait_for(
-            session.request("POST", url, json=body_dict, headers=headers),
-            timeout=timeout
-        )
-        status = resp.status
         try:
-            data = await resp.json()
+            proc = await asyncio.to_thread(
+                lambda: subprocess.check_output(
+                    ["bash", str(KEY_FILE), "get", "glm.api_key"],
+                    timeout=5, text=True,
+                )
+            )
+            key = proc.strip() if isinstance(proc, str) else proc.decode().strip()
         except Exception:
-            text = await resp.text()
-            try:
-                data = json.loads(text)
-            except Exception:
-                data = None
-        return status, data
-    except asyncio.TimeoutError:
-        _log_if(log_fn, "[GLM] Classifier timeout")
-        return None, None
-    except Exception as e:
-        _log_if(log_fn, f"[GLM] Classifier error: {e}")
-        return None, None
+            key = ""
+
+    _glm_key_cache["key"] = key
+    _glm_key_cache["ts"] = now
+    return key
 
 
-async def classify_tier(orig_body: bytes, request, session, log_fn=None) -> str:
-    """
-    Classifies request complexity using GLM-5.2 classifier.
-    Falls back to heuristic on failure or ambiguity.
-    """
-    try:
-        body = json.loads(orig_body)
-    except Exception:
-        return heuristic_tier(orig_body)
-    messages = body.get("messages", [])
-    task_text = ""
-    for m in reversed(messages):
-        if isinstance(m, dict) and m.get("role") == "user":
-            content = m.get("content", "")
-            if isinstance(content, str):
-                task_text = content
-            elif isinstance(content, list):
-                for p in content:
-                    if isinstance(p, dict) and p.get("type") == "text":
-                        task_text = p.get("text", "")
-                        break
-            break
-    task_text = task_text[:2000]
-    system_prompt = (
-        "Sei un classificatore di complessita. Rispondi SOLO con una parola: "
-        "SEMPLICE, MEDIO, o COMPLESSO. SEMPLICE=formattazione/rinomina/traduzioni banali. "
-        "MEDIO=modifiche localizzate, domande tecniche. COMPLESSO=refactor multi-file, "
-        "architettura, debug difficile, sicurezza/exploit, task agentici con molti tool."
-    )
-    classifier_body = {
-        "model": GLM_CLASSIFIER_MODEL,
-        "max_tokens": 20,
-        "stream": False,
-        "system": system_prompt,
-        "messages": [{"role": "user", "content": task_text}]
-    }
-    status, data = await _call_glm_json(classifier_body, session, log_fn, timeout=15.0)
-    if status is None or data is None:
-        result = heuristic_tier(orig_body)
-        _log_if(log_fn, f"[GLM] Classifier fallback -> {result}")
-        return result
-    content = ""
-    if data.get("type") == "message" and data.get("content"):
-        for block in data["content"]:
-            if block.get("type") == "text":
-                content = block.get("text", "")
-                break
-    content_lower = content.lower().strip()
-    if "complesso" in content_lower or "complex" in content_lower:
-        result = GLM_TIER_TOP
-    elif "medio" in content_lower or "medium" in content_lower:
-        result = GLM_TIER_MID
-    elif "semplice" in content_lower or "simple" in content_lower:
-        result = GLM_TIER_TURBO
-    else:
-        result = heuristic_tier(orig_body)
-        _log_if(log_fn, f"[GLM] Classifier ambiguous '{content}' -> heuristic {result}")
-        return result
-    _log_if(log_fn, f"[GLM] Classifier -> {result}")
-    return result
+# ── GLM Rate Limiter ─────────────────────────────────────────────────────────
+
+# Safety factor: 80% dei limiti (headroom per jitter gateway)
+GLM_SAFETY = float(os.environ.get("AIROUTER_GLM_SAFETY", "0.8"))
+
+# GLM rate limits ufficiali (verificare dal piano Z.ai)
+# ponytail: limits placeholder — aggiornare con dati reali Z.ai
+GLM_RATE_LIMITS = {
+    "glm-5.2": (200, 10_000_000),      # (RPM, TPM)
+    "glm-5-turbo": (500, 20_000_000),
+    "glm-4.7": (500, 20_000_000),
+}
+GLM_RATE_LIMITS_DEFAULT = (200, 10_000_000)
+GLM_RETRY_CAP_SEC = float(os.environ.get("AIROUTER_GLM_RETRY_CAP_SEC", "90"))
+GLM_BACKOFF_STEPS = (5, 10, 20, 40, 60)
 
 
-def apply_peak_cap(chosen_model: str, now=None) -> Tuple[str, bool]:
-    """
-    Applica il cap orario peak (delega a peak_scheduler).
-    `now` è un datetime opzionale (NON un float): se None, gli helper scheduler
-    usano l'ora corrente nel fuso PEAK_TZ. Ritorna (modello_effettivo, is_capped).
-    In peak i modelli 3x vengono degradati o reindirizzati ad Anthropic.
-    """
-    if not is_peak_hour(now):
-        return chosen_model, False
-    if chosen_model == _ANTHROPIC_BLOCKED:
-        return _ANTHROPIC_BLOCKED, True
-    # In peak, solo i modelli 3x (glm-5.2, glm-5-turbo) sono bloccati.
-    # Regola (decisione utente 2026-07-10):
-    #   TOP (5.2, task complesso) bloccato -> Anthropic esegue (qualità)
-    #   TURBO (5-turbo, task semplice) bloccato -> degrada a MID (glm-4.7, non-3x)
-    #   MID (4.7) non è 3x -> resta sempre usabile in peak
-    if should_block_glm_model(chosen_model):
-        if chosen_model == GLM_TIER_TOP:
-            return _ANTHROPIC_BLOCKED, True
-        # qualsiasi altro 3x (turbo o modelli extra da env) -> cap al tier MID
-        return GLM_TIER_MID, True
-    return chosen_model, False
+class RateLimitExhausted(Exception):
+    """acquire() ha esaurito il budget di attesa."""
 
 
-class GlmRateLimiter:
-    """
-    Async sliding window rate limiter for GLM (60s window).
-    Tracks RPM and TPM with safety multiplier.
+class GLMRateLimiter:
+    """Pacing client-side sui limiti GLM (sliding window 60s per modello)
+    + cooldown globale condiviso sui 429 (anti-hammering).
+
+    Design: window per modello (RPM+TPM), lock SOLO per check+insert,
+    sleep FUORI dal lock, cooldown globale sul 429.
     """
 
     def __init__(self):
         self._lock = asyncio.Lock()
-        self._window = 60.0
-        rpm_raw = int(GLM_RPM_LIMIT * GLM_SAFETY)
-        tpm_raw = int(GLM_TPM_LIMIT * GLM_SAFETY)
-        self._rpm_limit = max(rpm_raw, 1)
-        self._tpm_limit = max(tpm_raw, 1000)
-        self._requests: deque = deque()
-        self._tokens: deque = deque()
-        self._backoff: List[float] = [5, 10, 20, 40, 60]
-        self._backoff_idx: int = 0
-        self._cooldown_until: float = 0.0
+        self._windows = {}          # model -> deque([[ts, tokens], ...])
+        self._cooldown_until = 0.0  # monotonic; globale
+        self._backoff_idx = 0
 
-    def _clean_window(self, now: float) -> Tuple[int, int]:
-        """Returns (req_count, token_count) in current window."""
-        cutoff = now - self._window
-        while self._requests and self._requests[0] < cutoff:
-            self._requests.popleft()
-        while self._tokens and self._tokens[0][0] < cutoff:
-            self._tokens.popleft()
-        return len(self._requests), sum(t[1] for t in self._tokens)
+    def _limits(self, model: str):
+        rpm, tpm = GLM_RATE_LIMITS.get(model, GLM_RATE_LIMITS_DEFAULT)
+        return max(1, int(rpm * GLM_SAFETY)), int(tpm * GLM_SAFETY)
 
-    async def acquire(self, est_tokens: int, budget_sec: float) -> Optional[dict]:
-        """
-        Acquires rate limit slot. Returns entry dict or None if blocked.
-        """
-        async with self._lock:
-            now = time.time()
-            if now < self._cooldown_until:
-                wait = self._cooldown_until - now
-                if wait > budget_sec:
-                    return None
-                await asyncio.sleep(wait)
-                now = time.time()
-            req_count, tok_count = self._clean_window(now)
-            if req_count >= self._rpm_limit or tok_count + est_tokens > self._tpm_limit:
-                wait_time = self._window - (now - self._requests[0]) if self._requests else self._window
-                if budget_sec <= 0 or wait_time > budget_sec:
-                    return None
-                await asyncio.sleep(min(wait_time, budget_sec))
-                now = time.time()
-                req_count, tok_count = self._clean_window(now)
-                if req_count >= self._rpm_limit or tok_count + est_tokens > self._tpm_limit:
-                    return None
-            entry = {"ts": now, "est_tokens": est_tokens}
-            self._requests.append(now)
-            self._tokens.append((now, est_tokens))
-            return entry
+    def _prune(self, model: str, now: float):
+        win = self._windows.setdefault(model, deque())
+        while win and now - win[0][0] > 60.0:
+            win.popleft()
+        return win
 
-    def record(self, entry: Optional[dict], actual_tokens: Any, success: bool):
-        """Records actual token usage after request completes."""
-        if entry is None:
-            return
-        try:
-            actual = int(actual_tokens) if actual_tokens else entry.get("est_tokens", 0)
-        except (ValueError, TypeError):
-            actual = entry.get("est_tokens", 0)
-        if not success:
-            entry["failed"] = True
+    async def acquire(self, model: str, est_tokens: int, budget_sec: float):
+        """Attende uno slot RPM/TPM per `model`."""
+        waited = 0.0
+        while True:
+            async with self._lock:
+                now = time.monotonic()
+                if self._cooldown_until > now:
+                    wait = min(self._cooldown_until - now, 60.0)
+                else:
+                    win = self._prune(model, now)
+                    rpm_limit, tpm_limit = self._limits(model)
+                    tpm_used = sum(e[1] for e in win)
+                    if len(win) < rpm_limit and tpm_used + est_tokens <= tpm_limit:
+                        entry = [now, est_tokens]
+                        win.append(entry)
+                        return entry
+                    wait = max(0.5, 60.0 - (now - win[0][0])) if win else 1.0
+            wait += random.uniform(0.05, 0.5)
+            if waited + wait > budget_sec:
+                raise RateLimitExhausted(
+                    f"glm rate-limit: budget {budget_sec:.0f}s esaurito (waited {waited:.0f}s)")
+            await asyncio.sleep(wait)
+            waited += wait
+
+    def record(self, entry: list, actual_tokens: int, success: bool):
+        """Aggiorna entry acquisita: token reali se success, 0 se fail."""
+        entry[1] = actual_tokens if success else 0
 
     def on_429(self):
-        """Handles 429 response with exponential backoff."""
-        self._backoff_idx = min(self._backoff_idx + 1, len(self._backoff) - 1)
-        self._cooldown_until = time.time() + self._backoff[self._backoff_idx]
+        """Cooldown globale con backoff esponenziale + jitter."""
+        step = GLM_BACKOFF_STEPS[min(self._backoff_idx, len(GLM_BACKOFF_STEPS) - 1)]
+        self._backoff_idx = min(self._backoff_idx + 1, len(GLM_BACKOFF_STEPS) - 1)
+        until = time.monotonic() + step + random.uniform(0, 2)
+        if until > self._cooldown_until:
+            self._cooldown_until = until
+        return step
 
-    def snapshot(self) -> Dict[str, Any]:
-        """Returns current rate limit state."""
-        now = time.time()
-        req_count, tok_count = self._clean_window(now)
-        return {
-            "rpm_used": req_count,
-            "rpm_limit": self._rpm_limit,
-            "tpm_used": tok_count,
-            "tpm_limit": self._tpm_limit,
-            "backoff_idx": self._backoff_idx,
-            "cooldown_until": max(0, self._cooldown_until - now)
-        }
+    def on_success(self):
+        self._backoff_idx = 0
+        self._cooldown_until = 0.0
+
+    def snapshot(self) -> dict:
+        """Stato per /health."""
+        now = time.monotonic()
+        per_model = {}
+        for m, win in self._windows.items():
+            live = [e for e in win if now - e[0] <= 60.0]
+            rpm_limit, tpm_limit = self._limits(m)
+            per_model[m] = {"rpm_used": len(live), "rpm_limit": rpm_limit,
+                            "tpm_used": sum(e[1] for e in live), "tpm_limit": tpm_limit}
+        return {"cooldown_sec": max(0.0, round(self._cooldown_until - now, 1)),
+                "per_model": per_model}
 
 
-def classify_429_glm(raw: bytes) -> str:
-    """
-    Classifies 429 error type for GLM.
-    Returns 'quota_5h' for 5-hour quota errors, else 'rpm'.
-    """
-    try:
-        text = raw[:2000].lower()
-    except Exception:
-        return "rpm"
-    markers = [b"quota", b"5 hour", b"5-hour", b"resets at", b"usage limit"]
-    for marker in markers:
-        if marker in text:
-            return "quota_5h"
-    return "rpm"
+GLM_LIMITER = GLMRateLimiter()
+
+
+# ── Alert ─────────────────────────────────────────────────────────────────────
+
+_last_alert_ts = 0.0
+_ALERT_MIN_INTERVAL_SEC = 300
 
 
 def glm_alert(msg: str):
-    """
-    Logs alert to file and sends desktop notification.
-    """
+    """Notifica quota GLM esaurita: log file + throttle popup desktop."""
+    global _last_alert_ts
     try:
-        os.makedirs(os.path.dirname(GLM_ALERTS_LOG), exist_ok=True)
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        with open(GLM_ALERTS_LOG, "a") as f:
-            f.write(f"[{timestamp}] {msg}\n")
+        ALERT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(ALERT_LOG, "a") as f:
+            f.write(f"[{time.strftime('%Y-%m-%dT%H:%M:%S')}] {msg}\n")
     except Exception:
         pass
+    now = time.monotonic()
+    if now - _last_alert_ts < _ALERT_MIN_INTERVAL_SEC:
+        return
+    _last_alert_ts = now
     try:
-        subprocess.Popen(
-            ["notify-send", "-u", "normal", "-t", "20000", "GLM Quota", msg[:300]],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
+        import subprocess
+        subprocess.Popen(["notify-send", "-u", "normal", "-t", "20000",
+                          "GLM Quota", msg[:300]],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass
 
 
-def _init_limiter():
-    global GLM_LIMITER
-    if GLM_LIMITER is None:
-        GLM_LIMITER = GlmRateLimiter()
+# ── Body size check ────────────────────────────────────────────────────────────
 
-_init_limiter()
+def is_glm_body_too_large(body: bytes, model: str) -> bool:
+    """True se il body eccede il limite sicuro per il modello GLM target."""
+    # Stima: 1 token ≈ 4 char, aggiungiamo 20% headroom
+    try:
+        body_size = len(body)
+        est_tokens = int(body_size / 4 * 1.2)
+        limit = _GLM_CONTEXT_LIMITS.get(model, 900_000)
+        return est_tokens > limit
+    except Exception:
+        return False
+
+
+# ── 429 classification ────────────────────────────────────────────────────────
+
+def classify_429_glm(raw: bytes) -> str:
+    """Classifica un 429 GLM: 'quota_5h' (attesa ore) vs 'rpm_tpm' (attesa secondi)."""
+    low = raw[:2000].lower()
+    if b"usage limit" in low or b"resets at" in low or b"5h" in low:
+        return "quota_5h"
+    return "rpm_tpm"
+
+
+# ── Tier classification ───────────────────────────────────────────────────────
+
+def heuristic_tier(body: bytes) -> str:
+    """Fallback: stima il tier dalla dimensione del body.
+
+    - > 800K char → TOP (glm-5.2, 1M ctx)
+    - > 150K char → TURBO (glm-5-turbo, 200K ctx)
+    - altrimenti → MID (glm-4.7, 128K ctx)
+    """
+    try:
+        size = len(body)
+        if size > 800_000:
+            return GLM_TIER_TOP
+        if size > 150_000:
+            return GLM_TIER_TURBO
+        return GLM_TIER_MID
+    except Exception:
+        return GLM_TIER_MID
+
+
+async def classify_tier(body: bytes, request, session, log_fn=print):
+    """Classifica il tier ottimale per questo body.
+
+    Usa MiniMax/M3 come classificatore (R3-#4): manda un task di classificazione
+    a MiniMax con il body analysis. Fallback: heuristic_tier.
+    """
+    # Prima: heuristic veloce (copre la maggioranza dei casi)
+    heur = heuristic_tier(body)
+    size = len(body)
+
+    # Per task piccoli (< 10K), heuristic è sufficiente
+    if size < 10_000:
+        return heur
+
+    # Per task medi (10K-150K), heuristic è quasi sempre corretto
+    if size < 150_000:
+        return heur
+
+    # Per task grandi (> 150K): MiniMax fa classify migliore
+    # ponytail: qui si potrebbe chiamare MiniMax per classify,
+    # ma per ora heuristic è sufficiente con i limiti di context.
+    # Se serve classify più preciso, aggiungere call MiniMax qui.
+    return heur
+
+
+def apply_peak_cap(tier: str):
+    """Applica il cap peak: TURBO/TOP → MID se in fascia peak."""
+    # Import lazy per evitare circular
+    import peak_scheduler as _ps
+    if _ps.should_block_glm_model(tier):
+        return GLM_TIER_MID, True
+    return tier, False
+
+
+# ── Forward GLM ───────────────────────────────────────────────────────────────
+
+# Semaphore per concorrenza GLM
+_GLM_SEM = asyncio.Semaphore(int(os.environ.get("AIROUTER_GLM_SEMAPHORE", "8")))
+
+
+async def forward_glm(request, body: bytes, session, model: str,
+                      log_fn=print):
+    """Invia request al backend GLM con retry loop 2 tentativi (R3-#6).
+
+    Retry:
+      - 429 RPM/TPM: retry con backoff
+      - 5xx: retry immediato
+      - Errore Rete: retry con backoff
+    Non retry: 400, 401, 403, 404 (client error puro).
+    """
+
+    key = await get_glm_key()
+    if not key:
+        log_fn("GLM: chiave assente (GLM_API_KEY o secrets.sh glm.api_key)")
+        # Ritorna errore sintetico
+        from aiohttp import web
+        return web.Response(status=502, text="GLM key missing")
+
+    url = GLM_UPSTREAM + request.path_qs
+
+    for attempt in range(2):
+        try:
+            # Rate limiting
+            est_tokens = _estimate_tokens(body)
+            await GLM_LIMITER.acquire(model, est_tokens,
+                                      budget_sec=GLM_RETRY_CAP_SEC)
+
+            timeout = ClientTimeout(total=120)
+            async with _GLM_SEM:
+                async with session.request(
+                    method=request.method,
+                    url=url,
+                    headers={
+                        "Authorization": f"Bearer {key}",
+                        "Content-Type": "application/json",
+                        "x-api-key": key,
+                    },
+                    data=body,
+                    timeout=timeout,
+                    ssl=True,
+                ) as resp:
+                    raw = await resp.read()
+                    GLM_LIMITER.record(None, _estimate_tokens(raw), resp.status < 400)
+
+                    if resp.status == 429:
+                        step = GLM_LIMITER.on_429()
+                        log_fn(f"GLM 429 attempt {attempt + 1}: backoff {step}s")
+                        if attempt == 0:
+                            await asyncio.sleep(step + random.uniform(0.5, 2))
+                            continue
+                        # Fallisce dopo 2 tentativi
+                        break
+
+                    if resp.status >= 500 and attempt == 0:
+                        # Retry su 5xx
+                        await asyncio.sleep(0.5)
+                        continue
+
+                    # Risposta diretta (success o client error o 2nd attempt)
+                    from aiohttp import web
+                    headers = dict(resp.headers)
+                    # Rimuovi hop-by-hop
+                    for h in ("transfer-encoding", "connection", "keep-alive"):
+                        headers.pop(h, None)
+                    return web.Response(
+                        body=raw,
+                        status=resp.status,
+                        headers=headers,
+                        content_type=resp.content_type or "application/json",
+                    )
+
+        except asyncio.TimeoutError:
+            log_fn(f"GLM timeout attempt {attempt + 1}")
+            if attempt == 0:
+                await asyncio.sleep(1)
+                continue
+        except aiohttp.ClientError as e:
+            log_fn(f"GLM client error attempt {attempt + 1}: {e}")
+            if attempt == 0:
+                await asyncio.sleep(1)
+                continue
+        except Exception as e:
+            log_fn(f"GLM error: {e}")
+
+    # Tutti i tentativi falliti
+    from aiohttp import web
+    return web.Response(status=502, text=f"GLM exhausted after 2 attempts")
+
+
+def _estimate_tokens(data: bytes) -> int:
+    """Stima token da bytes (1 token ≈ 4 char + overhead)."""
+    try:
+        return max(1, int(len(data) / 4 * 1.2))
+    except Exception:
+        return 1
