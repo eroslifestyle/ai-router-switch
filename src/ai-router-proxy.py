@@ -827,8 +827,17 @@ def _resolve_chat_fingerprint(request) -> str:
     2. request.remote (IP:port) come fallback operativo - accettabile per setup locale single-user.
     3. "default" se neanche quello.
 
-    NB: in setup multi-utente dietro NAT stesso, abilitare X-Session-ID via client."""
-    sid = request.headers.get("X-Session-ID") or request.headers.get("x-session-id")
+    NB: in setup multi-utente dietro NAT stesso, abilitare X-Session-ID via client.
+
+    FIX 2026-07-12 (isolamento per-chat): Claude Code invia X-Claude-Code-Session-Id
+    (UUID univoco e stabile per chat), NON X-Session-ID (sempre null). I subagenti
+    condividono lo stesso Session-Id della chat madre -> ereditano automaticamente la
+    sua modalita'. Questo e' l'identificativo corretto per confinare gli switch di
+    modalita' a una singola chat/VSCode senza contaminare le altre sessioni."""
+    sid = (request.headers.get("X-Claude-Code-Session-Id")
+           or request.headers.get("x-claude-code-session-id")
+           or request.headers.get("X-Session-ID")
+           or request.headers.get("x-session-id"))
     if sid:
         return f"sid:{sid[:64]}"  # bound size anti-abuse
     return request.remote or "default"
@@ -3806,10 +3815,14 @@ async def handle(request):
             return web.json_response(RESILIENCE_INST.degraded_response(), status=503)
 
     # Comandi in-chat + marca-chat (solo porta dinamica :8787, solo /v1/messages).
+    # FIX 2026-07-12: chiave = _resolve_chat_fingerprint (UUID X-Claude-Code-Session-Id),
+    # NON conversation_fingerprint (SHA contenuto). L'UUID e' univoco e stabile per chat,
+    # cosi' lo switch !router resta confinato alla singola chat/VSCode e non contamina
+    # le altre sessioni. Prima cadeva su fallback 127.0.0.1 condiviso = bug globale.
     if forced is None and request.path.endswith("/v1/messages"):
         try:
             _data = json.loads(body)
-            _fp = conversation_fingerprint(_data)
+            _fp = _resolve_chat_fingerprint(request)
             # D39: guarda solo l'ULTIMO messaggio vero dell'utente
             _last = ""
             for _m in reversed(_data.get("messages", [])):
