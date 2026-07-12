@@ -2414,13 +2414,7 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
         # Il modello stesso che ha fallito riassume i messaggi vecchi con budget
         # calibrato per il modello target. Se anche questo fallisce → Haiku.
         log(f"shrink: body ancora grande dopo shrink → LLM summarization fp={chat_fp}")
-        summary_msgs = await summarize_old_messages(
-            messages=messages,
-            model=MINIMAX_MODEL,
-            fp=chat_fp,
-            upstream_url=MINIMAX_UPSTREAM + "/v1/messages",
-            api_key=(await get_minimax_key()) or ""
-        )
+        summary_msgs = await summarize_old_messages(messages)
         if summary_msgs is not None:
             summ_shrunk = dict(orig_dict)
             summ_shrunk["messages"] = summary_msgs
