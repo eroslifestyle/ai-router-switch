@@ -1835,6 +1835,24 @@ def _text_from_message(j: dict) -> str:
     return "".join(out)
 
 
+async def _retry_forward(forward_fn, request, body, session, attempts: int = 2):
+    '''Retry wrapper: 2 attempts for backend calls (pre-relay).
+
+    R4-#8: retry SOLO pre-esecuzione -- relay already started is not retried.
+    Caller does relay() after the return of this helper.
+    '''
+    last_exc = None
+    for i in range(attempts):
+        try:
+            return await forward_fn(request, body, session)
+        except Exception as e:
+            last_exc = e
+            if i < attempts - 1:
+                log("[_retry] attempt {}/{} EXC={}, retrying...".format(i+1, attempts, e))
+    log("[_retry] all {} attempts failed: {}".format(attempts, last_exc))
+    raise last_exc
+
+
 async def _call_full(forward_fn, request, body, session, timeout: float = 90):
     """Chiamata non-streaming: ritorna (status, json|None). `timeout` secondi PER FASE
     (headers + read), default 90. Il chiamante può passare il budget residuo (es. loop
@@ -2759,7 +2777,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     except Exception as e:
         log(f"mixed-new THINK EXC: {e} → fallback M3 diretto")
         try:
-            return await relay(await forward_minimax(request, body, session))
+            return await relay(await _retry_forward(forward_minimax, request, body, session))
         except Exception as e2:
             return web.json_response({"type": "error", "error": {"type": "router_error",
                 "message": f"think+fallback ko: {e2}"}}, status=502)
@@ -3598,7 +3616,7 @@ async def _glm_execute_with_chain(request, body, session, model, chat_fp, relay,
         log(f"GLM ctx-limit: body too large for {model} → direct to fallback fp={chat_fp}")
         if allow_minimax:
             try:
-                up2 = await forward_minimax(request, body, session)
+                up2 = await _retry_forward(forward_minimax, request, body, session)
                 if up2.status < 400:
                     return await relay(up2, extra_headers={"x-ai-verified": "glm-ctx→minimax"})
                 await up2.release()
@@ -3643,7 +3661,7 @@ async def _glm_execute_with_chain(request, body, session, model, chat_fp, relay,
 
     # 3) Fallback finale Anthropic
     try:
-        return await relay(await forward_anthropic(request, body, session),
+        return await relay(await _retry_forward(forward_anthropic, request, body, session),
                            extra_headers={"x-ai-verified": "glm→anthropic-final"})
     except Exception as e:
         log(f"GLM fallback chain esaurita EXC: {e} fp={chat_fp}")
@@ -4108,7 +4126,7 @@ async def handle(request):
             up = await forward_anthropic(request, body, session)
             return await relay(up)
         try:
-            up = await forward_anthropic(request, body, session)
+            up = await _retry_forward(forward_anthropic, request, body, session)
             log(f"anthropic (pure) -> {up.status} {request.path}")
             # FIX D38 2026-07-02: header di verifica esecutore anche in modalità pura
             return await relay(up, extra_headers={"x-ai-verified": "anthropic-pure"})
@@ -4142,7 +4160,7 @@ async def handle(request):
                 return await relay(up)
             except Exception as e:
                 log(f"GLM non-messages EXC: {e} → minimax passthrough")
-                return await relay(await forward_minimax(request, body, session))
+                return await relay(await _retry_forward(forward_minimax, request, body, session))
 
         return await _handle_glm_mode(request, body, session, mode, chat_fp, relay)
 
