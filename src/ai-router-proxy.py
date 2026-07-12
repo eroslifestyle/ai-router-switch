@@ -930,6 +930,23 @@ def clear_chat_mode(fp: str):
 # ── Comandi in-chat (D5/D7/D9): !router + frasi naturali italiane ─────────
 import re as _re
 
+# Alias CLI: mappa nome digitato -> nome interno del mode.
+_ALIAS_MAP = {
+    "mixam": "mixed",
+    "mixgm": "glm-minimax",
+    "mixag": "anthropic-glm",
+}
+# Nomi display: nome interno -> come appare in chat.
+_INTERNAL_TO_DISPLAY = {
+    "mixed": "Mixam",
+    "glm-minimax": "Mixgm",
+    "anthropic-glm": "Mixag",
+    "anthropic": "anthropic",
+    "minimax": "minimax",
+    "inverse": "inverse",
+    "glm": "glm",
+}
+
 _NL_MODE = [
     # NB: le regole GLM vanno PRIMA di anthropic/minimax puri (più specifiche):
     # "anthropic con glm" deve dare anthropic-glm, non anthropic.
@@ -955,8 +972,9 @@ def parse_router_command(text: str):
     m = _EXPLICIT.match(t)
     if m:
         arg = m.group(1).lower()
-        if arg in VALID_MODES:
-            return {"action": "set", "mode": arg}
+        resolved = _ALIAS_MAP.get(arg, arg)  # alias -> nome interno
+        if resolved in VALID_MODES:
+            return {"action": "set", "mode": resolved}
         if arg in ("status", "reset", "help"):
             return {"action": arg}
         return {"action": "help"}
@@ -971,14 +989,19 @@ def parse_router_command(text: str):
 def _router_reply_text(action: dict, fp: str) -> str:
     if action["action"] == "set":
         set_chat_mode(fp, action["mode"])
-        return f"✅ Questa chat ora usa: **{action['mode']}** (dal prossimo messaggio)."
+        _disp = _INTERNAL_TO_DISPLAY.get(action["mode"], action["mode"])
+        return f"✅ Questa chat ora usa: **{_disp}** (dal prossimo messaggio)."
     if action["action"] == "status":
         cm = get_chat_mode(fp)
-        return f"📍 Modalità chat: **{cm or 'default (' + get_file_mode() + ')'}**"
+        if cm:
+            return f"📍 Modalità chat: **{_INTERNAL_TO_DISPLAY.get(cm, cm)}**"
+        _gm = get_file_mode()
+        return f"📍 Modalità chat: **default ({_INTERNAL_TO_DISPLAY.get(_gm, _gm)})**"
     if action["action"] == "reset":
         clear_chat_mode(fp)
-        return f"↺ Chat riportata al default: **{get_file_mode()}**"
-    return ("🧭 Comandi: `!router <anthropic|minimax|mixed|inverse>` · "
+        _gm = get_file_mode()
+        return f"↺ Chat riportata al default: **{_INTERNAL_TO_DISPLAY.get(_gm, _gm)}**"
+    return ("🧭 Comandi: `!router <anthropic|minimax|mixam|inverse|glm|mixgm|mixag>` · "
             "`!router status` · `!router reset`. Anche a voce: «usa solo minimax».")
 
 
