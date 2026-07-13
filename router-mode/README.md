@@ -5,7 +5,7 @@
 Standalone control panel for the AI Router (`:8787`) with 5 orchestration modes. Provides both CLI and GUI interfaces to switch modes and monitor router health in real-time.
 
 **Location**: `~/.claude/router-mode/`  
-**Modes**: anthropic · minimax · mixed · inverse  
+**Modes**: anthropic · minimax · mixed · inverse · glm · glm-minimax · anthropic-glm  
 **Proxy**: `:9988` (CORS bypass for browser fetch)
 
 ---
@@ -140,12 +140,15 @@ Planned: badge in GNOME topbar showing `MODE: mixed` with quick-switch dropdown.
 
 ## Modes Reference
 
-| Mode | Icon | Orchestrator | Executor | Use Case |
-|------|------|--------------|----------|----------|
-| **anthropic** | 🔵 | Opus / Sonnet | Opus / Sonnet | Default, highest quality |
-| **minimax** | 🟠 | MiniMax M3 | MiniMax M2.7 | Cost-optimized |
-| **mixed** | 🔷 | Anthropic (Opus) | MiniMax M2.7 | Balanced: smart planning + fast exec |
-| **inverse** | 🔶 | MiniMax M3 (THINK) + Opus (OPPOSE) | MiniMax M2.7 (ACT) | Adversarial verify (slow, thorough) |
+| Mode | Icon | Orchestrator | Executor | Verify T2 | Use Case |
+|------|------|--------------|----------|-----------|----------|
+| **anthropic** | 🔵 | Claude Sonnet | Claude Haiku | — | Default, highest quality, full Claude stack |
+| **minimax** | 🟠 | MiniMax M3 | MiniMax M2.7 | — | Cost-optimized, pure MiniMax |
+| **mixed** | 🔷 | Claude Sonnet | MiniMax M2.7 | Anthropic fallback | Balanced: smart planning + fast exec |
+| **inverse** | 🔶 | MiniMax M3 | MiniMax M2.7 | Claude Opus | Adversarial verify (slow, thorough) |
+| **glm** | 🟢 | GLM tiered (5.2→4.7) | GLM tiered | — | Z.ai only, context-aware tiering |
+| **glm-minimax** | 🟢🟠 | GLM 5.2 (THINK) | MiniMax M2.7 (ACT) | GLM verify | Hybrid: GLM reasoning + MiniMax execution |
+| **anthropic-glm** | 🔵🟢 | Claude Sonnet (THINK) | GLM tiered (ACT) | Claude Opus | Hybrid: Anthropic planning + GLM cost-efficiency |
 
 ---
 

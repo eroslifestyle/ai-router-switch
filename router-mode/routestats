@@ -162,7 +162,8 @@ def main():
         cmd_modes()
     elif a.cmd == "switch":
         if not a.arg:
-            print("  ❌ Specifica il modo: routestats switch <anthropic|minimax|mixed|inverse>")
+            valid = ", ".join(m["id"] for m in MODES)
+            print(f"  ❌ Specifica il modo: routestats switch <{valid}>")
         else:
             cmd_switch(a.arg)
     else:
