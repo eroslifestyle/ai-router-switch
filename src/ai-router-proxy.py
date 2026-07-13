@@ -3623,6 +3623,58 @@ def _path_allowed(path: str) -> bool:
 # ORCHESTRAZIONE MODALITÀ GLM (2026-07-10)
 # ═══════════════════════════════════════════════════════════════════════════
 
+async def _anthropic_glm_only_chain(request, body, session, model, chat_fp, relay):
+    """Catena anthropic-glm: Anthropic → GLM (SOLO, NO MiniMax).
+
+    Regola utente 2026-07-13: anthropic-glm = SOLO Anthropic + GLM.
+    Se entrambi falliscono → 502. Nessun MiniMax."""
+    # CONTEXT CHECK: se body troppo grande per GLM, skip GLM → Anthropic diretto.
+    if _glm.is_glm_body_too_large(body, model):
+        log(f"anthropic-glm: ctx-limit for {model} → Anthropic diretto fp={chat_fp}")
+        try:
+            up = await forward_anthropic(request, body, session)
+            if up.status < 400:
+                return await relay(up, extra_headers={"x-ai-verified": "anthropic-glm-ctx→anthropic"})
+            await up.release()
+            return _err_response(f"anthropic-glm: Anthropic ko {up.status}", status=502)
+        except Exception as e:
+            log(f"anthropic-glm ctx→anthropic EXC: {e}")
+            return _err_response(f"anthropic-glm: tutti i backend ko: {e}", status=502)
+
+    # 1) Tentativo GLM
+    try:
+        up = await _glm.forward_glm(request, body, session, model, log_fn=log)
+        if up.status < 400:
+            mult = _peak.cost_multiplier(model)
+            return await relay(up, extra_headers={
+                "x-ai-verified": f"anthropic-glm({model})", "x-glm-cost-mult": str(mult)})
+        raw = b""
+        try:
+            raw = await up.read()
+        except Exception:
+            pass
+        await up.release()
+        if up.status == 429 and _glm.classify_429_glm(raw) == "quota_5h":
+            _glm.glm_alert(f"anthropic-glm: GLM quota 5h esaurita → Anthropic. {raw[:200]!r}")
+        log(f"anthropic-glm: GLM {up.status} → Anthropic fp={chat_fp}")
+    except Exception as e:
+        log(f"anthropic-glm: GLM EXC {e} → Anthropic fp={chat_fp}")
+
+    # 2) Fallback Anthropic (SOLO, no MiniMax dopo)
+    try:
+        up2 = await forward_anthropic(request, body, session)
+        if up2.status < 400:
+            log(f"anthropic-glm: GLM→Anthropic rescue OK fp={chat_fp}")
+            return await relay(up2, extra_headers={"x-ai-verified": "anthropic-glm→anthropic-rescue"})
+        await up2.release()
+        log(f"anthropic-glm: Anthropic {up2.status} → chain exhausted fp={chat_fp}")
+    except Exception as e:
+        log(f"anthropic-glm: Anthropic EXC {e} fp={chat_fp}")
+
+    # Tutti ko → 502 (NO MiniMax)
+    return _err_response("anthropic-glm: GLM e Anthropic entrambi ko", status=502)
+
+
 async def _glm_minimax_only_chain(request, body, session, model, chat_fp, relay):
     """Catena glm-minimax: GLM → MiniMax (SOLO, NO Anthropic).
 
@@ -3818,7 +3870,7 @@ async def _handle_glm_mode(request, body, session, mode, chat_fp, relay):
         eff_model, capped = _glm.apply_peak_cap(tier)
         if capped:
             log(f"anthropic-glm: tier {tier} → cap peak → {eff_model} fp={chat_fp}")
-        return await _glm_execute_with_chain(request, body, session, eff_model, chat_fp, relay)
+        return await _anthropic_glm_only_chain(request, body, session, eff_model, chat_fp, relay)
 
     # ── MODALITÀ glm-minimax: GLM-5.2 THINK → MiniMax ACT → GLM verify (task complessi) ──
     # GLM-5.2 orchestra (produce il piano nel THINK), MiniMax esegue sempre l'ACT,
