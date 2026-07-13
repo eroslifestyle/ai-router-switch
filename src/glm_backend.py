@@ -34,6 +34,8 @@ GLM_UPSTREAM = os.environ.get("GLM_UPSTREAM", "https://api.z.ai/api/anthropic")
 GLM_TIER_TOP = "TOP"
 GLM_TIER_TURBO = "TURBO"
 GLM_TIER_MID = "MID"
+GLM_TIER_VISION = "VISION"      # glm-4.6V (visione base)
+GLM_TIER_MULTIMODAL = "MULTIMODAL"  # glm-5V-Turbo (visione + video)
 
 # Marker per il proxy: task complesso in fascia peak → Anthropic esegue direttamente
 _ANTHROPIC_BLOCKED = "__ANTHROPIC_BLOCKED__"
@@ -43,6 +45,8 @@ GLM_MODEL_FOR_TIER = {
     GLM_TIER_TOP: "glm-5.2",
     GLM_TIER_TURBO: "glm-5-turbo",
     GLM_TIER_MID: "glm-4.7",
+    GLM_TIER_VISION: "glm-4.6V",
+    GLM_TIER_MULTIMODAL: "glm-5V-Turbo",
 }
 
 # Context limit sicuri per ogni modello (input tokens, con headroom)
@@ -51,6 +55,8 @@ _GLM_CONTEXT_LIMITS = {
     "glm-5.2": 900_000,     # 1M ctx, 100K headroom
     "glm-5-turbo": 180_000,  # 200K ctx, 20K headroom
     "glm-4.7": 115_000,      # 128K ctx, 13K headroom
+    "glm-4.6V": 120_000,    # 131K ctx, ~11K headroom
+    "glm-5V-Turbo": 180_000, # ~200K ctx, ~20K headroom
 }
 
 KEY_FILE = Path.home() / ".claude" / "secrets" / "secrets.sh"
@@ -96,6 +102,8 @@ GLM_RATE_LIMITS = {
     "glm-5.2": (200, 10_000_000),      # (RPM, TPM)
     "glm-5-turbo": (500, 20_000_000),
     "glm-4.7": (500, 20_000_000),
+    "glm-4.6V": (200, 10_000_000),    # ponytail: placeholder — verificare limiti reali
+    "glm-5V-Turbo": (100, 5_000_000),  # ponytail: placeholder — verificare limiti reali
 }
 GLM_RATE_LIMITS_DEFAULT = (200, 10_000_000)
 GLM_RETRY_CAP_SEC = float(os.environ.get("AIROUTER_GLM_RETRY_CAP_SEC", "90"))
@@ -215,6 +223,55 @@ def glm_alert(msg: str):
         pass
 
 
+# ── Multimodal detection ───────────────────────────────────────────────────────
+
+def has_multimodal_content(body: bytes) -> tuple[str, str]:
+    """Rileva il tipo di contenuto nel body.
+
+    Ritorna (content_type, detail):
+    - ("text", ""): solo testo
+    - ("image", ""): immagini presenti
+    - ("video", ""): video (frame input)
+    - ("pdf", ""): PDF/documenti
+    - ("image_gen", ""): richiesta generazione immagine
+    - ("video_gen", ""): richiesta generazione video
+    """
+    try:
+        data = json.loads(body)
+        messages = data.get("messages", [])
+
+        # Check image blocks in messages
+        for msg in messages:
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict):
+                        t = block.get("type", "")
+                        if t == "image":
+                            # Check per video frame (base64 source = frame)
+                            source = block.get("source", {})
+                            if source.get("type") == "base64":
+                                return ("video", "")
+                            return ("image", "")
+
+        # Check per generazione immagine (tool call o prompt specifico)
+        tools = data.get("tools", [])
+        for tool in tools:
+            name = tool.get("name", "").lower()
+            if "image" in name or "generation" in name:
+                return ("image_gen", "")
+
+        # Check per generazione video
+        for tool in tools:
+            name = tool.get("name", "").lower()
+            if "video" in name or "cogvideox" in name:
+                return ("video_gen", "")
+
+        return ("text", "")
+    except Exception:
+        return ("text", "")
+
+
 # ── Body size check ────────────────────────────────────────────────────────────
 
 def is_glm_body_too_large(body: bytes, model: str) -> bool:
@@ -262,30 +319,34 @@ def heuristic_tier(body: bytes) -> str:
 async def classify_tier(body: bytes, request, session, log_fn=print):
     """Classifica il tier ottimale per questo body.
 
-    Usa MiniMax/M3 come classificatore (R3-#4): manda un task di classificazione
-    a MiniMax con il body analysis. Fallback: heuristic_tier.
+    1. Multimodal detection (vision/video) ha priorita assoluta
+    2. Size-based tier per text-only
     """
-    # Prima: heuristic veloce (copre la maggioranza dei casi)
-    heur = heuristic_tier(body)
-    size = len(body)
+    try:
+        content_type, _ = has_multimodal_content(body)
 
-    # Per task piccoli (< 10K), heuristic è sufficiente
-    if size < 10_000:
-        return heur
+        # Routing basato su tipo contenuto
+        if content_type == "video":
+            log_fn(f"GLM classify: video detected → MULTIMODAL (glm-5V-Turbo)")
+            return GLM_TIER_MULTIMODAL
+        if content_type == "image":
+            log_fn(f"GLM classify: image detected → VISION (glm-4.6V)")
+            return GLM_TIER_VISION
 
-    # Per task medi (10K-150K), heuristic è quasi sempre corretto
-    if size < 150_000:
-        return heur
-
-    # Per task grandi (> 150K): MiniMax fa classify migliore
-    # ponytail: qui si potrebbe chiamare MiniMax per classify,
-    # ma per ora heuristic è sufficiente con i limiti di context.
-    # Se serve classify più preciso, aggiungere call MiniMax qui.
-    return heur
+        # Text-only: usa size-based heuristic
+        return heuristic_tier(body)
+    except Exception:
+        return GLM_TIER_MID
 
 
 def apply_peak_cap(tier: str):
-    """Applica il cap peak: TURBO/TOP → MID se in fascia peak."""
+    """Applica il cap peak: TURBO/TOP → MID se in fascia peak.
+
+    VISION e MULTIMODAL non sono mai bloccati (servono per feature specifiche).
+    """
+    # VISION/MULTIMODAL esenti dal peak cap
+    if tier in (GLM_TIER_VISION, GLM_TIER_MULTIMODAL):
+        return tier, False
     # Import lazy per evitare circular
     import peak_scheduler as _ps
     if _ps.should_block_glm_model(tier):
