@@ -3623,6 +3623,69 @@ def _path_allowed(path: str) -> bool:
 # ORCHESTRAZIONE MODALITÀ GLM (2026-07-10)
 # ═══════════════════════════════════════════════════════════════════════════
 
+async def _glm_minimax_only_chain(request, body, session, model, chat_fp, relay):
+    """Catena glm-minimax: GLM → MiniMax (SOLO, NO Anthropic).
+
+    Regola utente 2026-07-13: glm-minimax è SOLO GLM + MiniMax.
+    Se entrambi falliscono → 502. Nessun Anthropic."""
+    # Caso peak-blocked: skip GLM (non disponibile), MiniMax SOLO.
+    if model == _glm._ANTHROPIC_BLOCKED:
+        log(f"glm-minimax: peak-blocked → MiniMax solo fp={chat_fp}")
+        try:
+            up = await forward_minimax(request, body, session)
+            if up.status < 400:
+                return await relay(up, extra_headers={"x-ai-verified": "glm-minimax-peak-blocked→minimax"})
+            await up.release()
+            return _err_response(f"glm-minimax peak: MiniMax ko {up.status}", status=502)
+        except Exception as e:
+            log(f"glm-minimax peak→minimax EXC: {e}")
+            return _err_response(f"glm-minimax: tutti i backend ko: {e}", status=502)
+
+    # CONTEXT CHECK: se body troppo grande per GLM, skip GLM → MiniMax diretto.
+    if _glm.is_glm_body_too_large(body, model):
+        log(f"glm-minimax: ctx-limit for {model} → MiniMax diretto fp={chat_fp}")
+        try:
+            up = await forward_minimax(request, body, session)
+            if up.status < 400:
+                return await relay(up, extra_headers={"x-ai-verified": "glm-ctx→minimax-only"})
+            await up.release()
+            return _err_response(f"glm-minimax: MiniMax ko {up.status}", status=502)
+        except Exception as e:
+            log(f"glm-minimax ctx→minimax EXC: {e}")
+            return _err_response(f"glm-minimax: tutti i backend ko: {e}", status=502)
+
+    # 1) Tentativo GLM
+    try:
+        up = await _glm.forward_glm(request, body, session, model, log_fn=log)
+        if up.status < 400:
+            return await relay(up, extra_headers={"x-ai-verified": f"glm-minimax({model})"})
+        raw = b""
+        try:
+            raw = await up.read()
+        except Exception:
+            pass
+        await up.release()
+        if up.status == 429 and _glm.classify_429_glm(raw) == "quota_5h":
+            _glm.glm_alert(f"glm-minimax: GLM quota 5h esaurita → MiniMax solo. {raw[:200]!r}")
+        log(f"glm-minimax: GLM {up.status} → MiniMax fp={chat_fp}")
+    except Exception as e:
+        log(f"glm-minimax: GLM EXC {e} → MiniMax fp={chat_fp}")
+
+    # 2) Fallback MiniMax (SOLO, no Anthropic dopo)
+    try:
+        up2 = await forward_minimax(request, body, session)
+        if up2.status < 400:
+            log(f"glm-minimax: GLM→MiniMax rescue OK fp={chat_fp}")
+            return await relay(up2, extra_headers={"x-ai-verified": "glm-minimax→minimax-rescue"})
+        await up2.release()
+        log(f"glm-minimax: MiniMax {up2.status} → chain exhausted fp={chat_fp}")
+    except Exception as e:
+        log(f"glm-minimax: MiniMax EXC {e} fp={chat_fp}")
+
+    # Tutti ko → 502 (NO Anthropic)
+    return _err_response("glm-minimax: GLM e MiniMax entrambi ko", status=502)
+
+
 async def _glm_execute_with_chain(request, body, session, model, chat_fp, relay,
                                    allow_minimax=True):
     """Esegue su GLM col `model` dato; su fallimento applica la catena di
@@ -3779,11 +3842,10 @@ async def _handle_glm_mode(request, body, session, mode, chat_fp, relay):
             log(f"glm-minimax: MiniMax ACT {up.status} → fallback chain fp={chat_fp}")
         except Exception as e:
             log(f"glm-minimax: MiniMax ACT EXC: {e} → fallback chain fp={chat_fp}")
-        # Fallback: GLM tiered esegue, poi Anthropic
+        # Fallback: catena glm-minimax SOLO (NO Anthropic per regola 2026-07-13)
         tier = _glm.heuristic_tier(body)
         eff_model, _ = _glm.apply_peak_cap(tier)
-        return await _glm_execute_with_chain(request, body, session, eff_model, chat_fp,
-                                             relay, allow_minimax=True)
+        return await _glm_minimax_only_chain(request, body, session, eff_model, chat_fp, relay)
 
     # difensivo: modalità GLM ignota
     return _err_response(f"GLM mode '{mode}' non gestita", status=500)
