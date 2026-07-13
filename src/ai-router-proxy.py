@@ -3742,15 +3742,21 @@ async def _handle_glm_mode(request, body, session, mode, chat_fp, relay):
                         "x-ai-verified": "glm5.2-think+minimax-act+glm-verify"})
                 return await relay(up, extra_headers={
                     "x-ai-verified": "glm5.2-think+minimax-act"})
+            # FIX 2026-07-13: context exceed 400 → shrink retry PRIMA di consumare body
+            is_ctx, _ = await _is_context_exceed_400(up)
             await up.release()
+            if is_ctx:
+                log(f"glm-minimax: MiniMax 400 context-exceed → shrink retry fp={chat_fp}")
+                return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
             log(f"glm-minimax: MiniMax ACT {up.status} → fallback chain fp={chat_fp}")
         except Exception as e:
             log(f"glm-minimax: MiniMax ACT EXC: {e} → fallback chain fp={chat_fp}")
         # Fallback: GLM tiered esegue, poi Anthropic
         tier = _glm.heuristic_tier(body)
         eff_model, _ = _glm.apply_peak_cap(tier)
+        # FIX 2026-07-13: allow_minimax=True per ritentare dopo shrink
         return await _glm_execute_with_chain(request, body, session, eff_model, chat_fp,
-                                             relay, allow_minimax=False)
+                                             relay, allow_minimax=True)
 
     # difensivo: modalità GLM ignota
     return _err_response(f"GLM mode '{mode}' non gestita", status=500)
