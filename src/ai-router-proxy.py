@@ -3841,31 +3841,9 @@ async def _handle_glm_mode(request, body, session, mode, chat_fp, relay):
     # quando GLM fallisce; sui task critici riusciti, GLM resta la risposta (Anthropic
     # ha già orchestrato via system). Fallback chain identica.
     if mode == "anthropic-glm":
-        # GATE PRE-FLIGHT (stessi di mixed/glm-minimax): se il body è troppo grande
-        # per MiniMax, shrink/retry PRIMA di consumare il body.
-        if _is_context_too_large_for_minimax(body):
-            log(f"anthropic-glm PRE: body {len(body)}b > limit → shrink/retry fp={chat_fp}")
-            return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
-
-        # WEB-SEARCH GATE: blocca Anthropic web_search (usa MCP MiniMax).
-        if _has_web_search_tool(orig):
-            log(f"anthropic-glm: web_search bloccato -> usa MCP MiniMax fp={chat_fp}")
-            return _web_search_blocked_response()
-
-        # SERVER-TOOL GATE: bypass ad Anthropic diretto.
-        if _has_server_tools(orig):
-            log(f"anthropic-glm: server tools nel body → ACT Anthropic diretto fp={chat_fp}")
-            return await relay(await forward_anthropic(request, body, session))
-
-        # VISION GATE: MiniMax-M3 gestisce immagini, fallback Anthropic.
-        if _has_image_blocks(orig):
-            res = await _serve_minimax_vision(request, orig, session, chat_fp, relay)
-            if res is not None:
-                return res
-            log(f"anthropic-glm: vision M3 fallback → Anthropic fp={chat_fp}")
-            return await relay(await forward_anthropic(request, body, session))
-
-        # Classifica tier e exec con catena completa.
+        # anthropic-glm: GLM first → se fallisce → Anthropic.
+        # Nessun bypass diretto: i gate mandano alla catena _anthropic_glm_only_chain.
+        # La catena decide se GLM ce la fa o se serve Anthropic.
         tier = await _glm.classify_tier(body, request, session, log_fn=log)
         eff_model, capped = _glm.apply_peak_cap(tier)
         if capped:
