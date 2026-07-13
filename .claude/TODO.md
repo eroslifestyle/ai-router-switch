@@ -11,3 +11,5 @@
 - [x] Fix ai-mode CLI alias mancanti (mixgm/mixag/mixam)
 - [x] Fix per-chat mode override ignorato (get_mode controlla chat override prima del globale)
 - [x] Fix !router isolation per-chat: race condition su IP 127.0.0.1 → conversation_fingerprint (commit a3c0812)
+- [x] GLM multimodal complete: tier VISION/MULTIMODAL, image/video generation, route_glm_request
+- [x] THINK → ACT → VERIFY pattern: tutte le 4 modalità (glm, glm-minimax, anthropic-glm, minimax)
