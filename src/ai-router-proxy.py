@@ -3314,7 +3314,32 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
             pass
         return await _executor_direct()
     log(f"minimax-orch ACT {executor} {up.status} {request.path} fp={chat_fp}")
-    return await relay(up, extra_headers={"x-ai-verified": f"m3-orchestrate+{executor.lower()}-act"})
+
+    # VERIFY: M3 verifica output ACT
+    log(f"minimax-orch VERIFY: M3 verifica fp={chat_fp}")
+    try:
+        act_raw = await up.read()
+        await up.release()
+
+        verify_messages = [
+            {"role": "system", "content": "Sei un verifier AI. Verifica che l'output sia corretto e completo. Rispondi SOLO con VERIFIED se ok, o CORRECTIONS seguito dalle correzioni."},
+            {"role": "user", "content": f"Piano:\n{plan}\n\nOutput:\n{act_raw.decode(errors='ignore')[:5000]}"},
+        ]
+        verify_body = dict(orig)
+        verify_body["model"] = MINIMAX_ORCHESTRATOR_MODEL
+        verify_body["messages"] = verify_messages
+        verify_body["max_tokens"] = 500
+        verify_body["stream"] = False
+
+        v_status, v_json = await _call_full(_fwd_minimax_short, request, json.dumps(verify_body).encode(), session)
+        if v_status < 400 and v_json:
+            verify_text = _text_from_message(v_json).strip()
+            log(f"minimax-orch VERIFY: {verify_text[:100]} fp={chat_fp}")
+    except Exception as e:
+        log(f"minimax-orch VERIFY EXC: {e} fp={chat_fp}")
+
+    # Ritorna ACT output
+    return relay(aiohttp.web.Response(body=act_raw, status=200, content_type="application/json"))
 
 
 # ── INVERSE redesign 2026-07-01: M3 THINK → Opus OPPOSE → M3 ACT (loop max 2) ──
