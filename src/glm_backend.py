@@ -21,6 +21,7 @@ import os
 import random
 import subprocess
 import time
+import aiohttp
 from aiohttp import ClientTimeout
 from collections import deque
 from pathlib import Path
@@ -312,9 +313,7 @@ async def forward_glm(request, body: bytes, session, model: str,
     key = await get_glm_key()
     if not key:
         log_fn("GLM: chiave assente (GLM_API_KEY o secrets.sh glm.api_key)")
-        # Ritorna errore sintetico
-        from aiohttp import web
-        return web.Response(status=502, text="GLM key missing")
+        return aiohttp.web.Response(status=502, text="GLM key missing")
 
     url = GLM_UPSTREAM + request.path_qs
 
@@ -357,12 +356,11 @@ async def forward_glm(request, body: bytes, session, model: str,
                         continue
 
                     # Risposta diretta (success o client error o 2nd attempt)
-                    from aiohttp import web
                     headers = dict(resp.headers)
                     # Rimuovi hop-by-hop
                     for h in ("transfer-encoding", "connection", "keep-alive"):
                         headers.pop(h, None)
-                    return web.Response(
+                    return aiohttp.web.Response(
                         body=raw,
                         status=resp.status,
                         headers=headers,
@@ -383,8 +381,7 @@ async def forward_glm(request, body: bytes, session, model: str,
             log_fn(f"GLM error: {e}")
 
     # Tutti i tentativi falliti
-    from aiohttp import web
-    return web.Response(status=502, text=f"GLM exhausted after 2 attempts")
+    return aiohttp.web.Response(status=502, text=f"GLM exhausted after 2 attempts")
 
 
 def _estimate_tokens(data: bytes) -> int:
