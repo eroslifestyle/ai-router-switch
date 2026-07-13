@@ -3867,6 +3867,19 @@ async def handle(request):
                     break
             _cmd = parse_router_command(_last)
             if _cmd:
+                # FIX 2026-07-13: i client locali (Claude Code / altri) che non mandano
+                # X-Claude-Code-Session-Id cadono su request.remote = "127.0.0.1".
+                # Tutte le chat locali condividono lo stesso IP -> race condition globale:
+                # "!router minimax" in chat-A e "!router anthropic" in chat-B si
+                # sovrascrivono sullo stesso entry in ai-router-chats.json.
+                # Soluzione: per i comandi router usa conversation_fingerprint (hash del
+                # contenuto conversazione) che e' STABILE e UNIVOCO per chat, indipendente
+                # dall'IP. Eredita session ID esplicito se disponibile (Claude Code).
+                _sid = (request.headers.get("X-Claude-Code-Session-Id")
+                        or request.headers.get("x-claude-code-session-id", "")
+                        or request.headers.get("X-Session-ID", "")
+                        or request.headers.get("x-session-id", ""))
+                _fp = f"sid:{_sid[:64]}" if _sid else conversation_fingerprint(_data)
                 # gestione locale, risposta sintetica (D40: costo zero, no inoltro)
                 _txt = _router_reply_text(_cmd, _fp)
                 _msg = _synthetic_message(_txt)
