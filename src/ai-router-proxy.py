@@ -3827,6 +3827,10 @@ async def _handle_glm_mode(request, body, session, mode, chat_fp, relay):
 
     # ── MODALITÀ glm: GLM-5.2 classifica → tier → esegue (con cap peak) ──
     if mode == "glm":
+        # Routing per generazione media PRIMA di classify_tier
+        gen_resp = await _glm.route_glm_request(request, body, session, log_fn=log)
+        if gen_resp is not None:
+            return gen_resp
         tier = await _glm.classify_tier(body, request, session, log_fn=log)
         eff_model, capped = _glm.apply_peak_cap(tier)
         if capped:

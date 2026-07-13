@@ -30,6 +30,14 @@ from typing import Optional
 # Z.ai Anthropic-compatible endpoint
 GLM_UPSTREAM = os.environ.get("GLM_UPSTREAM", "https://api.z.ai/api/anthropic")
 
+# Endpoint per generazione media
+GLM_IMAGE_ENDPOINT = "https://api.z.ai/api/paas/v4/images/generations"
+GLM_VIDEO_ENDPOINT = "https://api.z.ai/api/paas/v4/videos/generations"
+
+# Endpoint per generazione media
+GLM_IMAGE_ENDPOINT = "https://api.z.ai/api/paas/v4/images/generations"
+GLM_VIDEO_ENDPOINT = "https://api.z.ai/api/paas/v4/videos/generations"
+
 # Tier costanti
 GLM_TIER_TOP = "TOP"
 GLM_TIER_TURBO = "TURBO"
@@ -254,18 +262,24 @@ def has_multimodal_content(body: bytes) -> tuple[str, str]:
                                 return ("video", "")
                             return ("image", "")
 
-        # Check per generazione immagine (tool call o prompt specifico)
+        # Check per generazione immagine (tool call o body type)
         tools = data.get("tools", [])
         for tool in tools:
             name = tool.get("name", "").lower()
             if "image" in name or "generation" in name:
                 return ("image_gen", "")
+        # Check body per type: image_generation
+        if '"type": "image_generation"' in body.decode(errors="ignore"):
+            return ("image_gen", "")
 
         # Check per generazione video
         for tool in tools:
             name = tool.get("name", "").lower()
             if "video" in name or "cogvideox" in name:
                 return ("video_gen", "")
+        # Check body per type: video_generation
+        if '"type": "video_generation"' in body.decode(errors="ignore"):
+            return ("video_gen", "")
 
         return ("text", "")
     except Exception:
@@ -352,6 +366,113 @@ def apply_peak_cap(tier: str):
     if _ps.should_block_glm_model(tier):
         return GLM_TIER_MID, True
     return tier, False
+
+
+# ── Image & Video Generation ──────────────────────────────────────────────────
+
+async def forward_glm_image(request, body: bytes, session, log_fn=print):
+    """Genera immagine via /v4/images/generations."""
+    key = await get_glm_key()
+    if not key:
+        return aiohttp.web.Response(status=502, text="GLM key missing")
+
+    try:
+        data = json.loads(body)
+        prompt = data.get("prompt", "")
+        size = data.get("size", "1024x1024")
+
+        payload = {
+            "model": "glm-image",
+            "prompt": prompt,
+            "size": size,
+        }
+
+        timeout = ClientTimeout(total=120)
+        async with session.request(
+            method="POST",
+            url=GLM_IMAGE_ENDPOINT,
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=timeout,
+            ssl=True,
+        ) as resp:
+            raw = await resp.read()
+            return aiohttp.web.Response(
+                body=raw,
+                status=resp.status,
+                content_type="application/json",
+            )
+    except Exception as e:
+        log_fn(f"GLM image generation EXC: {e}")
+        return aiohttp.web.Response(status=502, text=f"GLM image error: {e}")
+
+
+async def forward_glm_video(request, body: bytes, session, log_fn=print):
+    """Genera video via CogVideoX-3."""
+    key = await get_glm_key()
+    if not key:
+        return aiohttp.web.Response(status=502, text="GLM key missing")
+
+    try:
+        data = json.loads(body)
+        prompt = data.get("prompt", "")
+        image_url = data.get("image_url")
+        quality = data.get("quality", "quality")
+        size = data.get("size", "1920x1080")
+        fps = data.get("fps", 30)
+        with_audio = data.get("with_audio", False)
+
+        payload = {
+            "model": "cogvideox-3",
+            "prompt": prompt,
+            "quality": quality,
+            "size": size,
+            "fps": fps,
+            "with_audio": with_audio,
+        }
+        if image_url:
+            payload["image_url"] = image_url
+
+        timeout = ClientTimeout(total=300)  # Video takes longer
+        async with session.request(
+            method="POST",
+            url=GLM_VIDEO_ENDPOINT,
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=timeout,
+            ssl=True,
+        ) as resp:
+            raw = await resp.read()
+            return aiohttp.web.Response(
+                body=raw,
+                status=resp.status,
+                content_type="application/json",
+            )
+    except Exception as e:
+        log_fn(f"GLM video generation EXC: {e}")
+        return aiohttp.web.Response(status=502, text=f"GLM video error: {e}")
+
+
+async def route_glm_request(request, body: bytes, session, log_fn=print):
+    """Route la richiesta all'endpoint appropriato in base al tipo."""
+    content_type, _ = has_multimodal_content(body)
+
+    if content_type == "image_gen":
+        log_fn(f"GLM route: image generation → /v4/images/generations")
+        return await forward_glm_image(request, body, session, log_fn)
+
+    if content_type == "video_gen":
+        log_fn(f"GLM route: video generation → /v4/videos/generations")
+        return await forward_glm_video(request, body, session, log_fn)
+
+    # Per tutto il resto, usa il flow standard
+    return None
 
 
 # ── Forward GLM ───────────────────────────────────────────────────────────────
