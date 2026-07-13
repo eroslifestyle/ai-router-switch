@@ -4319,7 +4319,8 @@ async def handle(request):
         except Exception as e:
             gen_status, gen_json = 0, None
             log(f"inverse T2 R1 EXC: {e}")
-        if not gen_json or gen_status in MINIMAX_FALLBACK_STATUSES:  # FIX B4.1: solo retryable
+        # FIX 2026-07-13: 400 context-exceed deve fare fallback (non skip)
+        if not gen_json or gen_status in (MINIMAX_FALLBACK_STATUSES | {400}):  # FIX B4.1: solo retryable
             n = inverse_fail_inc(chat_fp)
             log(f"inverse T2: M3 R1 fallita ({gen_status}) [{n}/{INVERSE_FAIL_THRESHOLD}]")
             if inverse_should_escalate(chat_fp):
@@ -4439,7 +4440,8 @@ async def handle(request):
             gen_status, gen_json = await _call_full(_fwd_minimax_short, request, body, session)
         except Exception as e:
             gen_status, gen_json = 0, None
-        if not gen_json or gen_status in MINIMAX_FALLBACK_STATUSES:  # FIX B4.1 residuo
+        # FIX 2026-07-13: 400 context-exceed deve fare fallback
+        if not gen_json or gen_status in (MINIMAX_FALLBACK_STATUSES | {400}):  # FIX B4.1 residuo
             # M3 ancora giù: Anthropic esegue DIRETTO senza pipeline
             log(f"mixed escalation: M3 ko {gen_status}, Anthropic esegue diretto")
             try:
@@ -4566,7 +4568,8 @@ async def handle(request):
         gen_status, gen_json = await _call_full(_fwd_minimax_short, request, body, session)
     except Exception as e:
         gen_status, gen_json = 0, None
-    if not gen_json or gen_status in MINIMAX_FALLBACK_STATUSES:  # FIX B4.1: solo retryable
+    # FIX 2026-07-13: 400 context-exceed deve fare fallback
+    if not gen_json or gen_status in (MINIMAX_FALLBACK_STATUSES | {400}):  # FIX B4.1: solo retryable
         n = mixed_fail_inc(chat_fp)
         log(f"mixed T2 M3 R1 ko {gen_status} ({n}/{MIXED_FAIL_THRESHOLD}) {request.path}")
         try:
