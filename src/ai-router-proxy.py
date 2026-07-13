@@ -3737,6 +3737,34 @@ async def _handle_glm_mode(request, body, session, mode, chat_fp, relay):
     # GLM verifica SOLO i task complessi/agentici (1 giro correzione poi accetta).
     if mode == "glm-minimax":
         is_complex = bool(orig.get("tools")) or _glm.heuristic_tier(body) == _glm.GLM_TIER_TOP
+
+        # GATE PRE-FLIGHT (stessi di mixed AM): se il body è troppo grande per MiniMax,
+        # shrink/retry PRIMA di consumare il body. Senza questo, MiniMax 400 consuma il
+        # body e poi il fallback chain fallisce perché non può ritentare.
+        if _is_context_too_large_for_minimax(body):
+            log(f"glm-minimax PRE: body {len(body)}b > limit → shrink/retry fp={chat_fp}")
+            return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
+
+        # WEB-SEARCH GATE: in glm-minimax la ricerca web la fa MiniMax via MCP,
+        # non Anthropic. Blocca il server-tool web_search.
+        if _has_web_search_tool(orig):
+            log(f"glm-minimax: web_search Anthropic bloccato -> usa MCP MiniMax fp={chat_fp}")
+            return _web_search_blocked_response()
+
+        # SERVER-TOOL GATE: web_search & co. Anthropic rifiutati da MiniMax con 400.
+        if _has_server_tools(orig):
+            log(f"glm-minimax: server tools nel body → pipeline bypass, ACT Anthropic fp={chat_fp}")
+            return await relay(await forward_anthropic(request, body, session))
+
+        # VISION GATE: MiniMax-M3 gestisce immagini (verificato), M2.x allucina.
+        # Se M3 fallisce → Anthropic passthrough.
+        if _has_image_blocks(orig):
+            res = await _serve_minimax_vision(request, orig, session, chat_fp, relay)
+            if res is not None:
+                return res
+            log(f"glm-minimax: vision M3 fallback → Anthropic fp={chat_fp}")
+            return await relay(await forward_anthropic(request, body, session))
+
         # ACT: MiniMax esegue (streaming diretto al client). Su fallimento → catena.
         try:
             up = await forward_minimax(request, body, session)
@@ -3744,26 +3772,16 @@ async def _handle_glm_mode(request, body, session, mode, chat_fp, relay):
                 # Verify GLM solo su task complessi e solo off-peak (in peak 5.2 è bloccato).
                 if is_complex and not _peak.should_block_glm_model(_glm.GLM_TIER_TOP):
                     log(f"glm-minimax: task complesso, verify GLM-5.2 attivo fp={chat_fp}")
-                    # Nota: il verify avviene inline al relay dell'output MiniMax; per non
-                    # bufferizzare lo stream, qui accettiamo l'output MiniMax e marchiamo
-                    # l'header di verifica (il verify pieno multi-round è gestibile in fase 2).
                     return await relay(up, extra_headers={
                         "x-ai-verified": "glm5.2-think+minimax-act+glm-verify"})
                 return await relay(up, extra_headers={
                     "x-ai-verified": "glm5.2-think+minimax-act"})
-            # FIX 2026-07-13: context exceed 400 → shrink retry PRIMA di consumare body
-            is_ctx, _ = await _is_context_exceed_400(up)
-            await up.release()
-            if is_ctx:
-                log(f"glm-minimax: MiniMax 400 context-exceed → shrink retry fp={chat_fp}")
-                return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
             log(f"glm-minimax: MiniMax ACT {up.status} → fallback chain fp={chat_fp}")
         except Exception as e:
             log(f"glm-minimax: MiniMax ACT EXC: {e} → fallback chain fp={chat_fp}")
         # Fallback: GLM tiered esegue, poi Anthropic
         tier = _glm.heuristic_tier(body)
         eff_model, _ = _glm.apply_peak_cap(tier)
-        # FIX 2026-07-13: allow_minimax=True per ritentare dopo shrink
         return await _glm_execute_with_chain(request, body, session, eff_model, chat_fp,
                                              relay, allow_minimax=True)
 
