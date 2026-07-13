@@ -3827,15 +3827,8 @@ async def _handle_glm_mode(request, body, session, mode, chat_fp, relay):
 
     # ── MODALITÀ glm: GLM-5.2 classifica → tier → esegue (con cap peak) ──
     if mode == "glm":
-        # Routing per generazione media PRIMA di classify_tier
-        gen_resp = await _glm.route_glm_request(request, body, session, log_fn=log)
-        if gen_resp is not None:
-            return gen_resp
-        tier = await _glm.classify_tier(body, request, session, log_fn=log)
-        eff_model, capped = _glm.apply_peak_cap(tier)
-        if capped:
-            log(f"glm: tier {tier} → cap peak → {eff_model} fp={chat_fp}")
-        return await _glm_execute_with_chain(request, body, session, eff_model, chat_fp, relay)
+        # Pattern THINK → ACT → VERIFY con GLM
+        return await _glm.glm_think_act_verify(request, body, session, log_fn=log)
 
     # ── MODALITÀ anthropic-glm: Anthropic THINK → GLM tiered ACT → Anthropic verify T2 ──
     # THINK: l'orchestratore Anthropic (modello richiesto dal client) resta implicito

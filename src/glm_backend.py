@@ -57,6 +57,10 @@ GLM_MODEL_FOR_TIER = {
     GLM_TIER_MULTIMODAL: "glm-5V-Turbo",
 }
 
+# ── THINK-ACT-VERIFY constants ──────────────────────────────────────────────────
+GLM_THINK_VERIFY_MODEL = "glm-5.2"
+GLM_THINK_TIMEOUT_SEC = 60
+
 # Context limit sicuri per ogni modello (input tokens, con headroom)
 # Source: piano verificato con contesto reale
 _GLM_CONTEXT_LIMITS = {
@@ -366,6 +370,153 @@ def apply_peak_cap(tier: str):
     if _ps.should_block_glm_model(tier):
         return GLM_TIER_MID, True
     return tier, False
+
+
+
+# ── THINK-ACT-VERIFY ───────────────────────────────────────────────────────────
+
+def build_glm_think_body(orig: dict, content_type: str) -> bytes:
+    """Costruisce il body per il THINK con GLM-5.2.
+
+    Chiede al modello di analizzare il task e produrre un piano di azione."""
+    system = """Sei un orchestrator AI. Analizza la richiesta e produci un piano di azione.
+Il piano deve specificare:
+1. Tipo di task (coding, reasoning, creative, vision, etc.)
+2. Modello consigliato per l'esecuzione
+3. Approccio principale
+
+Rispondi SOLO con il piano, nient'altro."""
+
+    messages = orig.get("messages", [])
+
+    think_messages = [
+        {"role": "system", "content": system},
+    ]
+
+    # Aggiungi history recente
+    for msg in messages[-6:]:
+        role = msg.get("role", "user")
+        content_text = msg.get("content", "")
+        if isinstance(content_text, str) and len(content_text) < 5000:
+            think_messages.append({"role": role, "content": content_text[:3000]})
+
+    # Aggiungi task attuale
+    if messages:
+        last = messages[-1].get("content", "")
+        if isinstance(last, str):
+            think_messages.append({"role": "user", "content": f"Analizza questo task: {last[:2000]}"})
+
+    think_body = {
+        "model": GLM_THINK_VERIFY_MODEL,
+        "messages": think_messages,
+        "max_tokens": 1000,
+    }
+
+    return json.dumps(think_body).encode()
+
+
+def build_glm_verify_body(orig: dict, plan: str, act_output: str) -> bytes:
+    """Costruisce il body per il VERIFY con GLM-5.2.
+
+    Chiede al modello di verificare che l'output sia corretto."""
+    system = """Sei un verifier AI. Verifica che l'output prodotto sia corretto e completo.
+Se ci sono errori o omissioni, indica cosa corregere.
+Rispondi SOLO con VERIFIED se l'output è ok, o con CORRECTIONS seguito dalle correzioni."""
+
+    verify_messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": "Piano:\n" + plan + "\n\nOutput:\n" + act_output[:3000]},
+    ]
+
+    verify_body = {
+        "model": GLM_THINK_VERIFY_MODEL,
+        "messages": verify_messages,
+        "max_tokens": 500,
+    }
+
+    return json.dumps(verify_body).encode()
+
+
+async def glm_think_act_verify(request, body: bytes, session, log_fn=print):
+    """Esegue il pattern THINK → ACT → VERIFY con GLM.
+
+    1. GLM-5.2 THINK: produce piano
+    2. modello specifico ACT: esegue
+    3. GLM-5.2 VERIFY: verifica output
+    """
+    try:
+        orig = json.loads(body)
+    except Exception:
+        orig = {}
+
+    # STEP 1: THINK - GLM-5.2 analizza e produce piano
+    content_type, _ = has_multimodal_content(body)
+
+    # Per generazione media, skip THINK e vai diretto
+    if content_type in ("image_gen", "video_gen"):
+        if content_type == "image_gen":
+            return await forward_glm_image(request, body, session, log_fn)
+        return await forward_glm_video(request, body, session, log_fn)
+
+    # THINK
+    think_body = build_glm_think_body(orig, content_type)
+    log_fn(f"GLM THINK: analisi con {GLM_THINK_VERIFY_MODEL}")
+
+    try:
+        think_resp = await forward_glm(request, think_body, session, GLM_THINK_VERIFY_MODEL, log_fn)
+        if think_resp.status >= 400:
+            log_fn(f"GLM THINK fail {think_resp.status} → skip to direct ACT")
+            think_plan = ""
+        else:
+            think_raw = await think_resp.read()
+            await think_resp.release()
+            try:
+                think_data = json.loads(think_raw)
+                think_plan = think_data.get("content", [{}])[0].get("text", "") if think_data.get("content") else ""
+            except Exception:
+                think_plan = ""
+    except Exception as e:
+        log_fn(f"GLM THINK EXC: {e} → skip to direct ACT")
+        think_plan = ""
+
+    log_fn(f"GLM THINK done: plan={len(think_plan)}c")
+
+    # STEP 2: ACT - modello specifico esegue
+    tier, _ = await classify_tier(body, request, session, log_fn)
+    eff_model, _ = apply_peak_cap(tier)
+
+    log_fn(f"GLM ACT: esecuzione con {eff_model}")
+    act_resp = await forward_glm(request, body, session, eff_model, log_fn)
+
+    if act_resp.status >= 400:
+        log_fn(f"GLM ACT fail {act_resp.status}")
+        return act_resp
+
+    # STEP 3: VERIFY - GLM-5.2 verifica output
+    log_fn(f"GLM VERIFY: verifica con {GLM_THINK_VERIFY_MODEL}")
+
+    try:
+        act_raw = await act_resp.read()
+        await act_resp.release()
+
+        verify_body = build_glm_verify_body(orig, think_plan, act_raw.decode(errors="ignore")[:5000])
+        verify_resp = await forward_glm(request, verify_body, session, GLM_THINK_VERIFY_MODEL, log_fn)
+
+        if verify_resp.status < 400:
+            verify_raw = await verify_resp.read()
+            try:
+                verify_data = json.loads(verify_raw)
+                verify_text = verify_data.get("content", [{}])[0].get("text", "") if verify_data.get("content") else ""
+                log_fn(f"GLM VERIFY: {verify_text[:100]}")
+            except Exception:
+                pass
+            await verify_resp.release()
+    except Exception as e:
+        log_fn(f"GLM VERIFY EXC: {e}")
+
+    # Ritorna l'output dell'ACT (rileggiamo da orig body per avere la response completa)
+    act_resp = await forward_glm(request, body, session, eff_model, log_fn)
+    return act_resp
 
 
 # ── Image & Video Generation ──────────────────────────────────────────────────
