@@ -783,14 +783,23 @@ def _err_response(message: str, status: int = 502) -> web.Response:
     )
 
 
-def get_mode(request=None) -> str:
+def get_mode(request=None, fp: str = None) -> str:
     """Modalità deterministica: ogni porta ha la sua web.Application con
     app['forced_mode'] cablato. :8787 ha forced_mode=None -> dinamica da file.
-    Niente più sockname (inaffidabile con runner condiviso)."""
+    Niente più sockname (inaffidabile con runner condiviso).
+
+    Per-chat override (fp): se la chat ha un mode impostato, ha priorità
+    sul file globale. Questo permette di switchare il router DENTRO una chat
+    senza toccare il mode globale (utile per Claude Code)."""
     if request is not None:
         forced = request.app.get("forced_mode")
         if forced in VALID_MODES:
             return forced
+    # Per-chat override: legge da ai-router-chats.json, più veloce del file globale
+    if fp:
+        cm = get_chat_mode(fp)
+        if cm:
+            return cm
     return get_file_mode()
 
 
@@ -3763,7 +3772,9 @@ async def _handle_glm_mode(request, body, session, mode, chat_fp, relay):
 
 
 async def handle(request):
-    mode = get_mode(request)
+    # FIX per-chat mode: fp disponibile PRIMA di get_mode così la chat override ha priorità sul global
+    fp = _resolve_chat_fingerprint(request)
+    mode = get_mode(request, fp)
     # FIX B3.8: rifiuta esplicitamente multipart (non supportato dal routing).
     ct = (request.headers.get("Content-Type") or "").lower()
     if "multipart/form-data" in ct:
