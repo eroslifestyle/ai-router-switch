@@ -514,8 +514,12 @@ async def glm_think_act_verify(request, body: bytes, session, log_fn=print):
     except Exception as e:
         log_fn(f"GLM VERIFY EXC: {e}")
 
-    # Ritorna l'output dell'ACT (rileggiamo da orig body per avere la response completa)
-    act_resp = await forward_glm(request, body, session, eff_model, log_fn)
+    # ACT output già in memory, ritorna quello (non rieseguire)
+    act_resp = aiohttp.web.Response(
+        body=act_raw,
+        status=200,
+        content_type="application/json",
+    )
     return act_resp
 
 
