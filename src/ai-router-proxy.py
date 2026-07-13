@@ -4501,6 +4501,12 @@ async def handle(request):
             # L'unico overhead mixed è il classification T2 (micro-sec).
             try:
                 up = await forward_minimax(request, body, session)
+                # FIX 2026-07-13: context exceed 400 → shrink retry
+                if up.status == 400:
+                    is_ctx, _ = await _is_context_exceed_400(up)
+                    if is_ctx:
+                        log(f"mixed FAST-PATH 400 context-exceed → shrink retry fp={chat_fp}")
+                        return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
                 mixed_fail_reset(chat_fp)
                 log(f"mixed FAST-PATH MiniMax direct fp={chat_fp}")
                 return await relay(up)
