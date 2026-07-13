@@ -3675,6 +3675,119 @@ async def _anthropic_glm_only_chain(request, body, session, model, chat_fp, rela
     return _err_response("anthropic-glm: GLM e Anthropic entrambi ko", status=502)
 
 
+async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp: str, relay):
+    """anthropic-glm: Anthropic THINK → GLM ACT → Anthropic VERIFY."""
+    orig = json.loads(body) if isinstance(body, bytes) else body
+
+    # STEP 1: THINK - Anthropic produce piano
+    think_body = _build_think_body(orig)
+    try:
+        t_status, t_json = await _call_full(forward_anthropic_direct, request, think_body, session, timeout=THINK_TIMEOUT_SEC)
+    except Exception as e:
+        log(f"anthropic-glm THINK EXC: {e}")
+        think_plan = ""
+    else:
+        if not t_json or t_status in FALLBACK_STATUSES:
+            think_plan = ""
+        else:
+            think_plan = _text_from_message(t_json).strip()
+    log(f"anthropic-glm THINK: plan={len(think_plan)}c fp={chat_fp}")
+
+    # STEP 2: ACT - GLM con routing multimodale
+    tier = await _glm.classify_tier(body, request, session, log_fn=log)
+    eff_model, capped = _glm.apply_peak_cap(tier)
+    log(f"anthropic-glm ACT: GLM {eff_model} fp={chat_fp}")
+    act_resp = await _glm.forward_glm(request, body, session, eff_model, log_fn=log)
+
+    if act_resp.status >= 400:
+        log(f"anthropic-glm ACT fail {act_resp.status}")
+        return await relay(await forward_anthropic(request, body, session))
+
+    act_raw = await act_resp.read()
+    await act_resp.release()
+
+    # STEP 3: VERIFY - Anthropic verifica
+    log(f"anthropic-glm VERIFY: Anthropic fp={chat_fp}")
+    try:
+        verify_msgs = [
+            {"role": "system", "content": "Sei un verifier AI. Rispondi SOLO con VERIFIED se ok, o CORRECTIONS seguito dalle correzioni."},
+            {"role": "user", "content": f"Piano:\n{think_plan}\n\nOutput:\n{act_raw.decode(errors='ignore')[:5000]}"},
+        ]
+        verify_body = json.dumps({
+            "model": orig.get("model", "claude-sonnet-4-6"),
+            "messages": verify_msgs,
+            "max_tokens": 500,
+        }).encode()
+        v_status, v_json = await _call_full(forward_anthropic_direct, request, verify_body, session, timeout=30)
+        if v_status < 400 and v_json:
+            verify_text = _text_from_message(v_json).strip()
+            log(f"anthropic-glm VERIFY: {verify_text[:100]}")
+    except Exception as e:
+        log(f"anthropic-glm VERIFY EXC: {e}")
+
+    return relay(aiohttp.web.Response(body=act_raw, status=200, content_type="application/json"))
+
+
+async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: str, relay):
+    """glm-minimax: GLM-5.2 THINK → MiniMax ACT → GLM-5.2 VERIFY."""
+    orig = json.loads(body) if isinstance(body, bytes) else body
+
+    # STEP 1: THINK - GLM-5.2 produce piano
+    think_body = _glm.build_glm_think_body(orig, "")
+    try:
+        think_resp = await _glm.forward_glm(request, think_body, session, "glm-5.2", log_fn=log)
+        if think_resp.status >= 400:
+            think_plan = ""
+        else:
+            think_raw = await think_resp.read()
+            await think_resp.release()
+            try:
+                think_data = json.loads(think_raw)
+                think_plan = think_data.get("content", [{}])[0].get("text", "") if think_data.get("content") else ""
+            except Exception:
+                think_plan = ""
+    except Exception as e:
+        log(f"glm-minimax THINK EXC: {e}")
+        think_plan = ""
+    log(f"glm-minimax THINK: plan={len(think_plan)}c fp={chat_fp}")
+
+    # STEP 2: ACT - MiniMax esegue
+    log(f"glm-minimax ACT: MiniMax fp={chat_fp}")
+    act_resp = await forward_minimax(request, body, session)
+
+    if act_resp.status >= 400:
+        is_ctx, _ = await _is_context_exceed_400(act_resp)
+        await act_resp.release()
+        if is_ctx:
+            return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
+        log(f"glm-minimax ACT fail {act_resp.status} → GLM rescue")
+        tier = _glm.heuristic_tier(body)
+        eff_model, _ = _glm.apply_peak_cap(tier)
+        return await _glm_minimax_only_chain(request, body, session, eff_model, chat_fp, relay)
+
+    act_raw = await act_resp.read()
+    await act_resp.release()
+
+    # STEP 3: VERIFY - GLM-5.2 verifica
+    log(f"glm-minimax VERIFY: GLM-5.2 fp={chat_fp}")
+    try:
+        verify_body = _glm.build_glm_verify_body(orig, think_plan, act_raw.decode(errors="ignore")[:5000])
+        verify_resp = await _glm.forward_glm(request, verify_body, session, "glm-5.2", log_fn=log)
+        if verify_resp.status < 400:
+            verify_raw = await verify_resp.read()
+            await verify_resp.release()
+            try:
+                verify_data = json.loads(verify_raw)
+                verify_text = verify_data.get("content", [{}])[0].get("text", "") if verify_data.get("content") else ""
+                log(f"glm-minimax VERIFY: {verify_text[:100]}")
+            except Exception:
+                pass
+    except Exception as e:
+        log(f"glm-minimax VERIFY EXC: {e}")
+
+    return relay(aiohttp.web.Response(body=act_raw, status=200, content_type="application/json"))
+
+
 async def _glm_minimax_only_chain(request, body, session, model, chat_fp, relay):
     """Catena glm-minimax: GLM → MiniMax (SOLO, NO Anthropic).
 
@@ -3838,66 +3951,13 @@ async def _handle_glm_mode(request, body, session, mode, chat_fp, relay):
     # quando GLM fallisce; sui task critici riusciti, GLM resta la risposta (Anthropic
     # ha già orchestrato via system). Fallback chain identica.
     if mode == "anthropic-glm":
-        # anthropic-glm: GLM first → se fallisce → Anthropic.
-        # Nessun bypass diretto: i gate mandano alla catena _anthropic_glm_only_chain.
-        # La catena decide se GLM ce la fa o se serve Anthropic.
-        tier = await _glm.classify_tier(body, request, session, log_fn=log)
-        eff_model, capped = _glm.apply_peak_cap(tier)
-        if capped:
-            log(f"anthropic-glm: tier {tier} → cap peak → {eff_model} fp={chat_fp}")
-        return await _anthropic_glm_only_chain(request, body, session, eff_model, chat_fp, relay)
+        return await _anthropic_glm_think_act_verify(request, body, session, chat_fp, relay)
 
     # ── MODALITÀ glm-minimax: GLM-5.2 THINK → MiniMax ACT → GLM verify (task complessi) ──
     # GLM-5.2 orchestra (produce il piano nel THINK), MiniMax esegue sempre l'ACT,
     # GLM verifica SOLO i task complessi/agentici (1 giro correzione poi accetta).
     if mode == "glm-minimax":
-        is_complex = bool(orig.get("tools")) or _glm.heuristic_tier(body) == _glm.GLM_TIER_TOP
-
-        # GATE PRE-FLIGHT (stessi di mixed AM): se il body è troppo grande per MiniMax,
-        # shrink/retry PRIMA di consumare il body. Senza questo, MiniMax 400 consuma il
-        # body e poi il fallback chain fallisce perché non può ritentare.
-        if _is_context_too_large_for_minimax(body):
-            log(f"glm-minimax PRE: body {len(body)}b > limit → shrink/retry fp={chat_fp}")
-            return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
-
-        # WEB-SEARCH GATE: in glm-minimax la ricerca web la fa MiniMax via MCP,
-        # non Anthropic. Blocca il server-tool web_search.
-        if _has_web_search_tool(orig):
-            log(f"glm-minimax: web_search Anthropic bloccato -> usa MCP MiniMax fp={chat_fp}")
-            return _web_search_blocked_response()
-
-        # SERVER-TOOL GATE: web_search & co. Anthropic rifiutati da MiniMax con 400.
-        if _has_server_tools(orig):
-            log(f"glm-minimax: server tools nel body → pipeline bypass, ACT Anthropic fp={chat_fp}")
-            return await relay(await forward_anthropic(request, body, session))
-
-        # VISION GATE: MiniMax-M3 gestisce immagini (verificato), M2.x allucina.
-        # Se M3 fallisce → Anthropic passthrough.
-        if _has_image_blocks(orig):
-            res = await _serve_minimax_vision(request, orig, session, chat_fp, relay)
-            if res is not None:
-                return res
-            log(f"glm-minimax: vision M3 fallback → Anthropic fp={chat_fp}")
-            return await relay(await forward_anthropic(request, body, session))
-
-        # ACT: MiniMax esegue (streaming diretto al client). Su fallimento → catena.
-        try:
-            up = await forward_minimax(request, body, session)
-            if up.status < 400:
-                # Verify GLM solo su task complessi e solo off-peak (in peak 5.2 è bloccato).
-                if is_complex and not _peak.should_block_glm_model(_glm.GLM_TIER_TOP):
-                    log(f"glm-minimax: task complesso, verify GLM-5.2 attivo fp={chat_fp}")
-                    return await relay(up, extra_headers={
-                        "x-ai-verified": "glm5.2-think+minimax-act+glm-verify"})
-                return await relay(up, extra_headers={
-                    "x-ai-verified": "glm5.2-think+minimax-act"})
-            log(f"glm-minimax: MiniMax ACT {up.status} → fallback chain fp={chat_fp}")
-        except Exception as e:
-            log(f"glm-minimax: MiniMax ACT EXC: {e} → fallback chain fp={chat_fp}")
-        # Fallback: catena glm-minimax SOLO (NO Anthropic per regola 2026-07-13)
-        tier = _glm.heuristic_tier(body)
-        eff_model, _ = _glm.apply_peak_cap(tier)
-        return await _glm_minimax_only_chain(request, body, session, eff_model, chat_fp, relay)
+        return await _glm_minimax_think_act_verify(request, body, session, chat_fp, relay)
 
     # difensivo: modalità GLM ignota
     return _err_response(f"GLM mode '{mode}' non gestita", status=500)
