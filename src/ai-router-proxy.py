@@ -4414,11 +4414,13 @@ async def handle(request):
             log(f"anthropic mode: model MiniMax '{_am}' -> forward_minimax (fuori-banda)")
             return await relay(await forward_minimax(request, body, session),
                                extra_headers={"x-ai-verified": "minimax-oob"})
-        # FIX 2026-07-15: fallback per-modello sul 429 Anthropic. Il piano Max ha
-        # quote SEPARATE per modello: Opus/Sonnet possono essere 429 mentre Haiku
-        # è ancora 200. Se il client (via /model) chiede Opus/Sonnet e Anthropic
-        # risponde 429, ritenta la stessa richiesta su Haiku (quota separata)
-        # invece di propagare l'errore. Se anche Haiku fallisce → 429 originale.
+        # FIX 2026-07-15 (rev2): il 429 di Anthropic su Opus/Sonnet NON è
+        # saturazione di quota ma un burst-limiter TRANSITORIO (x-should-retry:true,
+        # verificato: 200 e 429 sullo stesso model nello stesso minuto). Il proxy
+        # in modalità pura resta TRASPARENTE: relay() propaga status + header
+        # x-should-retry/retry-after al client, che ritenta da solo. In più il proxy
+        # fa UN SOLO retry con backoff breve quando l'upstream segnala x-should-retry,
+        # per assorbire il burst senza mascherare nulla né degradare il modello scelto.
         try:
             up = await _retry_forward(forward_anthropic, request, body, session)
         except Exception as e:
@@ -4427,30 +4429,22 @@ async def handle(request):
                 {"type": "error", "error": {"type": "router_error", "message": str(e)}},
                 status=502,
             )
-        if up.status == 429 and ("opus" in _am or "sonnet" in _am):
-            try:
-                orig_429_raw = await up.read()
-            except Exception:
-                orig_429_raw = b""
+        should_retry = str(up.headers.get("x-should-retry", "")).lower() == "true"
+        if up.status == 429 and should_retry:
+            ra = up.headers.get("retry-after")
+            delay = min(float(ra), 3.0) if ra and ra.isdigit() else 1.5
             up.release()
-            log(f"anthropic mode: 429 su '{_am}' -> fallback Haiku (quota per-modello)")
+            log(f"anthropic mode: 429 x-should-retry su '{_am}', retry singolo dopo {delay}s")
+            await asyncio.sleep(delay)
             try:
-                hb = json.loads(body)
-                hb["model"] = THINK_MODEL
-                haiku_body = json.dumps(hb).encode()
-                up_h = await _retry_forward(forward_anthropic, request, haiku_body, session)
+                up = await _retry_forward(forward_anthropic, request, body, session)
             except Exception as e:
-                log(f"anthropic mode: fallback Haiku EXC {e}")
-                up_h = None
-            if up_h is not None and up_h.status < 400:
-                return await relay(up_h, extra_headers={"x-ai-verified": "anthropic-haiku-429fallback"})
-            if up_h is not None:
-                up_h.release()
-            log(f"anthropic mode: anche Haiku ko, propago 429 originale per '{_am}'")
-            return web.json_response(
-                json.loads(orig_429_raw or b"{}") if orig_429_raw.strip() else {"type": "error", "error": {"type": "rate_limit_error", "message": "Error"}},
-                status=429)
-        # caso normale (status ok, o 429 non-Opus/Sonnet): relay diretto
+                log(f"ERR anthropic (pure) retry {request.path}: {e}")
+                return web.json_response(
+                    {"type": "error", "error": {"type": "router_error", "message": str(e)}},
+                    status=502,
+                )
+        # relay trasparente: propaga status e header upstream (incluso x-should-retry)
         # FIX D38 2026-07-02: header di verifica esecutore anche in modalità pura
         log(f"anthropic (pure) -> {up.status} {request.path}")
         return await relay(up, extra_headers={"x-ai-verified": "anthropic-pure"})
