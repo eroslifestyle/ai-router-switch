@@ -1014,10 +1014,14 @@ def _router_reply_text(action: dict, fp: str) -> str:
             "`!router status` · `!router reset`. Anche a voce: «usa solo minimax».")
 
 
-def _synthetic_message(text: str) -> dict:
+def _synthetic_message(text: str, model: str = "ai-router") -> dict:
+    # FIX 2026-07-15: eco del model richiesto dal client invece dell'hardcoded
+    # "ai-router". Claude Code, su una chat NUOVA, registra la conversazione dal
+    # model del primo message_start; un model sconosciuto ("ai-router") fa fallire
+    # la creazione dell'entry -> "No conversation found with session ID".
     return {
         "id": "msg_router", "type": "message", "role": "assistant",
-        "model": "ai-router", "content": [{"type": "text", "text": text}],
+        "model": model or "ai-router", "content": [{"type": "text", "text": text}],
         "stop_reason": "end_turn", "stop_sequence": None,
         "usage": {"input_tokens": 0, "output_tokens": 0},
     }
@@ -4099,7 +4103,8 @@ async def handle(request):
                 _fp = f"sid:{_sid[:64]}" if _sid else conversation_fingerprint(_data)
                 # gestione locale, risposta sintetica (D40: costo zero, no inoltro)
                 _txt = _router_reply_text(_cmd, _fp)
-                _msg = _synthetic_message(_txt)
+                # eco del model richiesto (Claude Code registra la chat da questo)
+                _msg = _synthetic_message(_txt, _data.get("model", "ai-router"))
                 log(f"in-chat command {_cmd} fp={_fp}")
                 if bool(_data.get("stream")):
                     # FIX SSE: usa helper con header anti-buffering + flush per evento
