@@ -4414,17 +4414,46 @@ async def handle(request):
             log(f"anthropic mode: model MiniMax '{_am}' -> forward_minimax (fuori-banda)")
             return await relay(await forward_minimax(request, body, session),
                                extra_headers={"x-ai-verified": "minimax-oob"})
+        # FIX 2026-07-15: fallback per-modello sul 429 Anthropic. Il piano Max ha
+        # quote SEPARATE per modello: Opus/Sonnet possono essere 429 mentre Haiku
+        # è ancora 200. Se il client (via /model) chiede Opus/Sonnet e Anthropic
+        # risponde 429, ritenta la stessa richiesta su Haiku (quota separata)
+        # invece di propagare l'errore. Se anche Haiku fallisce → 429 originale.
         try:
             up = await _retry_forward(forward_anthropic, request, body, session)
-            log(f"anthropic (pure) -> {up.status} {request.path}")
-            # FIX D38 2026-07-02: header di verifica esecutore anche in modalità pura
-            return await relay(up, extra_headers={"x-ai-verified": "anthropic-pure"})
         except Exception as e:
             log(f"ERR anthropic (pure) {request.path}: {e}")
             return web.json_response(
                 {"type": "error", "error": {"type": "router_error", "message": str(e)}},
                 status=502,
             )
+        if up.status == 429 and ("opus" in _am or "sonnet" in _am):
+            try:
+                orig_429_raw = await up.read()
+            except Exception:
+                orig_429_raw = b""
+            up.release()
+            log(f"anthropic mode: 429 su '{_am}' -> fallback Haiku (quota per-modello)")
+            try:
+                hb = json.loads(body)
+                hb["model"] = THINK_MODEL
+                haiku_body = json.dumps(hb).encode()
+                up_h = await _retry_forward(forward_anthropic, request, haiku_body, session)
+            except Exception as e:
+                log(f"anthropic mode: fallback Haiku EXC {e}")
+                up_h = None
+            if up_h is not None and up_h.status < 400:
+                return await relay(up_h, extra_headers={"x-ai-verified": "anthropic-haiku-429fallback"})
+            if up_h is not None:
+                up_h.release()
+            log(f"anthropic mode: anche Haiku ko, propago 429 originale per '{_am}'")
+            return web.json_response(
+                json.loads(orig_429_raw or b"{}") if orig_429_raw.strip() else {"type": "error", "error": {"type": "rate_limit_error", "message": "Error"}},
+                status=429)
+        # caso normale (status ok, o 429 non-Opus/Sonnet): relay diretto
+        # FIX D38 2026-07-02: header di verifica esecutore anche in modalità pura
+        log(f"anthropic (pure) -> {up.status} {request.path}")
+        return await relay(up, extra_headers={"x-ai-verified": "anthropic-pure"})
 
     # ═══════════════════════════════════════════════════════════════════════
     # MODALITÀ GLM (2026-07-10) — endpoint z.ai Anthropic-compatible.
