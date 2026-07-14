@@ -968,7 +968,7 @@ _NL_MODE = [
     (_re.compile(r"inverse|inversa|inverti", _re.I), "inverse"),
 ]
 _CMD_VERB = _re.compile(r"\b(usa|passa|metti|imposta|attiva|cambia|adesso\s+usa)\b", _re.I)
-_EXPLICIT = _re.compile(r"^\s*!router\s+(\w+)", _re.I)
+_EXPLICIT = _re.compile(r"!router\s+(\w+)", _re.I)
 
 
 def parse_router_command(text: str):
@@ -978,7 +978,7 @@ def parse_router_command(text: str):
         return None
     t = text.strip()
     # esplicito: !router <x>
-    m = _EXPLICIT.match(t)
+    m = _EXPLICIT.search(t)
     if m:
         arg = m.group(1).lower()
         resolved = _ALIAS_MAP.get(arg, arg)  # alias -> nome interno
