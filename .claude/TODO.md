@@ -1,7 +1,7 @@
 # ai-router-switch — TODO
 
 ## Attivo
-- [ ] Test: !router da DUE chat contemporanee per verificare isolamento reale
+- [ ] Test: !router da DUE chat contemporanee per verificare isolamento reale (nota: store ai-router-chats.json già mostra override distinti per session-id → isolamento confermato lato dati, manca solo test live simultaneo)
 
 ## Completati
 - [x] Fix glm-minimax: context-exceed 400 → shrink retry + allow_minimax=True
