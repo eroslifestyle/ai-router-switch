@@ -1,332 +1,377 @@
-# AI Router Proxy - Operational Guide v1.0
+# AI Router Proxy — Operational Guide
 
-## Panoramica
-
-Questo documento descrive il router stack che gestisce il traffico API verso
-i backend Anthropic (Claude) e MiniMax (modello M3). Il sistema è composto
-da un proxy principale e due servizi di compressione context.
-
-## Architettura
-
-```
-[Applicazione]
-      |
-      v
-  :8787 ai-router (proxy switcher, modalità dinamica)
-      |
-      |
-
-Porte fixed:
-  :8771 ai-router (FORCED: anthropic)
-  :8772 ai-router (FORCED: minimax)
-  :8773 ai-router (FORCED: mixed)
-  :8774 ai-router (FORCED: interactive)
-```
-
-Il proxy ai-router è un singolo processo aiohttp in ascolto su 5 porte.
-Le porte 8771-8774 hanno la modalità preimpostata nel bind, permettendo
-di usare backend diversi in sessioni parallele.
+> Document version: 2026-07-14 · Project: [ai-router-switch](https://github.com/eroslifestyle/ai-router-switch)
 
 ---
 
-## Le Quattro Modalità
+## Overview
 
-### 1. Anthropic (Pura)
+AI Router Proxy is a **self-hosted** proxy that sits in front of Claude Code (and any
+Anthropic-format client) and routes traffic to **Claude**, **MiniMax**, or **GLM/z.ai**
+depending on the active mode.
 
-verso api.anthropic.com). Nessun fallback. Se il backend risponde con
-errore, l'errore viene restituito tale e quale al client.
+The router is a **single Python/aiohttp process** listening on 8 ports:
 
-**Uso consigliato**: quando serve Claude e basta, senza compromessi.
+| Port | Role |
+|------|------|
+| `8787` | Dynamic — follows `ai-mode` |
+| `8771` | Forced: `anthropic` |
+| `8772` | Forced: `minimax` |
+| `8773` | Forced: `mixed` |
+| `8774` | Forced: `inverse` |
+| `8775` | Forced: `glm` |
+| `8776` | Forced: `glm-minimax` |
+| `8777` | Forced: `anthropic-glm` |
 
-### 2. MiniMax (Pura)
-
-verso api.minimax.io/anthropic, modello M3). Nessun fallback.
-
-**Uso consigliato**: task semplici dove il modello M3 è sufficiente.
-
-### 3. Mixed (Fallback Bidirezionale)
-
-Tenta il backend primario (variabile `AIROUTER_MIXED_PRIMARY`, default
-anthropic). Se la risposta ha status in `FALLBACK_STATUSES`, ritenta
-automaticamente sul backend secondario.
-
-**Status che triggerrano il fallback**: 401, 403, 408, 409, 413, 429,
-500, 502, 503, 504, 529.
-
-**Nota**: status 400 e 404 non causano fallback (sono errori del client).
-
-**Circuit breaker**: 3 fallimenti consecutivi su un backend mettono
-quel backend in cooldown per 120 secondi.
-
-**Uso consigliato**: produzione, quando vuoi continuità di servizio.
-
-### 4. Interactive (Intelligente)
-
-Classificazione automatica dei task basata su euristica del system prompt:
-
-- **T0/T1** (task semplici, non critici): inoltrati a MiniMax
-- **T2** (task complessi, critici): generati da MiniMax, poi verificati
-  da Claude (opus)
-
-Se Claude non è disponibile, la bozza MiniMax viene comunque restituita
-marcata `"unverified"`.
-
-**Parole chiave che classificano T2**: "critically", "security", "audit",
-"vulnerability", "analyze", "explain in detail", "find issues",
-"architectural", "refactor deep".
-
-**Uso consigliato**: sviluppo giornaliero con risparmio intelligente.
+**Golden rule:** the router selects the backend. It never touches model settings,
+skills, agents, MCP, tools, or system prompt.
 
 ---
 
-## Cambiare Modalità Runtime
+## The Seven Modes
 
-La porta `:8787` legge il file `~/.claude/ai-router-mode` ad ogni
-richiesta. Per cambiare modalità a caldo:
+### 1. `anthropic` — Pure Claude
+
+All traffic goes to `api.anthropic.com`. No fallback. If the backend returns an
+error, the error is passed through unchanged.
+
+**Use when:** you need Claude and nothing else.
+
+### 2. `minimax` — Pure MiniMax
+
+All traffic goes to `api.minimaxi.chat/anthropic` (MiniMax **Anthropic-compatible**
+endpoint). No fallback. MiniMax-M3 orchestrates, M2.7 executes.
+
+**Use when:** simple tasks, limited budget, no weekly limit.
+
+### 3. `mixed` — Bidirectional Fallback
+
+Attempts the primary backend (`ai-mode` or env `AIROUTER_MIXED_PRIMARY`, default:
+`anthropic`). If the response has a status in `FALLBACK_STATUSES`, automatically
+retries on the secondary backend.
+
+**Statuses triggering Anthropic→MiniMax fallback:**
+`401, 403, 408, 409, 413, 429, 500, 502, 503, 504, 529`
+
+**Statuses triggering MiniMax→Anthropic fallback:**
+`401, 403, 408, 409, 413, 500, 502, 503, 504, 529`
+*(429 is excluded because MiniMax handles its own rate limit internally)*
+
+**Note:** status `400` and `404` do not trigger fallback (client errors, not backend).
+
+**Use when:** production with service continuity even if a subscription expires.
+
+### 4. `inverse` — MiniMax generates, Claude verifies
+
+Generation always from MiniMax. For **T2** tasks (classified as critical/complex),
+an additional verification pass by Claude Opus runs before delivering the response.
+
+**T2 classification** (heuristic on system prompt):
+keywords such as `"critically"`, `"security"`, `"audit"`, `"vulnerability"`,
+`"analyze"`, `"explain in detail"`, `"find issues"`, `"architect"`, `"review"`.
+
+If Claude Opus is unavailable, the MiniMax response is still returned with flag
+`"unverified"`.
+
+**Use when:** cost-saving with verification on critical tasks.
+
+### 5. `glm` — GLM/z.ai with tiering
+
+GLM-5.2 classifies task complexity → routes to the most appropriate tier:
+
+| Tier | Model | Condition |
+|------|-------|-----------|
+| High | `glm-5-turbo` | Complex tasks, off-peak |
+| Low | `glm-4.7` | Simple tasks |
+| Top | `glm-5.2` | Off-peak, complex tasks not resolved |
+
+**Peak cost control:** window `14:00–18:00 Asia/Shanghai` (~08:00–12:00 Italy summer).
+In peak, `glm-5.2`/`glm-5-turbo` cost 3× and are blocked for complex tasks →
+complex tasks fall back to Claude, simple ones use `glm-4.7`.
+Off-peak: full tiering, 1× promo pricing until 2026-09-30.
+
+**Fallback chain:** GLM → MiniMax → Claude.
+
+**Use when:** you want GLM as the primary backend.
+
+### 6. `glm-minimax` — GLM thinks, MiniMax acts
+
+- **GLM-5.2** generates the reasoning (THINK)
+- **MiniMax** executes (ACT, streaming)
+- For complex/agentic tasks: **GLM verifies** the result
+
+**Use when:** combining GLM's reasoning with MiniMax's speed and cost.
+
+### 7. `anthropic-glm` — Claude orchestrates, GLM executes, Claude verifies T2
+
+- **Claude** (user's model) orchestrates and classifies
+- **GLM** executes with tiering (`glm-5-turbo` → `glm-4.7` → `glm-5.2`)
+- **T2** (critical/complex) tasks: **Claude verifies** before delivery
+
+**Fallback chain:** GLM → MiniMax → Claude.
+
+**Use when:** Claude is the primary orchestrator but you want to leverage GLM for execution.
+
+---
+
+## Switching Modes
+
+### Dynamic port 8787
+
+Port `8787` reads `~/.claude/ai-router-mode` on every request.
+To change mode on the fly:
+
+```bash
+ai-mode minimax         # most convenient way
+ai-mode anthropic
+ai-mode mixed
+ai-mode inverse
+ai-mode glm
+ai-mode glm-minimax
+ai-mode anthropic-glm
+ai-mode status
+ai-mode log
+```
+
+Or manually:
 
 ```bash
 echo "minimax" > ~/.claude/ai-router-mode
 echo "anthropic" > ~/.claude/ai-router-mode
-echo "mixed" > ~/.claude/ai-router-mode
-echo "interactive" > ~/.claude/ai-router-mode
 ```
 
-**Propagazione**: richiede ~2 secondi (nessuna cache, aiohttp mantiene
-le connessioni esistenti).
+**Propagation:** takes ~2 seconds (aiohttp keeps persistent connections).
 
-**Script helper**: se disponibile, usa `ai-mode`:
+### In-Chat Commands
+
+During a conversation you can send commands **isolated to that chat** (not global).
+The proxy identifies the conversation from the Claude Code session fingerprint.
+
+```
+!router minimax        # switch to MiniMax for this chat only
+!router anthropic      # switch to pure Claude for this chat
+!router mixed          # fallback for this chat
+!router inverse        # inverse mode for this chat
+!router glm            # GLM for this chat
+!router glm-minimax
+!router anthropic-glm
+!router status         # show current mode and backend status
+!router reset          # restore global mode from ai-mode
+!router help           # inline help
+```
+
+The proxy also understands natural phrases like `"usa solo claude"` or
+`"passa a minimax"`.
+
+**Scope:** the command changes mode only for that conversation.
+**Important:** `!router` is handled by the proxy `:8787` — these messages travel
+through to the proxy, which intercepts them. I do not respond to them.
+
+### Fixed Ports
+
+To force a mode without modifying files or using in-chat commands,
+point directly to the fixed port:
 
 ```bash
-ai-mode minimax
-ai-mode anthropic
-ai-mode mixed
-ai-mode interactive
+# Pure Claude session
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8771
+
+# Pure MiniMax session
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8772
+
+# Mixed session
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8773
+
+# Inverse session
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8774
+
+# GLM sessions
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8775   # glm
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8776   # glm-minimax
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8777   # anthropic-glm
 ```
-
----
-
-## Comandi in-Chat
-
-Il proxy intercetta comandi nei messaggi chat. Sintassi:
-
-```
-!router <comando>
-```
-
-Oppure frasi naturali come "usa solo claude", "passa a minimax".
-
-| Comando | Effetto |
-|---|---|
-| `!router anthropic` | Forza modalità anthropic per questa chat |
-| `!router minimax` | Forza modalità minimax per questa chat |
-| `!router mixed` | Forza modalità mixed per questa chat |
-| `!router interactive` | Forza modalità interactive per questa chat |
-| `!router status` | Restituisce modalità corrente e stato backend |
-| `!router reset` | Ripristina modalità da file |
-| `!router help` | Mostra help inline |
-
-Il comando cambia la modalità solo per quella conversazione (identificata
-da fingerprint della chat).
 
 ---
 
 ## Health Check
 
-Ogni porta del proxy espone un endpoint pubblico (no auth):
-
 ```bash
+# Main endpoint
 curl http://127.0.0.1:8787/__router_health
-```
 
-Risposta esempio:
+# Example response:
+# {
+#   "service": "ai-router-proxy",
+#   "mode": "mixed",
+#   "port_role": "dynamic",
+#   "version": "...",
+#   "backends": { "anthropic": "up", "minimax": "up" }
+# }
 
-```json
-{
-  "service": "ai-router-proxy",
-  "mode": "mixed",
-  "port_role": "dynamic",
-  "backends": {
-    "anthropic": "up",
-    "minimax": "up"
-  }
-}
-```
+# Prometheus metrics
+curl http://127.0.0.1:8787/metrics
+curl http://127.0.0.1:8787/stats
 
-
-- `GET /health`
-- `GET /readyz`
-- `GET /livez`
-- `GET /stats`
-- `GET /metrics` (formato Prometheus)
-
----
-
-## Cose da NON Fare
-
-- **Non killare** i servizi senza piano di ripristino immediato
-- **Non modificare** manualmente i file unit systemd se non sai cosa
-  fai (sono protetti da hook)
-- **Non puntare** direttamente a `:8790` o `:8791` dalle app: passa
-  sempre per `:8787` (o `8771-8774` per modalità fissa)
-- **Non cambiare** modalità in produzione senza prima testare in
-  `mixed` (il fallback garantisce continuità)
-- **Non ignorare** allarmi del watchdog: indicano che qualcosa non
-  funziona come previsto
-
----
-
-## Hardening e Resilienza
-
-### Triple Difesa
-
-1. **systemd**: i servizi sono `enabled` con `Restart=always` e
-   `RestartSec=2`
-
-2. **Cron watchdog**: `ai-stack-guard.sh` controlla ogni 60 secondi
-   che le 5 porte siano in ascolto. Se una cade e systemd non la
-   riavvia entro 4 secondi, la rilancia via nohup come safety net
-
-3. **Hook PreToolUse**: blocca comandi pericolosi su tutti i servizi
-   (`kill`, `systemctl stop`, `systemctl disable`). Regola:
-   `AI-ROUTER-POLICY`
-
-### Servizi systemd
-
-I tre servizi sono installati in `~/.config/systemd/user/`:
-
-- `ai-router-proxy.service` (porte 8787, 8771-8774)
-
-Per riavviare manualmente:
-
-```bash
-systemctl --user restart ai-router-proxy.service
+# Kubernetes-compatible endpoints
+curl http://127.0.0.1:8787/health
+curl http://127.0.0.1:8787/readyz
+curl http://127.0.0.1:8787/livez
 ```
 
 ---
 
-## Esempi d'Uso
+## Usage Examples
 
-### 1. Claude Code di Base
-
-Lo script di setup imposta:
+### Claude Code — basic
 
 ```bash
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
 ```
 
-Claude Code userà automaticamente la modalità corrente del file
-`~/.claude/ai-router-mode`.
+Claude Code automatically uses the mode set by `ai-mode`.
 
-### 2. Sessioni Parallele con Backend Diversi
+### Parallel sessions with different backends
 
 ```bash
-# Terminale 1: VSCode, solo Claude
+# Terminal 1 (VSCode): always Claude
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8771
 
-# Terminale 2: shell veloce, solo MiniMax
+# Terminal 2: always MiniMax
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8772
+
+# Terminal 3: always GLM
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8775
 ```
 
-Nessuna interferenza: le due sessioni usano backend indipendenti.
+Sessions operate independently without interference.
 
-### 3. Failover Automatico
+### Automatic failover
 
 ```bash
-echo "mixed" > ~/.claude/ai-router-mode
+ai-mode mixed
 ```
 
-Se Claude è giù o la subscription è scaduta, il router passa
-automaticamente a MiniMax. Latenza: un retry, circa 1-2 secondi
-in più. Qualità: inferiore (modello M3 vs Claude).
+If Claude is down, the subscription expired, or the rate limit is hit,
+the router automatically switches to MiniMax.
 
-### 4. Risparmio Intelligente in Sviluppo
+### Smart saving with verification
 
 ```bash
-echo "interactive" > ~/.claude/ai-router-mode
+ai-mode inverse
 ```
 
-Durante il giorno:
-- Refactor meccanici, riassunti, traduzioni -> MiniMax (gratis)
-- Analisi sicurezza, refactor architetturale, audit -> Claude (verificato)
+MiniMax generates for all tasks. Critical tasks (T2) are verified by Claude Opus
+before delivery.
 
 ---
 
-## Troubleshooting Rapido
+## GLM — API Key
 
-| Sintomo | Causa Probabile | Fix |
-|---|---|---|
-| Tutte le risposte 401 | Chiave Anthropic scaduta/assente | Usa `mixed` mode o aggiorna secrets |
-| Modalità non cambia | Cache connessioni (~2s) | Aspetta 2 secondi, riprova |
-| `/readyz` rumoroso in log | Baco risolto il 2026-06-23 | Aggiorna ai-router-proxy |
-| Mixed non fa fallback | Status non in FALLBACK_STATUSES | Verifica codice (status 400/404 esclusi) |
-| Proxy non risponde | Servizio crashato | `systemctl --user restart ai-router-proxy.service` |
-
-### Debug Avanzato
+Modes `glm`, `glm-minimax`, `anthropic-glm` require a z.ai key.
 
 ```bash
-# Verifica stato servizi
+export GLM_API_KEY=...
+# or
+secrets.sh set glm.api_key <value>
+```
+
+Without the key, GLM modes return a 500 error with an explicit message.
+All other modes continue to work normally.
+
+---
+
+## Hardening and Resilience
+
+### Triple Defense
+
+1. **systemd** — `ai-router-proxy.service` with `Restart=always`,
+   `OOMScoreAdjust=-900`, linger enabled.
+
+2. **Cron watchdog** — `scripts/ai-stack-guard.sh` runs every 60 seconds to verify
+   all 8 ports are listening. If one is down and systemd hasn't restarted it within
+   4 seconds, it relaunches via nohup.
+
+3. **SessionStart hook** — verifies the stack is up when the IDE starts.
+
+Tested: `kill -9` on all services → full restore in <10 seconds.
+
+### What NOT to Do
+
+- **Don't kill** the service without an immediate recovery plan
+- **Don't edit** systemd unit files manually without understanding the consequences
+- **Don't point** directly to `:8790` or `:8791` — always use `:8787` or fixed ports
+- **Don't change** mode in production without first testing in `mixed`
+- **Don't ignore** watchdog alarms
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| All responses 401 | Anthropic key expired/absent | Use `mixed` or update secrets |
+| Mode doesn't change | Persistent connections (~2s) | Wait 2 seconds |
+| GLM mode returns 500 | `GLM_API_KEY` not set | `export GLM_API_KEY=...` |
+| Proxy doesn't respond | Service not started | `systemctl --user start ai-router-proxy.service` |
+| `mixed` doesn't fallback | Status is 400 or 404 (client errors, not backend) | Check the request |
+
+### Debug
+
+```bash
+# Service status
 systemctl --user status ai-router-proxy.service
 
-# Verifica porte in ascolto
-ss -tlnp | grep -E '878[0-9]|877[1-4]'
+# Listening ports
+ss -tlnp | grep -E '877[1-7]|8787'
 
-# Log recenti
+# Recent logs
 journalctl --user -u ai-router-proxy.service -n 50
 
-# Test diretto health endpoint
-curl -v http://127.0.0.1:8787/__router_health
+# Health endpoint
+curl http://127.0.0.1:8787/__router_health
 ```
 
 ---
 
-## Requisiti di Sistema
+## Environment Variables
 
-- Linux con systemd (user services)
-- Python 3.11+ con aiohttp
-- 3 file unit systemd in `~/.config/systemd/user/`
-- Script watchdog in PATH o in `~/bin/`
-
----
-
-## Variabili d'Ambiente
-
-### Proxy Router
-
-| Variabile | Default | Descrizione |
-|---|---|---|
-| `AIROUTER_PORT` | 8787 | Porta principale |
-| `AIROUTER_ANTHROPIC_UPSTREAM` | http://127.0.0.1:8791 | Backend Claude |
-| `AIROUTER_MINIMAX_UPSTREAM` | http://127.0.0.1:8790 | Backend MiniMax |
-| `AIROUTER_MINIMAX_MODEL` | MiniMax-M3 | Modello MiniMax |
-| `AIROUTER_VERIFY_MODEL` | claude-opus-4-8 | Modello verifica interactive |
-| `AIROUTER_MIXED_PRIMARY` | anthropic | Backend primario in mixed |
-
-
-| Variabile | Servizio | Descrizione |
-|---|---|---|
-
-### Client
-
-| Variabile | Valore Tipico |
-|---|---|
-| `ANTHROPIC_BASE_URL` | http://127.0.0.1:8787 |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AIROUTER_PORT` | `8787` | Base port |
+| `AIROUTER_ANTHROPIC_UPSTREAM` | `http://127.0.0.1:8791` | Anthropic backend |
+| `AIROUTER_MINIMAX_UPSTREAM` | `http://127.0.0.1:8790` | MiniMax backend |
+| `AIROUTER_MIXED_PRIMARY` | `anthropic` | Primary backend in mixed |
+| `AIROUTER_MINIMAX_MODEL` | `MiniMax-M3` | MiniMax model |
+| `AIROUTER_VERIFY_MODEL` | `claude-opus-4-8` | Verify model in inverse |
+| `GLM_API_KEY` | — | z.ai key for GLM modes |
 
 ---
 
-## File Rilevanti
+## Relevant Files
 
-- `src/ai-router-proxy.py` - Proxy principale
-- `docs/MANUAL.en.md` - Questo documento
-- `scripts/ai-mode` - Script helper cambio modalità
-- `scripts/ai-stack-guard.sh` - Watchdog
+```
+src/
+  ai-router-proxy.py     # Main proxy
+  glm_backend.py         # GLM backend (defensive import)
+  peak_scheduler.py      # Peak scheduler for GLM
+
+scripts/
+  ai-mode                # CLI helper for mode switching
+  ai-stack-guard.sh      # Cron watchdog
+
+sviluppo/
+  tests/
+    test_glm_modes.sh    # Isolation test for GLM modes
+```
 
 ---
 
-## Supporto
+## Support
 
-Per problemi non risolti da questa guida, consulta i log dei servizi
-con `journalctl --user` o apri una issue con:
+When reporting issues, include:
 
-- Output di `ss -tlnp | grep -E '878[0-9]|877[1-4]'`
-- Output di `curl http://127.0.0.1:8787/__router_health`
-- Ultime 50 righe di journalctl per il servizio coinvolto
+1. Output of `systemctl --user status ai-router-proxy.service`
+2. Output of `curl http://127.0.0.1:8787/__router_health`
+3. Last 50 lines of `journalctl --user -u ai-router-proxy.service`
+4. Contents of `~/.claude/ai-router-mode`
+5. Relevant environment variables (exclude API keys)

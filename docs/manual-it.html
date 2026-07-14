@@ -1,10 +1,4 @@
-<!--
-  AI Router Proxy - Guida Operativa Completa (IT) v1.0
-  Generato automaticamente. Self-contained: no CDN, no dipendenze esterne.
-  Per la versione markdown: docs/MANUAL.md
-  Per la versione inglese: docs/manual-en.html
-  Per cambiare lingua: docs/index.html
--->
+
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -547,16 +541,37 @@
     <aside class="sidebar" id="sidebar" aria-label="Indice dei contenuti">
       <input type="text" class="sidebar-search" placeholder="Cerca sezione..." id="searchInput" oninput="filterTOC()">
       <nav>
-        <ul class="toc" id="toc">
-          <li><a href="#panoramica">1. Panoramica</a></li>
-          <li><a href="#architettura">2. Architettura di Rete</a></li>
-          <li><a href="#modalita-routing">3. Le Quattro Modalità di Routing</a>
-            <ul class="toc-sub">
-              <li><a href="#modalita-anthropic">3.1 Anthropic (Pura)</a></li>
-              <li><a href="#modalita-minimax">3.2 MiniMax (Pura)</a></li>
-              <li><a href="#modalita-mixed">3.3 Mixed (Fallback Bidirezionale)</a></li>
-              <li><a href="#modalita-interactive">3.4 Interactive (Intelligente)</a></li>
-            </ul>
+              <h3>Indice dei contenuti</h3>
+      <ul class="toc" id="toc">
+<li><a href="#panoramica">Panoramica</a></li>
+<li><a href="#le-sette-modalità">Le Sette Modalità</a></li>
+      <li class="toc-sub-item"><a href="#anthropic-claude-puro">1. anthropic — Claude puro</a></li>
+      <li class="toc-sub-item"><a href="#minimax-minimax-puro">2. minimax — MiniMax puro</a></li>
+      <li class="toc-sub-item"><a href="#mixed-fallback-bidirezionale">3. mixed — Fallback bidirezionale</a></li>
+      <li class="toc-sub-item"><a href="#inverse-minimax-genera-claude-verifica">4. inverse — MiniMax genera, Claude verifica</a></li>
+      <li class="toc-sub-item"><a href="#glm-glmz.ai-puro-con-tiering">5. glm — GLM/z.ai puro con tiering</a></li>
+      <li class="toc-sub-item"><a href="#glm-minimax-glm-pensa-minimax-esegue">6. glm-minimax — GLM pensa, MiniMax esegue</a></li>
+      <li class="toc-sub-item"><a href="#anthropic-glm-claude-orchestra-glm-esegue-claude-verifica-t2">7. anthropic-glm — Claude orchestra, GLM esegue, Claude verifica T2</a></li>
+<li><a href="#cambiare-modalità">Cambiare Modalità</a></li>
+      <li class="toc-sub-item"><a href="#porta-dinamica-8787">Porta dinamica 8787</a></li>
+      <li class="toc-sub-item"><a href="#comandi-in-chat">Comandi In-Chat</a></li>
+      <li class="toc-sub-item"><a href="#porte-fisse">Porte fisse</a></li>
+<li><a href="#health-check">Health Check</a></li>
+<li><a href="#esempi-duso">Esempi d’Uso</a></li>
+      <li class="toc-sub-item"><a href="#claude-code-base">Claude Code — base</a></li>
+      <li class="toc-sub-item"><a href="#sessioni-parallele-con-backend-diversi">Sessioni parallele con backend diversi</a></li>
+      <li class="toc-sub-item"><a href="#failover-automatico">Failover automatico</a></li>
+      <li class="toc-sub-item"><a href="#risparmio-intelligente-con-verifica">Risparmio intelligente con verifica</a></li>
+<li><a href="#glm-chiave-api">GLM — Chiave API</a></li>
+<li><a href="#hardening-e-resilienza">Hardening e Resilienza</a></li>
+      <li class="toc-sub-item"><a href="#tripla-difesa">Tripla difesa</a></li>
+      <li class="toc-sub-item"><a href="#cosa-non-fare">Cosa NON fare</a></li>
+<li><a href="#troubleshooting">Troubleshooting</a></li>
+      <li class="toc-sub-item"><a href="#debug">Debug</a></li>
+<li><a href="#variabili-dambiente">Variabili d’Ambiente</a></li>
+<li><a href="#file-rilevanti">File rilevanti</a></li>
+<li><a href="#supporto">Supporto</a></li>
+      </ul>
           </li>
           <li><a href="#cambiare-modalita">4. Cambiare Modalità Runtime</a>
             <ul class="toc-sub">
@@ -585,378 +600,370 @@
     
     <main class="main">
       <article class="content">
-        <h1 id="titolo">AI Router Stack<span class="anchor-link" onclick="copyAnchor(this)">#</span></h1>
-        <p>Guida Operativa Completa per la configurazione e l'uso del sistema di routing AI multi-provider.</p>
-        
-        <h2 id="panoramica">1. Panoramica<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
-        <p>AI Router Stack è un sistema di orchestrazione che permette di:</p>
-        <ul>
-          <li><strong>Unified Endpoint</strong>: Un solo endpoint per tutti i provider AI (Anthropic Claude, MiniMax, ecc.)</li>
-          <li><strong>Smart Routing</strong>: Instradamento automatico basato su costi, latenza, disponibilita</li>
-          <li><strong>Failover Intelligente</strong>: Fallback automatico in caso di errori o sovraccarichi</li>
-          <li><strong>Risparmio Economico</strong>: Ottimizzazione dei costi tramite routing intelligente</li>
-        </ul>
-        
-        <div class="info-box">
-          <strong>Schema Base</strong>
-          Il router funziona come proxy trasparente: le richieste arrivano sulla porta 8787 e vengono instradate al provider piu appropriato in base alla modalita configurata.
-        </div>
-        
-        <h2 id="architettura">2. Architettura di Rete<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
-        
-<pre class="diagram code-block">
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           AI ROUTER STACK                                    │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                         PORTA 8787 (Unified)                         │    │
-│  │              ┌──────────────────────────────┐                       │    │
-│  │              │     Smart Router Engine      │                       │    │
-│  │              │  ┌────────────────────────┐  │                       │    │
-│  │              │  │  Modalita:             │  │                       │    │
-│  │              │  │  - Anthropic (Pura)    │  │                       │    │
-│  │              │  │  - MiniMax (Pura)      │  │                       │    │
-│  │              │  │  - Mixed (Fallback)    │  │                       │    │
-│  │              │  │  - Interactive         │  │                       │    │
-│  │              │  └────────────────────────┘  │                       │    │
-│  └──────────────┼──────────────────────────────┼───────────────────────┘    │
-│                 │                              │                              │
-│     ┌───────────┴───────────┐                  │                              │
-│     │                       │                  │                              │
-│     ▼                       ▼                  │                              │
-│ ┌───────────┐         ┌───────────┐           │                              │
-│ │  PORTA    │         │  PORTA    │           │                              │
-│ │  8771     │         │  8772     │           │                              │
-│ │           │         │           │           │                              │
-│ │ Anthropic │         │ MiniMax   │           │                              │
-│ │ Direct    │         │ Direct    │           │                              │
-│ └───────────┘         └───────────┘           │                              │
-│                                               │                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌─────────────────┐     ┌─────────────────┐
-│  api.anthropic  │     │  api.minimax.io │
-│  .com           │     │                 │
-│                 │     │                 │
-│  Claude Models  │     │  MiniMax Models │
-└─────────────────┘     └─────────────────┘
-</pre>
-        
-        <h3>Componenti</h3>
-        <table>
-          <thead>
-            <tr><th>Componente</th><th>Porta</th><th>Descrizione</th></tr>
-          </thead>
-          <tbody>
-            <tr><td>Unified Proxy</td><td>8787</td><td>Endpoint principale con routing intelligente</td></tr>
-            <tr><td>Anthropic Direct</td><td>8771</td><td>Accesso diretto solo Anthropic</td></tr>
-            <tr><td>MiniMax Direct</td><td>8772</td><td>Accesso diretto solo MiniMax</td></tr>
-            <tr><td>Health Check</td><td>8788</td><td>Endpoint per monitoraggio stato</td></tr>
-          </tbody>
-        </table>
-        
-        <h2 id="modalita-routing">3. Le Quattro Modalita di Routing<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
-        
-        <h3 id="modalita-anthropic">3.1 Anthropic (Pura)<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
-        <p>Tutto il traffico viene instradato esclusivamente verso Anthropic Claude.</p>
-        <pre class="code-block bash"><code>ANTHROPIC_API_KEY=sk-ant-...
-ROUTING_MODE=anthropic</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
-        <p><strong>Caso d'uso:</strong> quando hai bisogno solo di Claude per ragioni di compatibilita o preferenza.</p>
-        
-        <h3 id="modalita-minimax">3.2 MiniMax (Pura)<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
-        <p>Tutto il traffico viene instradato esclusivamente verso MiniMax.</p>
-        <pre class="code-block bash"><code>MINIMAX_API_KEY=eyJhbG...
-ROUTING_MODE=minimax</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
-        <p><strong>Caso d'uso:</strong> ottimizzazione costi o test specifici su MiniMax.</p>
-        
-        <h3 id="modalita-mixed">3.3 Mixed (Fallback Bidirezionale)<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
-        <p>Routing con fallback automatico bidirezionale. Se un provider fallisce, l'altro subentra.</p>
-        <pre class="code-block bash"><code>ANTHROPIC_API_KEY=sk-ant-...
-MINIMAX_API_KEY=eyJhbG...
-ROUTING_MODE=mixed
-PRIMARY_PROVIDER=anthropic
-FALLBACK_ENABLED=true</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
-        
-        <h4>Logica di Failover</h4>
-        <pre class="diagram"><code>Richiesta → Provider Primario
-                │
-                ├─[OK]→ Risposta
-                │
-                └─[ERRORE]→ Fallback Provider
-                              │
-                              ├─[OK]→ Risposta
-                              │
-                              └─[ERRORE]→ Errore "Tutti i provider non disponibili"</code></pre>
-        
-        <h3 id="modalita-interactive">3.4 Interactive (Intelligente)<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
-        <p>Routing basato su analisi del contenuto della richiesta e ottimizzazione costi.</p>
-        <pre class="code-block bash"><code>ANTHROPIC_API_KEY=sk-ant-...
-MINIMAX_API_KEY=eyJhbG...
-ROUTING_MODE=interactive
-COST_OPTIMIZATION=true
-LATENCY_THRESHOLD_MS=2000</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
-        <p><strong>Criteri di selezione:</strong></p>
-        <ul>
-          <li>Complessita della richiesta</li>
-          <li>Costo per token del provider</li>
-          <li>Latenza attuale del provider</li>
-          <li>Stato di salute del provider</li>
-        </ul>
-        
-        <h2 id="cambiare-modalita">4. Cambiare Modalita Runtime<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
-        
-        <h3 id="porta-dinamica">4.1 Porta Dinamica (8787)<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
-        <p>La porta 8787 accetta comandi speciali per cambiare modalita al volo.</p>
-        <pre class="code-block bash"><code># Cambia modalita via curl
-curl -X POST http://localhost:8787/mode \
-  -H "Content-Type: application/json" \
-  -d '{"mode": "minimax"}'
+<h1 id="ai-router-proxy-guida-operativa-completa">AI Router Proxy — Guida Operativa Completa</h1>
+<blockquote>
+<p>Versione documento: 2026-07-14 · Progetto: <a href="https://github.com/eroslifestyle/ai-router-switch">ai-router-switch</a></p>
+</blockquote>
+<hr />
+<h2 id="panoramica">Panoramica</h2>
+<p>AI Router Proxy è un proxy <strong>self-hosted</strong> che si pone davanti a Claude Code (e qualunque client Anthropic-format) e instrada il traffico verso <strong>Claude</strong>, <strong>MiniMax</strong>, o <strong>GLM/z.ai</strong> scegliendo il backend a seconda della modalità attiva.</p>
+<p>Il router è un <strong>singolo processo Python/aiohttp</strong> in ascolto su 8 porte:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Porta</th>
+<th>Ruolo</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>8787</code></td>
+<td>Dinamica — segue <code>ai-mode</code></td>
+</tr>
+<tr class="even">
+<td><code>8771</code></td>
+<td>Forzata: <code>anthropic</code></td>
+</tr>
+<tr class="odd">
+<td><code>8772</code></td>
+<td>Forzata: <code>minimax</code></td>
+</tr>
+<tr class="even">
+<td><code>8773</code></td>
+<td>Forzata: <code>mixed</code></td>
+</tr>
+<tr class="odd">
+<td><code>8774</code></td>
+<td>Forzata: <code>inverse</code></td>
+</tr>
+<tr class="even">
+<td><code>8775</code></td>
+<td>Forzata: <code>glm</code></td>
+</tr>
+<tr class="odd">
+<td><code>8776</code></td>
+<td>Forzata: <code>glm-minimax</code></td>
+</tr>
+<tr class="even">
+<td><code>8777</code></td>
+<td>Forzata: <code>anthropic-glm</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Regola aurea:</strong> il router seleziona il backend. Non tocca impostazioni, skills, agenti, MCP, tools o system prompt del modello.</p>
+<hr />
+<h2 id="le-sette-modalità">Le Sette Modalità</h2>
+<h3 id="anthropic-claude-puro">1. <code>anthropic</code> — Claude puro</h3>
+<p>Tutto verso <code>api.anthropic.com</code>. Nessun fallback. Se il backend risponde con errore, l’errore viene restituito al client senza intervento.</p>
+<p><strong>Uso:</strong> quando serve Claude e basta.</p>
+<h3 id="minimax-minimax-puro">2. <code>minimax</code> — MiniMax puro</h3>
+<p>Tutto verso <code>api.minimaxi.chat/anthropic</code> (endpoint <strong>Anthropic-compat</strong> di MiniMax). Nessun fallback. MiniMax-M3 orchestra, M2.7 esegue.</p>
+<p><strong>Uso:</strong> task semplici, budget limitato, nessun limite settimanale.</p>
+<h3 id="mixed-fallback-bidirezionale">3. <code>mixed</code> — Fallback bidirezionale</h3>
+<p>Tenta il backend primario (<code>ai-mode</code> o env <code>AIROUTER_MIXED_PRIMARY</code>, default: <code>anthropic</code>). Se la risposta ha status in <code>FALLBACK_STATUSES</code>, ritenta automaticamente sul backend secondario.</p>
+<p><strong>Status che triggerrano il fallback su Anthropic→MiniMax:</strong> <code>401, 403, 408, 409, 413, 429, 500, 502, 503, 504, 529</code></p>
+<p><strong>Status che triggerrano il fallback su MiniMax→Anthropic:</strong> <code>401, 403, 408, 409, 413, 500, 502, 503, 504, 529</code> <em>(429 è escluso perché il rate limit è gestito internamente da MiniMax)</em></p>
+<p><strong>Nota:</strong> status <code>400</code> e <code>404</code> non causano fallback (errori del client, non del backend).</p>
+<p><strong>Uso:</strong> produzione, continuità di servizio anche se una subscription scade.</p>
+<h3 id="inverse-minimax-genera-claude-verifica">4. <code>inverse</code> — MiniMax genera, Claude verifica</h3>
+<p>Generazione sempre da MiniMax. Per task <strong>T2</strong> (classificati come critici/complessi) viene eseguita una verifica aggiuntiva da Claude Opus prima di restituire la risposta.</p>
+<p><strong>Classificazione T2</strong> (euristica sul system prompt): parole chiave come <code>"critically"</code>, <code>"security"</code>, <code>"audit"</code>, <code>"vulnerability"</code>, <code>"analyze"</code>, <code>"explain in detail"</code>, <code>"find issues"</code>, <code>"architect"</code>, <code>"review"</code>.</p>
+<p>Se Claude Opus non è disponibile, la risposta MiniMax viene comunque restituita con flag <code>"unverified"</code>.</p>
+<p><strong>Uso:</strong> risparmio intelligente con verifica su task critici.</p>
+<h3 id="glm-glmz.ai-puro-con-tiering">5. <code>glm</code> — GLM/z.ai puro con tiering</h3>
+<p>GLM-5.2 classifica la complessità del task → instrada al tier più appropriato:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Tier</th>
+<th>Modello</th>
+<th>Condizione</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Alto</td>
+<td><code>glm-5-turbo</code></td>
+<td>Task complessi, peak-off</td>
+</tr>
+<tr class="even">
+<td>Basso</td>
+<td><code>glm-4.7</code></td>
+<td>Task semplici</td>
+</tr>
+<tr class="odd">
+<td>Top</td>
+<td><code>glm-5.2</code></td>
+<td>Peak-off, task complessi non risolti</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Cost control peak:</strong> fascia <code>14:00–18:00 Asia/Shanghai</code> (~08:00–12:00 Italia estate). In peak <code>glm-5.2</code>/<code>glm-5-turbo</code> costano 3× e sono bloccati → task complessi ricadono su Claude, task semplici usano <code>glm-4.7</code>. Off-peak: tiering completo, prezzo 1× promo fino al 2026-09-30.</p>
+<p><strong>Fallback chain:</strong> GLM → MiniMax → Claude.</p>
+<p><strong>Uso:</strong> quando si vuole usare GLM come backend primario.</p>
+<h3 id="glm-minimax-glm-pensa-minimax-esegue">6. <code>glm-minimax</code> — GLM pensa, MiniMax esegue</h3>
+<ul>
+<li><strong>GLM-5.2</strong> genera il ragionamento (THINK)</li>
+<li><strong>MiniMax</strong> esegue (ACT, streaming)</li>
+<li>Per task complessi/agentici: <strong>GLM verifica</strong> il risultato</li>
+</ul>
+<p><strong>Uso:</strong> combinazione del reasoning GLM con la velocità/economicità di MiniMax.</p>
+<h3 id="anthropic-glm-claude-orchestra-glm-esegue-claude-verifica-t2">7. <code>anthropic-glm</code> — Claude orchestra, GLM esegue, Claude verifica T2</h3>
+<ul>
+<li><strong>Claude</strong> (model dell’utente) orchestra e classifica</li>
+<li><strong>GLM</strong> esegue con tiering (<code>glm-5-turbo</code> → <code>glm-4.7</code> → <code>glm-5.2</code>)</li>
+<li>Task <strong>T2</strong> (critici/complessi): <strong>Claude verifica</strong> prima della consegna</li>
+</ul>
+<p><strong>Fallback chain:</strong> GLM → MiniMax → Claude.</p>
+<p><strong>Uso:</strong> quando Claude è l’orchestratore primario ma si vuole sfruttare GLM per l’esecuzione.</p>
+<hr />
+<h2 id="cambiare-modalità">Cambiare Modalità</h2>
+<h3 id="porta-dinamica-8787">Porta dinamica 8787</h3>
+<p>La porta <code>8787</code> legge il file <code>~/.claude/ai-router-mode</code> ad ogni richiesta. Per cambiare modalità a caldo:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">ai-mode</span> minimax        <span class="co"># modo più comodo</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="ex">ai-mode</span> anthropic</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="ex">ai-mode</span> mixed</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="ex">ai-mode</span> inverse</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="ex">ai-mode</span> glm</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="ex">ai-mode</span> glm-minimax</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="ex">ai-mode</span> anthropic-glm</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="ex">ai-mode</span> status</span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="ex">ai-mode</span> log</span></code></pre></div>
+<p>Oppure manualmente:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;minimax&quot;</span> <span class="op">&gt;</span> ~/.claude/ai-router-mode</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;anthropic&quot;</span> <span class="op">&gt;</span> ~/.claude/ai-router-mode</span></code></pre></div>
+<p><strong>Propagazione:</strong> richiede ~2 secondi (aiohttp mantiene connessioni persistenti).</p>
+<h3 id="comandi-in-chat">Comandi In-Chat</h3>
+<p>Durante una conversazione è possibile inviare comandi <strong>isolati per chat</strong> (non globali). Il proxy riconosce il fingerprint della conversazione dalla sessione Claude Code.</p>
+<pre><code>!router minimax        # passa a MiniMax per questa chat
+!router anthropic      # passa a Claude puro per questa chat
+!router mixed          # fallback per questa chat
+!router inverse        # modalità inverse per questa chat
+!router glm            # GLM per questa chat
+!router glm-minimax
+!router anthropic-glm
+!router status         # mostra modalità corrente e stato backend
+!router reset          # ripristina modalità globale da ai-mode
+!router help           # help inline</code></pre>
+<p>Il proxy riconosce anche frasi naturali come <code>"usa solo claude"</code> o <code>"torna a minimax"</code>.</p>
+<p><strong>Scope:</strong> il comando cambia la modalità solo per quella conversazione. <strong>Importante:</strong> <code>!router</code> è gestito dal proxy <code>:8787</code> — non devo rispondere a questi messaggi, viaggiano fino al proxy che li intercetta.</p>
+<h3 id="porte-fisse">Porte fisse</h3>
+<p>Per forzare una modalità senza modificare file o usare comandi in-chat, puntare direttamente alla porta fissa:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Sessione Claude pura</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">ANTHROPIC_BASE_URL</span><span class="op">=</span>http://127.0.0.1:8771</span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Sessione MiniMax pura</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">ANTHROPIC_BASE_URL</span><span class="op">=</span>http://127.0.0.1:8772</span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Sessione con fallback</span></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">ANTHROPIC_BASE_URL</span><span class="op">=</span>http://127.0.0.1:8773</span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a><span class="co"># Sessione inverse</span></span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">ANTHROPIC_BASE_URL</span><span class="op">=</span>http://127.0.0.1:8774</span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a><span class="co"># Sessioni GLM</span></span>
+<span id="cb4-14"><a href="#cb4-14" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">ANTHROPIC_BASE_URL</span><span class="op">=</span>http://127.0.0.1:8775   <span class="co"># glm</span></span>
+<span id="cb4-15"><a href="#cb4-15" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">ANTHROPIC_BASE_URL</span><span class="op">=</span>http://127.0.0.1:8776   <span class="co"># glm-minimax</span></span>
+<span id="cb4-16"><a href="#cb4-16" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">ANTHROPIC_BASE_URL</span><span class="op">=</span>http://127.0.0.1:8777   <span class="co"># anthropic-glm</span></span></code></pre></div>
+<hr />
+<h2 id="health-check">Health Check</h2>
+<div class="sourceCode" id="cb5"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Endpoint principale</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> http://127.0.0.1:8787/__router_health</span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Risposta esempio:</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a><span class="co"># {</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a><span class="co">#   &quot;service&quot;: &quot;ai-router-proxy&quot;,</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a><span class="co">#   &quot;mode&quot;: &quot;mixed&quot;,</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a><span class="co">#   &quot;port_role&quot;: &quot;dynamic&quot;,</span></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a><span class="co">#   &quot;version&quot;: &quot;...&quot;,</span></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a><span class="co">#   &quot;backends&quot;: { &quot;anthropic&quot;: &quot;up&quot;, &quot;minimax&quot;: &quot;up&quot; }</span></span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a><span class="co"># }</span></span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a><span class="co"># Metriche Prometheus</span></span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> http://127.0.0.1:8787/metrics</span>
+<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> http://127.0.0.1:8787/stats</span>
+<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a><span class="co"># Endpoints Kubernetes-compatibili</span></span>
+<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> http://127.0.0.1:8787/health</span>
+<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> http://127.0.0.1:8787/readyz</span>
+<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> http://127.0.0.1:8787/livez</span></code></pre></div>
+<hr />
+<h2 id="esempi-duso">Esempi d’Uso</h2>
+<h3 id="claude-code-base">Claude Code — base</h3>
+<div class="sourceCode" id="cb6"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">ANTHROPIC_BASE_URL</span><span class="op">=</span>http://127.0.0.1:8787</span></code></pre></div>
+<p>Claude Code userà automaticamente la modalità impostata da <code>ai-mode</code>.</p>
+<h3 id="sessioni-parallele-con-backend-diversi">Sessioni parallele con backend diversi</h3>
+<div class="sourceCode" id="cb7"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Terminale 1 (VSCode): sempre Claude</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">ANTHROPIC_BASE_URL</span><span class="op">=</span>http://127.0.0.1:8771</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Terminale 2: sempre MiniMax</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">ANTHROPIC_BASE_URL</span><span class="op">=</span>http://127.0.0.1:8772</span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Terminale 3: sempre GLM</span></span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">ANTHROPIC_BASE_URL</span><span class="op">=</span>http://127.0.0.1:8775</span></code></pre></div>
+<p>Le sessioni operano indipendentemente senza interferenze.</p>
+<h3 id="failover-automatico">Failover automatico</h3>
+<div class="sourceCode" id="cb8"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">ai-mode</span> mixed</span></code></pre></div>
+<p>Se Claude è down, la subscription è scaduta, o il rate limit è raggiunto, il router passa automaticamente a MiniMax.</p>
+<h3 id="risparmio-intelligente-con-verifica">Risparmio intelligente con verifica</h3>
+<div class="sourceCode" id="cb9"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">ai-mode</span> inverse</span></code></pre></div>
+<p>MiniMax genera per tutti i task. Task critici (T2) vengono verificati da Claude Opus prima della consegna.</p>
+<hr />
+<h2 id="glm-chiave-api">GLM — Chiave API</h2>
+<p>Le modalità <code>glm</code>, <code>glm-minimax</code>, <code>anthropic-glm</code> richiedono una chiave z.ai.</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">GLM_API_KEY</span><span class="op">=</span>...</span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a><span class="co"># oppure</span></span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a><span class="ex">secrets.sh</span> set glm.api_key <span class="op">&lt;</span>valore<span class="op">&gt;</span></span></code></pre></div>
+<p>Senza la chiave, le modalità GLM ritornano errore 500 con messaggio esplicito. Le altre modalità continuano a funzionare normalmente.</p>
+<hr />
+<h2 id="hardening-e-resilienza">Hardening e Resilienza</h2>
+<h3 id="tripla-difesa">Tripla difesa</h3>
+<ol type="1">
+<li><p><strong>systemd</strong> — servizio <code>ai-router-proxy.service</code> con <code>Restart=always</code>, <code>OOMScoreAdjust=-900</code>, linger abilitato.</p></li>
+<li><p><strong>Cron watchdog</strong> — <code>scripts/ai-stack-guard.sh</code> eseguito ogni 60 secondi verifica che tutte le 8 porte siano in ascolto. Se una cade e systemd non la riavvia entro 4 secondi, la rilancia via nohup.</p></li>
+<li><p><strong>SessionStart hook</strong> — verifica che lo stack sia attivo all’avvio dell’IDE.</p></li>
+</ol>
+<p>Testato: <code>kill -9</code> su tutti i servizi → ripristino completo in &lt;10 secondi.</p>
+<h3 id="cosa-non-fare">Cosa NON fare</h3>
+<ul>
+<li><strong>Non killare</strong> il servizio senza piano di ripristino immediato</li>
+<li><strong>Non modificare</strong> manualmente i file unit systemd senza capire le conseguenze</li>
+<li><strong>Non puntare</strong> direttamente a <code>:8790</code> o <code>:8791</code> — usare sempre <code>:8787</code> o le porte fisse</li>
+<li><strong>Non cambiare</strong> modalità in produzione senza prima testare in <code>mixed</code></li>
+<li><strong>Non ignorare</strong> gli allarmi del watchdog</li>
+</ul>
+<hr />
+<h2 id="troubleshooting">Troubleshooting</h2>
+<table>
+<colgroup>
+<col style="width: 42%" />
+<col style="width: 33%" />
+<col style="width: 23%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Sintomo</th>
+<th>Causa</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Tutte le risposte 401</td>
+<td>Chiave Anthropic scaduta/assente</td>
+<td>Usa <code>mixed</code> o aggiorna secrets</td>
+</tr>
+<tr class="even">
+<td>Modalità non cambia</td>
+<td>Connessioni persistenti (~2s)</td>
+<td>Aspetta 2 secondi</td>
+</tr>
+<tr class="odd">
+<td>GLM mode ritorna 500</td>
+<td><code>GLM_API_KEY</code> non impostata</td>
+<td><code>export GLM_API_KEY=...</code></td>
+</tr>
+<tr class="even">
+<td>Proxy non risponde</td>
+<td>Servizio non avviato</td>
+<td><code>systemctl --user start ai-router-proxy.service</code></td>
+</tr>
+<tr class="odd">
+<td><code>mixed</code> non fa fallback</td>
+<td>Status è 400 o 404 (errori client, non backend)</td>
+<td>Verifica la richiesta</td>
+</tr>
+</tbody>
+</table>
+<h3 id="debug">Debug</h3>
+<div class="sourceCode" id="cb11"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Status servizio</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a><span class="ex">systemctl</span> <span class="at">--user</span> status ai-router-proxy.service</span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Porte in ascolto</span></span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a><span class="ex">ss</span> <span class="at">-tlnp</span> <span class="kw">|</span> <span class="fu">grep</span> <span class="at">-E</span> <span class="st">&#39;877[1-7]|8787&#39;</span></span>
+<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Log recenti</span></span>
+<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a><span class="ex">journalctl</span> <span class="at">--user</span> <span class="at">-u</span> ai-router-proxy.service <span class="at">-n</span> 50</span>
+<span id="cb11-9"><a href="#cb11-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-10"><a href="#cb11-10" aria-hidden="true" tabindex="-1"></a><span class="co"># Health endpoint</span></span>
+<span id="cb11-11"><a href="#cb11-11" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> http://127.0.0.1:8787/__router_health</span></code></pre></div>
+<hr />
+<h2 id="variabili-dambiente">Variabili d’Ambiente</h2>
+<table>
+<colgroup>
+<col style="width: 34%" />
+<col style="width: 28%" />
+<col style="width: 37%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Variabile</th>
+<th>Default</th>
+<th>Descrizione</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>AIROUTER_PORT</code></td>
+<td><code>8787</code></td>
+<td>Porta base</td>
+</tr>
+<tr class="even">
+<td><code>AIROUTER_ANTHROPIC_UPSTREAM</code></td>
+<td><code>http://127.0.0.1:8791</code></td>
+<td>Backend Anthropic</td>
+</tr>
+<tr class="odd">
+<td><code>AIROUTER_MINIMAX_UPSTREAM</code></td>
+<td><code>http://127.0.0.1:8790</code></td>
+<td>Backend MiniMax</td>
+</tr>
+<tr class="even">
+<td><code>AIROUTER_MIXED_PRIMARY</code></td>
+<td><code>anthropic</code></td>
+<td>Backend primario in mixed</td>
+</tr>
+<tr class="odd">
+<td><code>AIROUTER_MINIMAX_MODEL</code></td>
+<td><code>MiniMax-M3</code></td>
+<td>Modello MiniMax</td>
+</tr>
+<tr class="even">
+<td><code>AIROUTER_VERIFY_MODEL</code></td>
+<td><code>claude-opus-4-8</code></td>
+<td>Modello verifica inverse</td>
+</tr>
+<tr class="odd">
+<td><code>GLM_API_KEY</code></td>
+<td>—</td>
+<td>Chiave z.ai per modalità GLM</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="file-rilevanti">File rilevanti</h2>
+<pre><code>src/
+  ai-router-proxy.py     # Proxy principale
+  glm_backend.py         # Backend GLM (importato difensivamente)
+  peak_scheduler.py      # Scheduler peak per GLM
 
-# Modalita disponibili: anthropic, minimax, mixed, interactive</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
-        
-        <div class="warn-box">
-          <strong>Cambiamenti Temporanei</strong>
-          I cambiamenti via API sono temporanei e si resettano al riavvio del servizio. Per persistenza, usa le variabili d'ambiente.
-        </div>
-        
-        <h3 id="porte-fisse">4.2 Porte Fisse (8771-8774)<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
-        <table>
-          <thead>
-            <tr><th>Porta</th><th>Provider</th><th>Modalita</th><th>Uso</th></tr>
-          </thead>
-          <tbody>
-            <tr><td>8771</td><td>Anthropic</td><td>Diretta</td><td>Accesso esclusivo Anthropic</td></tr>
-            <tr><td>8772</td><td>MiniMax</td><td>Diretta</td><td>Accesso esclusivo MiniMax</td></tr>
-            <tr><td>8773</td><td>Mixed</td><td>Fallback</td><td>Primary Anthropic, Fallback MiniMax</td></tr>
-            <tr><td>8774</td><td>Interactive</td><td>Smart</td><td>Routing intelligente</td></tr>
-          </tbody>
-        </table>
-        
-        <h2 id="comandi-chat">5. Comandi In-Chat<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
-        <p>Puoi forzare il provider direttamente nei messaggi chat con comandi speciali.</p>
-        <pre class="code-block output"><code># Claude Code: forza MiniMax
-@minimax Scrivi un hello world in Python
+scripts/
+  ai-mode                # Helper CLI per cambio modalità
+  ai-stack-guard.sh      # Watchdog cron
 
-# Forza Anthropic (default)
-Scrivi un hello world in Python
-
-# Forza fallback
-@fallback:minimax Analizza questo codice</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
-        
-        <div class="info-box">
-          <strong>Sintassi Comandi</strong>
-          <code>@provider</code> - forza provider specifico<br>
-          <code>@fallback:provider</code> - usa come fallback dopo il primary
-        </div>
-        
-        <h2 id="health-check">6. Health Check<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
-        <pre class="code-block bash"><code># Check completo
-curl http://localhost:8788/health
-
-# Risposta JSON
-{
-  "status": "ok",
-  "providers": {
-    "anthropic": {
-      "status": "healthy",
-      "latency_ms": 150,
-      "quota_remaining": 45000
-    },
-    "minimax": {
-      "status": "healthy",
-      "latency_ms": 80,
-      "quota_remaining": 120000
-    }
-  },
-  "current_mode": "interactive",
-  "uptime_seconds": 86400
-}</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
-        
-        <h3>Endpoint Specifici</h3>
-        <pre class="code-block bash"><code># Solo Anthropic
-curl http://localhost:8788/health/anthropic
-
-# Solo MiniMax
-curl http://localhost:8788/health/minimax
-
-# Latenza
-curl http://localhost:8788/health/latency</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
-        
-        <h2 id="esempi">7. Esempi d'Uso<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
-        
-        <h3 id="esempio-base">7.1 Claude Code di Base<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
-        <p>Configurazione semplice per iniziare subito con routing automatico.</p>
-        <pre class="code-block bash"><code># .env
-ANTHROPIC_API_KEY=sk-ant-api03-...
-MINIMAX_API_KEY=eyJhbGc...
-ROUTING_MODE=interactive
-
-# Avvio
-docker-compose up -d
-
-# Claude Code
-claude-code --provider router</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
-        
-        <h3 id="esempio-parallelo">7.2 Sessioni Parallele con Backend Diversi<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
-        <pre class="code-block bash"><code># Terminale 1: Claude su Anthropic
-ANTHROPIC_API_KEY=sk-ant-... claudia-code --port 8771
-
-# Terminale 2: Claude su MiniMax
-MINIMAX_API_KEY=eyJhbG... claude-code --port 8772
-
-# Entrambi funzionano in parallelo!</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
-        
-        <h3 id="esempio-failover">7.3 Failover Automatico<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
-        <p>Configurazione per alta disponibilita con fallback automatico.</p>
-        <pre class="code-block bash"><code># .env - Alta Disponibilita
-ANTHROPIC_API_KEY=sk-ant-...
-MINIMAX_API_KEY=eyJhbG...
-ROUTING_MODE=mixed
-PRIMARY_PROVIDER=anthropic
-FALLBACK_ENABLED=true
-FALLBACK_DELAY_MS=500
-MAX_RETRIES=3
-
-# Il router tentera:
-# 1. Anthropic (primary)
-# 2. Se fallisce entro 500ms, MiniMax (fallback)
-# 3. Se anche MiniMax fallisce, ritorna errore dopo 3 retry</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
-        
-        <h3 id="esempio-risparmio">7.4 Risparmio Intelligente<span class="anchor-link" onclick="copyAnchor(this)">#</span></h3>
-        <p>Ottimizzazione costi usando Interactive mode con soglie.</p>
-        <pre class="code-block bash"><code># .env - Ottimizzazione Costi
-ROUTING_MODE=interactive
-COST_OPTIMIZATION=true
-COST_THRESHOLD_CENTS=10
-PREFER_CHEAPER=true
-
-# Regole:
-# - Richieste semplici (< 10 cent): MiniMax
-# - Richieste complesse: Anthropic
-# - Fallback automatico se un provider e in sovraccarico</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
-        
-        <h2 id="troubleshooting">8. Troubleshooting Rapido<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
-        
-        <table>
-          <thead>
-            <tr><th>Problema</th><th>Soluzione</th></tr>
-          </thead>
-          <tbody>
-            <tr><td>Connessione rifiutata</td><td>Verifica che il servizio sia in esecuzione: <code>docker ps | grep router</code></td></tr>
-            <tr><td>401 Unauthorized</td><td>Controlla che le API key siano corrette nel file .env</td></tr>
-            <tr><td>Timeout frequenti</td><td>Aumenta TIMEOUT_MS o verifica la connessione internet</td></tr>
-            <tr><td>Sempre stesso provider</td><td>Verifica la modalita con <code>curl localhost:8788/health</code></td></tr>
-            <tr><td>Errore 429</td><td>Rate limit raggiunto. Attendi o aumenta i limiti con il provider</td></tr>
-          </tbody>
-        </table>
-        
-        <h3>Log Debug</h3>
-        <pre class="code-block bash"><code># Abilita log dettagliati
-LOG_LEVEL=debug docker-compose up
-
-# Cerca errori specifici
-docker-compose logs | grep -i error
-
-# Trace una richiesta specifica
-docker-compose logs -f | grep "request-id-123"</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
-        
-        <h2 id="hardening">9. Hardening e Resilienza (tripla difesa)<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
-        
-        <h3>Livello 1: Rate Limiting</h3>
-        <pre class="code-block bash"><code># Limiti per provider
-ANTHROPIC_RATE_LIMIT=100
-MINIMAX_RATE_LIMIT=200
-GLOBAL_RATE_LIMIT=150</code><button class="copy-btn" onclick="copyAnchor(this)">#</button></pre>
-        
-        <h3>Livello 2: Circuit Breaker</h3>
-        <p>Il sistema chiude automaticamente il circuito verso un provider se:</p>
-        <ul>
-          <li>5 errori consecutivi</li>
-          <li>Tasso di errore > 50% in 1 minuto</li>
-          <li>Latenza > 10 secondi</li>
-        </ul>
-        <pre class="code-block bash"><code># Configurazione Circuit Breaker
-CIRCUIT_BREAKER_THRESHOLD=5
-CIRCUIT_BREAKER_TIMEOUT=60
-CIRCUIT_BREAKER_RESET=300</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
-        
-        <h3>Livello 3: Health Monitoring</h3>
-        <pre class="code-block bash"><code># Check automatici
-HEALTH_CHECK_INTERVAL=30
-HEALTH_CHECK_ENDPOINT=/v1/models
-AUTO_RECOVERY=true</code><button class="copy-btn" onclick="copyCode(this)">Copia</button></pre>
-        
-        <div class="danger-box">
-          <strong>Importante</strong>
-          Non disattivare mai tutti e tre i livelli di difesa insieme. Questo espone il sistema a cascate di errori e costi non controllati.
-        </div>
-        
-        <h2 id="variabili">10. Variabili d'Ambiente<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
-        
-        <table>
-          <thead>
-            <tr><th>Variabile</th><th>Default</th><th>Descrizione</th></tr>
-          </thead>
-          <tbody>
-            <tr><td><code>ROUTING_MODE</code></td><td>interactive</td><td>Modalita: anthropic, minimax, mixed, interactive</td></tr>
-            <tr><td><code>ANTHROPIC_API_KEY</code></td><td>-</td><td>Chiave API Anthropic</td></tr>
-            <tr><td><code>MINIMAX_API_KEY</code></td><td>-</td><td>Chiave API MiniMax</td></tr>
-            <tr><td><code>PRIMARY_PROVIDER</code></td><td>anthropic</td><td>Provider primario per mixed mode</td></tr>
-            <tr><td><code>FALLBACK_ENABLED</code></td><td>true</td><td>Abilita fallback automatico</td></tr>
-            <tr><td><code>TIMEOUT_MS</code></td><td>30000</td><td>Timeout per richiesta (ms)</td></tr>
-            <tr><td><code>LOG_LEVEL</code></td><td>info</td><td>Livello log: debug, info, warn, error</td></tr>
-            <tr><td><code>PORT</code></td><td>8787</td><td>Porta principale</td></tr>
-            <tr><td><code>COST_OPTIMIZATION</code></td><td>false</td><td>Abilita ottimizzazione costi</td></tr>
-            <tr><td><code>CIRCUIT_BREAKER_THRESHOLD</code></td><td>5</td><td>Errori prima di aprire circuito</td></tr>
-          </tbody>
-        </table>
-        
-        <h2 id="requisiti">11. Requisiti di Sistema<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
-        
-        <table>
-          <thead>
-            <tr><th>Componente</th><th>Minimo</th><th>Raccomandato</th></tr>
-          </thead>
-          <tbody>
-            <tr><td>CPU</td><td>1 core</td><td>2+ core</td></tr>
-            <tr><td>RAM</td><td>512 MB</td><td>1 GB</td></tr>
-            <tr><td>Docker</td><td>20.10+</td><td>24.0+</td></tr>
-            <tr><td>Docker Compose</td><td>2.0+</td><td>2.20+</td></tr>
-            <tr><td>Network</td><td>Stabile</td><td>Banda larga</td></tr>
-          </tbody>
-        </table>
-        
-        <h3>Browser Supportati</h3>
-        <ul>
-          <li>Chrome/Edge 90+</li>
-          <li>Firefox 88+</li>
-          <li>Safari 14+</li>
-        </ul>
-        
-        <h2 id="no-dovere">12. Cose da NON Fare<span class="anchor-link" onclick="copyAnchor(this)">#</span></h2>
-        
-        <div class="danger-box">
-          <strong>NON Esportare API Key in Plain Text</strong>
-          <p>Non commitare mai le API key su Git. Usa .env.example come template.</p>
-        </div>
-        
-        <div class="danger-box">
-          <strong>NON Disabilitare il Circuit Breaker in Produzione</strong>
-          <p>Senza protezione, un provider guasto puo generare costi enormi.</p>
-        </div>
-        
-        <div class="danger-box">
-          <strong>NON Usare la Stessa API Key su Tutti i Backend</strong>
-          <p>Mantieni le key separate per tracciare meglio i costi.</p>
-        </div>
-        
-        <h3>Anti-pattern da Evitare</h3>
-        <ul>
-          <li><strong>No hardcoding</strong>: Usa sempre variabili d'ambiente</li>
-          <li><strong>No retry infiniti</strong>: Imposta MAX_RETRIES</li>
-          <li><strong>No logging di API key</strong>: Maschera sempre i valori sensibili</li>
-          <li><strong>No timeout infinito</strong>: Limita sempre il tempo massimo</li>
-        </ul>
+sviluppo/
+  tests/
+    test_glm_modes.sh    # Test isolamento modalità GLM</code></pre>
+<hr />
+<h2 id="supporto">Supporto</h2>
+<p>Per segnalare problemi, includere:</p>
+<ol type="1">
+<li>Output di <code>systemctl --user status ai-router-proxy.service</code></li>
+<li>Output di <code>curl http://127.0.0.1:8787/__router_health</code></li>
+<li>Ultime 50 righe di <code>journalctl --user -u ai-router-proxy.service</code></li>
+<li>Contenuto di <code>~/.claude/ai-router-mode</code></li>
+<li>Variabili d’ambiente rilevanti (escludere chiavi API)</li>
+</ol>
       </article>
     </main>
   </div>
