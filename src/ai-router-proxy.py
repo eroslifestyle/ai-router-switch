@@ -4402,6 +4402,18 @@ async def handle(request):
         if not request.path.endswith("/v1/messages"):
             up = await forward_anthropic(request, body, session)
             return await relay(up)
+        # FIX 2026-07-14: fuori-banda m3-code/m3-web/ask-m3. Un client che chiede
+        # esplicitamente un model MiniMax (es. minimax-m2.7-hs) va instradato a
+        # forward_minimax anche in modalità anthropic pura: altrimenti il body col
+        # nome MiniMax finisce all'upstream Anthropic -> not_found_error: model.
+        try:
+            _am = (json.loads(body).get("model") or "").strip().lower()
+        except Exception:
+            _am = ""
+        if _am.startswith("minimax"):
+            log(f"anthropic mode: model MiniMax '{_am}' -> forward_minimax (fuori-banda)")
+            return await relay(await forward_minimax(request, body, session),
+                               extra_headers={"x-ai-verified": "minimax-oob"})
         try:
             up = await _retry_forward(forward_anthropic, request, body, session)
             log(f"anthropic (pure) -> {up.status} {request.path}")
