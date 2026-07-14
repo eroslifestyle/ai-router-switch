@@ -4,6 +4,7 @@
 - [ ] Test: !router da DUE chat contemporanee per verificare isolamento reale (nota: store ai-router-chats.json già mostra override distinti per session-id → isolamento confermato lato dati, manca solo test live simultaneo)
 
 ## Completati
+- [x] Fix m3-code/ask-m3 not_found_error in mode anthropic: model MiniMax → forward_minimax (header minimax-oob, commit b017b36) + config nomi canonici + ripristino symlink ~/.claude/scripts→src (2026-07-14)
 - [x] Fix glm-minimax: context-exceed 400 → shrink retry + allow_minimax=True
 - [x] Fix mixed fast-path: check context-exceed prima di relay(up)
 - [x] Fix T2 pipelines: aggiunge {400} ai fallback check (inverse T2 R1, mixed escalation, mixed T2 R1)
