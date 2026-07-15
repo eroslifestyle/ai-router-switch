@@ -968,7 +968,13 @@ _NL_MODE = [
     (_re.compile(r"inverse|inversa|inverti", _re.I), "inverse"),
 ]
 _CMD_VERB = _re.compile(r"\b(usa|passa|metti|imposta|attiva|cambia|adesso\s+usa)\b", _re.I)
-_EXPLICIT = _re.compile(r"!router\s+(\w+)", _re.I)
+# FIX 2026-07-15 (regressione): la rimozione totale dell'anchor rendeva la regex
+# troppo permissiva -> qualsiasi messaggio che CONTIENE "!router X" (anche dentro
+# un brief in prosa passato a m3-code) veniva intercettato come comando. Anchor
+# selettivo: !router deve stare a inizio-stringa, dopo un ">" (fine tag
+# system-reminder), o dopo un newline. Matcha il comando utente reale ma NON una
+# citazione in prosa ("...esempio: !router anthropic...").
+_EXPLICIT = _re.compile(r"(?:^|>|\n)\s*!router\s+(\w+)", _re.I)
 
 
 def parse_router_command(text: str):
