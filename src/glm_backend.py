@@ -16,12 +16,14 @@ R3 decisions:
   R3-#6: forward_glm con retry loop 2 tentativi
 """
 import asyncio
+import gzip
 import json
 import os
 import random
 import subprocess
 import time
 import aiohttp
+import aiohttp.web
 from aiohttp import ClientTimeout
 from collections import deque
 from pathlib import Path
@@ -176,7 +178,8 @@ class GLMRateLimiter:
 
     def record(self, entry: list, actual_tokens: int, success: bool):
         """Aggiorna entry acquisita: token reali se success, 0 se fail."""
-        entry[1] = actual_tokens if success else 0
+        if entry is not None:
+            entry[1] = actual_tokens if success else 0
 
     def on_429(self):
         """Cooldown globale con backoff esponenziale + jitter."""
@@ -482,7 +485,7 @@ async def glm_think_act_verify(request, body: bytes, session, log_fn=print):
     log_fn(f"GLM THINK done: plan={len(think_plan)}c")
 
     # STEP 2: ACT - modello specifico esegue
-    tier, _ = await classify_tier(body, request, session, log_fn)
+    tier = await classify_tier(body, request, session, log_fn)
     eff_model, _ = apply_peak_cap(tier)
 
     log_fn(f"GLM ACT: esecuzione con {eff_model}")
@@ -492,34 +495,28 @@ async def glm_think_act_verify(request, body: bytes, session, log_fn=print):
         log_fn(f"GLM ACT fail {act_resp.status}")
         return act_resp
 
-    # STEP 3: VERIFY - GLM-5.2 verifica output
+    # forward_glm ritorna una web.Response con il body già in memoria (.body).
+    # Estrai il body per il VERIFY e per la risposta finale.
+    act_raw = act_resp.body if isinstance(act_resp.body, (bytes, bytearray)) else b""
+
+    # STEP 3: VERIFY - GLM-5.2 verifica output (best-effort, non blocca la risposta)
     log_fn(f"GLM VERIFY: verifica con {GLM_THINK_VERIFY_MODEL}")
-
     try:
-        act_raw = await act_resp.read()
-        await act_resp.release()
-
         verify_body = build_glm_verify_body(orig, think_plan, act_raw.decode(errors="ignore")[:5000])
         verify_resp = await forward_glm(request, verify_body, session, GLM_THINK_VERIFY_MODEL, log_fn)
 
         if verify_resp.status < 400:
-            verify_raw = await verify_resp.read()
+            verify_raw = verify_resp.body if isinstance(verify_resp.body, (bytes, bytearray)) else b""
             try:
                 verify_data = json.loads(verify_raw)
                 verify_text = verify_data.get("content", [{}])[0].get("text", "") if verify_data.get("content") else ""
                 log_fn(f"GLM VERIFY: {verify_text[:100]}")
             except Exception:
                 pass
-            await verify_resp.release()
     except Exception as e:
         log_fn(f"GLM VERIFY EXC: {e}")
 
-    # ACT output già in memory, ritorna quello (non rieseguire)
-    act_resp = aiohttp.web.Response(
-        body=act_raw,
-        status=200,
-        content_type="application/json",
-    )
+    # Ritorna l'output dell'ACT (già in memoria, non rieseguire)
     return act_resp
 
 
@@ -697,11 +694,23 @@ async def forward_glm(request, body: bytes, session, model: str,
                     # Rimuovi hop-by-hop
                     for h in ("transfer-encoding", "connection", "keep-alive"):
                         headers.pop(h, None)
+                    # FIX: GLM API è inconsistente - a volte ritorna gzip-encoded con
+                    # header corretto, a volte ritorna plain JSON con header "gzip" sbagliato.
+                    # Controlla il magic byte (gzip = 0x1f 0x8b) per decidere.
+                    if raw[:2] == b'\x1f\x8b':
+                        try:
+                            raw = gzip.decompress(raw)
+                            headers.pop("Content-Encoding", None)
+                            log_fn(f"GLM gzip decompressed: {len(raw)}b")
+                        except Exception as e:
+                            log_fn(f"GLM gzip decompress failed: {e}")
+                    elif resp.headers.get("Content-Encoding", "").lower() == "gzip":
+                        # Header dice gzip ma body non è gzip → rimuovi header errato
+                        headers.pop("Content-Encoding", None)
                     return aiohttp.web.Response(
                         body=raw,
                         status=resp.status,
                         headers=headers,
-                        content_type=resp.content_type or "application/json",
                     )
 
         except asyncio.TimeoutError:
