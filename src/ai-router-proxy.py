@@ -3349,7 +3349,7 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
         log(f"minimax-orch VERIFY EXC: {e} fp={chat_fp}")
 
     # Ritorna ACT output
-    return relay(aiohttp.web.Response(body=act_raw, status=200, content_type="application/json"))
+    return web.Response(body=act_raw, status=200, content_type="application/json")
 
 
 # ── INVERSE redesign 2026-07-01: M3 THINK → Opus OPPOSE → M3 ACT (loop max 2) ──
@@ -3760,7 +3760,7 @@ async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp
     except Exception as e:
         log(f"anthropic-glm VERIFY EXC: {e}")
 
-    return relay(aiohttp.web.Response(body=act_raw, status=200, content_type="application/json"))
+    return web.Response(body=act_raw, status=200, content_type="application/json")
 
 
 async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: str, relay):
@@ -3820,7 +3820,7 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
     except Exception as e:
         log(f"glm-minimax VERIFY EXC: {e}")
 
-    return relay(aiohttp.web.Response(body=act_raw, status=200, content_type="application/json"))
+    return web.Response(body=act_raw, status=200, content_type="application/json")
 
 
 async def _glm_minimax_only_chain(request, body, session, model, chat_fp, relay):
