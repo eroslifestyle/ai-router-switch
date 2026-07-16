@@ -3738,8 +3738,8 @@ async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp
         log(f"anthropic-glm ACT fail {act_resp.status}")
         return await relay(await forward_anthropic(request, body, session))
 
-    act_raw = await act_resp.read()
-    await act_resp.release()
+    # forward_glm returns web.Response with body already in memory (.body)
+    act_raw = act_resp.body if isinstance(act_resp.body, (bytes, bytearray)) else b""
 
     # STEP 3: VERIFY - Anthropic verifica
     log(f"anthropic-glm VERIFY: Anthropic fp={chat_fp}")
@@ -3760,7 +3760,8 @@ async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp
     except Exception as e:
         log(f"anthropic-glm VERIFY EXC: {e}")
 
-    return web.Response(body=act_raw, status=200, content_type="application/json")
+    # Return the ACT response (body already in memory)
+    return act_resp
 
 
 async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: str, relay):
@@ -3774,8 +3775,8 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
         if think_resp.status >= 400:
             think_plan = ""
         else:
-            think_raw = await think_resp.read()
-            await think_resp.release()
+            # forward_glm returns web.Response with body in memory
+            think_raw = think_resp.body if isinstance(think_resp.body, (bytes, bytearray)) else b""
             try:
                 think_data = json.loads(think_raw)
                 think_plan = think_data.get("content", [{}])[0].get("text", "") if think_data.get("content") else ""
@@ -3800,6 +3801,7 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
         eff_model, _ = _glm.apply_peak_cap(tier)
         return await _glm_minimax_only_chain(request, body, session, eff_model, chat_fp, relay)
 
+    # forward_minimax returns aiohttp client response with .read() needed
     act_raw = await act_resp.read()
     await act_resp.release()
 
@@ -3809,8 +3811,7 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
         verify_body = _glm.build_glm_verify_body(orig, think_plan, act_raw.decode(errors="ignore")[:5000])
         verify_resp = await _glm.forward_glm(request, verify_body, session, "glm-5.2", log_fn=log)
         if verify_resp.status < 400:
-            verify_raw = await verify_resp.read()
-            await verify_resp.release()
+            verify_raw = verify_resp.body if isinstance(verify_resp.body, (bytes, bytearray)) else b""
             try:
                 verify_data = json.loads(verify_raw)
                 verify_text = verify_data.get("content", [{}])[0].get("text", "") if verify_data.get("content") else ""

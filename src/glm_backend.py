@@ -691,22 +691,20 @@ async def forward_glm(request, body: bytes, session, model: str,
 
                     # Risposta diretta (success o client error o 2nd attempt)
                     headers = dict(resp.headers)
-                    # Rimuovi hop-by-hop
-                    for h in ("transfer-encoding", "connection", "keep-alive"):
-                        headers.pop(h, None)
+                    # Rimuovi hop-by-hop (HTTP headers are case-insensitive)
+                    HOP = frozenset(("transfer-encoding", "connection", "keep-alive", "content-encoding"))
+                    for k in list(headers.keys()):
+                        if k.lower() in HOP:
+                            headers.pop(k)
                     # FIX: GLM API è inconsistente - a volte ritorna gzip-encoded con
                     # header corretto, a volte ritorna plain JSON con header "gzip" sbagliato.
                     # Controlla il magic byte (gzip = 0x1f 0x8b) per decidere.
                     if raw[:2] == b'\x1f\x8b':
                         try:
                             raw = gzip.decompress(raw)
-                            headers.pop("Content-Encoding", None)
                             log_fn(f"GLM gzip decompressed: {len(raw)}b")
                         except Exception as e:
                             log_fn(f"GLM gzip decompress failed: {e}")
-                    elif resp.headers.get("Content-Encoding", "").lower() == "gzip":
-                        # Header dice gzip ma body non è gzip → rimuovi header errato
-                        headers.pop("Content-Encoding", None)
                     return aiohttp.web.Response(
                         body=raw,
                         status=resp.status,
