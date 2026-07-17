@@ -2,13 +2,10 @@
 """
 AI Router Proxy — switcher davanti a Claude Code.
 
-Quattro modalità (file ~/.claude/ai-router-mode):
+Modalità (file ~/.claude/ai-router-mode):
   - anthropic   : tutto diretto a api.anthropic.com
   - minimax     : tutto diretto a api.minimaxi.chat/anthropic
   - mixed       : Anthropic primario; su 429/5xx/errore -> fallback MiniMax (bidir)
-  - inverse     : MiniMax orchestra + esegue. Anthropic verifica (T2) i task critici.
-                  Anthropic interviene direttamente come esecutore dopo 2 fallimenti
-                  (resilienza). Task non-critici -> MiniMax diretto (streaming).
 
 
 Claude Code punta qui: ANTHROPIC_BASE_URL=http://127.0.0.1:8787
@@ -385,18 +382,14 @@ MINIMAX_EXECUTORS = set(
 # M2.7 -> M3 -> (2 fail MiniMax) -> Haiku -> modello selezionato dall'utente.
 # Gli orchestratori Anthropic (Fable/Opus/Sonnet) non eseguono MAI al 1° colpo.
 MIXED_EXECUTOR_MODEL = os.environ.get("AIROUTER_MIXED_EXECUTOR", "MiniMax-M2.7")
-# Feature flag redesign 4 modalità 2026-07-01: se =1 (default), mixed/inverse
-# usano le NUOVE pipeline gerarchiche (Anthropic THINK+CONTROLLA+M3 ACT / M3 THINK
-# + Opus OPPOSE + M3 ACT) per TUTTE le /v1/messages — abroga la distinzione T0/T1/T2
-# che escludeva le richieste agentiche. =0 fallback al comportamento legacy T2-only.
+# Feature flag redesign 2026-07-01: se =1 (default), mixed usa la NUOVA pipeline
+# gerarchica (Anthropic THINK+CONTROLLA+M3 ACT) per TUTTE le /v1/messages —
+# abroga la distinzione T0/T1/T2 che escludeva le richieste agentiche.
+# =0 fallback al comportamento legacy T2-only. (inverse rimossa 2026-07-17)
 NEW_PIPELINE = os.environ.get("AIROUTER_NEW_PIPELINE", "1") == "1"
-INVERSE_REVIEW_MAX_ITER = int(os.environ.get("AIROUTER_INVERSE_REVIEW_MAX_ITER", "2"))
-# FIX bug hang inverse: cap di tempo totale sul loop OPPOSE. Sotto backoff 429
-# le chiamate Anthropic possono durare 50s+; senza budget il client scade (>60s).
-INVERSE_REVIEW_BUDGET_SEC = int(os.environ.get("AIROUTER_INVERSE_BUDGET_SEC", "25"))
-# Modello giudice per la verifica T2 in modalità inverse (Claude Opus).
+# Modello giudice per la verifica/finalize T2 (usato da mixed).
 VERIFY_MODEL = os.environ.get("AIROUTER_VERIFY_MODEL", "claude-opus-4-8")
-VALID_MODES = ("anthropic", "minimax", "mixed", "inverse",
+VALID_MODES = ("anthropic", "minimax", "mixed",
                "glm", "glm-minimax", "anthropic-glm")
 
 # ── GLM/z.ai backend (Anthropic-compatible endpoint) ─────────────────────────
@@ -608,29 +601,22 @@ def _minimax_alert(msg: str):
         pass
 # Circuit breaker (D15): dopo N fail un backend va in cooldown e viene saltato.
 # FIX audit v4: BREAKER_* removed (dead code - mai chiamato nel flusso;
-# la logica di escalation usa _inverse_fails / _mixed_fails per-chat).
+# la logica di escalation usa _mixed_fails per-chat).
 # Se serve circuit-breaker globale, va reintrodotto con test.
 
-# Contatore per-chat dei fallimenti MiniMax (modalità inverse).
-# Dopo N fail consecutivi: Anthropic esegue direttamente (bypass MiniMax).
-INVERSE_FAIL_THRESHOLD = int(os.environ.get("AIROUTER_INVERSE_FAILS", "2"))
-_inverse_fails = {}  # chat_fp -> int
-
-# FIX E: mappa chat_fp -> modello originale richiesto dal client, usata dal relay
-# per riscrivere il campo 'model' nella SSE response (così il jsonl di Claude Code
+# FIX E + FIX AUDIT 2026-07-17: chat_fp|"__remap__" -> modello originale richiesto
+# dal client. Scritto da remap_body_for_minimax(), consumato da relay() per
+# riscrivere il campo 'model' nella SSE response (così il jsonl di Claude Code
 # riceve il modello reale, non "MiniMax-M3" rimappato dall'upstream).
+# DEDUPE 2026-07-17: era definito due volte (seconda definizione azzerava la prima).
 _request_orig_model = {}  # chat_fp -> orig_model (es. "claude-sonnet-4-6")
 
 # MIXED: MiniMax esegue tutto; dopo N fail consecutivi Anthropic prende il comando.
+# DEDUPE 2026-07-17: _mixed_fail_ts/_mixed_cooldown_until erano definiti due volte.
 MIXED_FAIL_THRESHOLD = int(os.environ.get("AIROUTER_MIXED_FAILS", "2"))
 _mixed_fails = {}  # chat_fp -> int
 _mixed_fail_ts = {}  # chat_fp -> float — epoch sec ultimo fail (per reset counter + GC)
 _mixed_cooldown_until = {}  # chat_fp -> float — epoch sec fine escalation (rescue→Anthropic)
-
-# FIX AUDIT 2026-07-17: chat_fp|"__remap__" -> modello originale richiesto dal client.
-# Usato da remap_body_for_minimax() e consumato da relay() (riscrittura SSE).
-# Senza questo dict ogni richiesta mixed/MiniMax cadeva in NameError → 500.
-_request_orig_model = {}
 
 # FIX B1.1: lock condiviso per contatori globali (thread-safe + asyncio-safe via run_in_executor)
 _counter_lock = threading.Lock()
@@ -638,17 +624,11 @@ _counter_lock = threading.Lock()
 # FIX #2: Cooldown e reset automatico per escalation
 RESCUE_COOLDOWN_SEC = 30  # cooldown dopo escalation prima di ritentare
 FAIL_RESET_SEC = 60  # reset counter se ultimo fallimento > 60s fa
-_inverse_fail_ts = {}  # chat_fp -> timestamp ultimo fallimento
-_mixed_fail_ts = {}  # chat_fp -> timestamp ultimo fallimento
-_inverse_cooldown_until = {}  # chat_fp -> timestamp fine cooldown
-_mixed_cooldown_until = {}  # chat_fp -> timestamp fine cooldown
 
 
 _FAILS_GC_MAX = 5000  # soglia oltre cui ripulire chat_fp stale
 _FAILS_GC_INTERVAL = 1000  # AQ-RL2: GC ogni N incrementi, non ogni volta
-# AQ-RL2: contatore GC separato per ciascun tracker (indipendenti)
-_gc_inv_counter = 0
-_gc_mix_counter = 0
+_gc_mix_counter = 0  # AQ-RL2: contatore GC del tracker mixed
 
 
 def _gc_fail_dicts(fails: dict, ts: dict, cooldown: dict, now: float) -> None:
@@ -661,52 +641,6 @@ def _gc_fail_dicts(fails: dict, ts: dict, cooldown: dict, now: float) -> None:
         fails.pop(fp, None)
         ts.pop(fp, None)
         cooldown.pop(fp, None)
-
-
-def inverse_fail_inc(chat_fp: str) -> int:
-    """AQ-RL2: GC fuori dal lock — throttling ogni _FAILs_GC_INTERVAL incrementi."""
-    global _gc_inv_counter
-    with _counter_lock:  # FIX B1.1
-        now = time.time()
-        # Reset automatico se ultimo fail > FAIL_RESET_SEC fa
-        last_fail = _inverse_fail_ts.get(chat_fp, 0)
-        if now - last_fail > FAIL_RESET_SEC:
-            _inverse_fails[chat_fp] = 0
-        n = _inverse_fails.get(chat_fp, 0) + 1
-        _inverse_fails[chat_fp] = n
-        _inverse_fail_ts[chat_fp] = now
-        # AQ-RL2: incrementa contatore GC atomico (lock-protected, micro)
-        _gc_inv_counter += 1
-        counter = _gc_inv_counter
-    # AQ-RL2: GC fuori dal lock — O(n) scansione non blocca altri thread/chat_fp
-    if counter % _FAILS_GC_INTERVAL == 0:
-        _gc_fail_dicts(_inverse_fails, _inverse_fail_ts, _inverse_cooldown_until, time.time())
-    return n
-
-
-def inverse_fail_reset(chat_fp: str) -> None:
-    """Azzera contatore (chiamata MiniMax riuscita)."""
-    with _counter_lock:  # FIX audit v5 #2: simmetrico con inverse_fail_inc
-        # FIX leak: pop invece di =0. Un'entry a 0 senza ts corrispondente è orfana
-        # immortale (_gc_fail_dicts itera ts, non la raccoglie mai) → crescita RAM
-        # illimitata. mixed_fail_reset già fa pop: qui rendiamo i due simmetrici.
-        _inverse_fails.pop(chat_fp, None)
-        _inverse_fail_ts.pop(chat_fp, None)
-        _inverse_cooldown_until.pop(chat_fp, None)
-
-
-def inverse_should_escalate(chat_fp: str) -> bool:
-    """True se Anthropic deve bypassare MiniMax ed eseguire direttamente."""
-    with _counter_lock:  # FIX M3: check->write del cooldown atomico
-        # Cooldown attivo: resta in modalità escalation
-        if time.time() < _inverse_cooldown_until.get(chat_fp, 0):
-            return True
-        fails = _inverse_fails.get(chat_fp, 0)
-        if fails >= INVERSE_FAIL_THRESHOLD:
-            # Attiva cooldown
-            _inverse_cooldown_until[chat_fp] = time.time() + RESCUE_COOLDOWN_SEC
-            return True
-        return False
 
 
 def mixed_fail_inc(chat_fp: str) -> int:
@@ -775,7 +709,7 @@ PORT_MODE = {
     8771: "anthropic",
     8772: "minimax",
     8773: "mixed",
-    8774: "inverse",
+    # 8774 era "inverse" — modalità rimossa 2026-07-17, porta lasciata libera
     8775: "glm",            # solo GLM, 5.2 orchestra tiering
     8776: "glm-minimax",    # GLM-5.2 THINK → MiniMax ACT → GLM verify
     8777: "anthropic-glm",  # Anthropic THINK → GLM tiered ACT → Anthropic verify T2
@@ -985,7 +919,6 @@ _INTERNAL_TO_DISPLAY = {
     "anthropic-glm": "Mixag",
     "anthropic": "anthropic",
     "minimax": "minimax",
-    "inverse": "inverse",
     "glm": "glm",
 }
 
@@ -998,7 +931,6 @@ _NL_MODE = [
     (_re.compile(r"solo\s+(claude|anthropic)|usa\s+(claude|anthropic)", _re.I), "anthropic"),
     (_re.compile(r"solo\s+minimax|usa\s+minimax", _re.I), "minimax"),
     (_re.compile(r"mod\w*\s+mist|mixed|mist[ao]\b", _re.I), "mixed"),
-    (_re.compile(r"inverse|inversa|inverti", _re.I), "inverse"),
 ]
 _CMD_VERB = _re.compile(r"\b(usa|passa|metti|imposta|attiva|cambia|adesso\s+usa)\b", _re.I)
 # FIX 2026-07-15 (regressione): la rimozione totale dell'anchor rendeva la regex
@@ -1049,7 +981,7 @@ def _router_reply_text(action: dict, fp: str) -> str:
         clear_chat_mode(fp)
         _gm = get_file_mode()
         return f"↺ Chat riportata al default: **{_INTERNAL_TO_DISPLAY.get(_gm, _gm)}**"
-    return ("🧭 Comandi: `!router <anthropic|minimax|mixam|inverse|glm|mixgm|mixag>` · "
+    return ("🧭 Comandi: `!router <anthropic|minimax|mixam|glm|mixgm|mixag>` · "
             "`!router status` · `!router reset`. Anche a voce: «usa solo minimax».")
 
 
@@ -1367,7 +1299,7 @@ def _read_oauth_from_file() -> str:
 
 def _load_oauth_token():
     """Carica il token OAuth Anthropic da ~/.claude/.credentials.json se non
-    è già in env. Usato da forward_anthropic_direct (verify T2 in modalità inverse)."""
+    è già in env. Usato da forward_anthropic_direct (verify T2 in modalità mixed)."""
     if os.environ.get("ANTHROPIC_OAUTH_TOKEN"):
         return
     tok = _read_oauth_from_file()
@@ -1455,7 +1387,7 @@ async def forward_anthropic(request, body, session):
                 else:
                     headers.pop("anthropic-beta", None)
                     headers.pop("Anthropic-Beta", None)
-                log(f"[#68727] stripped 1m beta for {model_str} fp={fp}")
+                log(f"[#68727] stripped 1m beta for {model_str}")
         except Exception:
             pass
 
@@ -1577,7 +1509,7 @@ def _synthetic_context_exceed(body_bytes: bytes) -> "_SyntheticResponse":
     """FIX 2026-07-08 (BUG-CTX-PRE): MiniMax ha context window ~200k.
     Se il body in ingresso eccede MINIMAX_CONTEXT_BYTE_LIMIT, NON chiamare
     MiniMax: ritorna synthetic 400 con marker header x-ai-context-exceeded=true
-    così i call site (mixed/minimax/inverse) possono intercettare il caso,
+    così i call site (mixed/minimax) possono intercettare il caso,
     fare shrink/retry prima di girare il 400 nudo al client (che altrimenti
     blocca la sessione in loop)."""
     resp = _SyntheticResponse(
@@ -1819,7 +1751,7 @@ ANTHROPIC_OAUTH_TOKEN = os.environ.get("ANTHROPIC_OAUTH_TOKEN", "")  # Bearer da
 
 async def forward_anthropic_direct(request, body, session):
     """Chiama api.anthropic.com diretto con OAuth Bearer.
-    Usato dalle verify T2 in modalità inverse: il modello di verifica è
+    Usato dalle verify T2 (mixed finalize): il modello di verifica è
     Claude stesso (via login OAuth nativo di Claude Code)."""
     global ANTHROPIC_OAUTH_TOKEN  # FIX B3.2: refresh lazy del token
     if not ANTHROPIC_OAUTH_TOKEN:
@@ -1891,7 +1823,7 @@ async def forward_anthropic_direct(request, body, session):
 
 
 
-# ── Helper per modalità inverse (T2 verify) ──────────────────────
+# ── Helper pipeline verify T2 (mixed) ────────────────────────────
 def _force_no_stream(body: bytes):
     try:
         d = json.loads(body)
@@ -1940,7 +1872,7 @@ async def _retry_forward(forward_fn, request, body, session, attempts: int = 2):
 async def _call_full(forward_fn, request, body, session, timeout: float = 90):
     """Chiamata non-streaming: ritorna (status, json|None). `timeout` secondi PER FASE
     (headers + read), default 90. Il chiamante può passare il budget residuo (es. loop
-    OPPOSE/REVISE inverse) per non sforare la finestra dichiarata: worst-case ~2×timeout."""
+    pipeline verify) per non sforare la finestra dichiarata: worst-case ~2×timeout."""
     nb, _ = _force_no_stream(body)
     up = None
     try:
@@ -1969,7 +1901,7 @@ async def _call_full(forward_fn, request, body, session, timeout: float = 90):
     # auto_decompress=False per fare passthrough gzip/brotli al client relay,
     # ma le pipeline interne (THINK/REVISE/ACT/finalize) parsa il body con
     # json.loads: se il body è compresso, parse fallisce silenziosamente →
-    # t_json=None → fallback spurio (mixed_new THINK ko 200 / inverse THINK
+    # t_json=None → fallback spurio (mixed_new THINK ko 200 / THINK
     # EXC). Decomprimiamo qui per essere robusti a proxy intermedi (Cloudflare).
     ce = (up.headers.get("Content-Encoding") or "").lower().strip()
     if ce and raw:
@@ -2011,51 +1943,6 @@ def _anthropic_system(instruction: str) -> list:
         {"type": "text", "text": CLAUDE_CODE_MARKER},
         {"type": "text", "text": instruction},
     ]
-
-
-def _build_critique_body(orig: dict, question: str, draft: str) -> bytes:
-    """Round 1: Anthropic riceve la bozza M3 e produce una critica costruttiva.
-    NON genera la risposta finale: solo issue list, dubbi, fatti da verificare.
-    Output strutturato per essere ri-usato da M3 nel round 2."""
-    sys_msg = (
-        "Sei un revisore critico esperto e SEVERO. Ricevi DOMANDA e BOZZA prodotta da M3. "
-        "Il tuo compito: produrre SEMPRE una lista di almeno 2-4 criticita', anche se la bozza "
-        "ti sembra accettabile. Cerca: imprecisioni, dettagli mancanti, formulazioni deboli, "
-        "informazioni che potrebbero fuorviare, ordine non ottimale dei contenuti. "
-        "Se davvero non trovi nulla, rispondi letteralmente 'NESSUNA CRITICA'. "
-        "Altrimenti elenca punti concreti e azionabili, numerati, in italiano."
-    )
-    user_msg = (
-        f"DOMANDA:\n{question}\n\nBOZZA M3:\n{draft}\n\n"
-        "Elenca le criticita' da correggere (o 'NESSUNA CRITICA')."
-    )
-    return json.dumps({
-        "model": VERIFY_MODEL,
-        "max_tokens": min(int(orig.get("max_tokens", 1024)) // 2, 512),
-        "system": _anthropic_system(sys_msg),
-        "messages": [{"role": "user", "content": user_msg}],
-        "stream": False,
-    }).encode()
-
-
-def _build_revise_body(orig: dict, question: str, draft: str, critique: str) -> bytes:
-    """Round 2: M3 riceve la propria bozza + la critica di Anthropic e produce la v2."""
-    sys_msg = (
-        "Sei M3, un modello che collabora. Hai prodotto una BOZZA iniziale. "
-        "Un revisore (Anthropic) ha prodotto una CRITICA. Il tuo compito: "
-        "rivedi la bozza tenendo conto della critica, mantenendo cio' che e' corretto "
-        "e correggendo cio' che va corretto. Rispondi con la versione finale, in italiano."
-    )
-    user_msg = (
-        f"DOMANDA:\n{question}\n\nBOZZA v1:\n{draft}\n\n"
-        f"CRITICA ANTHROPIC:\n{critique}\n\n"
-        "Restituisci la risposta finale riveduta (v2)."
-    )
-    body = dict(orig)
-    body["system"] = sys_msg
-    body["messages"] = [{"role": "user", "content": user_msg}]
-    body["stream"] = False
-    return json.dumps(body).encode()
 
 
 def _build_finalize_body(orig: dict, question: str, draft_v2: str) -> bytes:
@@ -2114,65 +2001,6 @@ def _build_think_body(orig: dict) -> bytes:
     body.pop("tools", None)
     body.pop("thinking", None)
     return json.dumps(body).encode()
-
-
-def _extract_balanced_json(text: str) -> list:
-    """Ritorna tutte le sottostringhe JSON-object top-level bilanciate nel testo,
-    ignorando le graffe dentro le stringhe. Robusto a preamboli, code-fence e
-    più oggetti concatenati. Ordine di apparizione."""
-    objs = []
-    depth = 0
-    start = -1
-    in_str = False
-    esc = False
-    for i, ch in enumerate(text):
-        if in_str:
-            if esc:
-                esc = False
-            elif ch == "\\":
-                esc = True
-            elif ch == '"':
-                in_str = False
-            continue
-        if ch == '"':
-            in_str = True
-        elif ch == "{":
-            if depth == 0:
-                start = i
-            depth += 1
-        elif ch == "}":
-            if depth > 0:
-                depth -= 1
-                if depth == 0 and start >= 0:
-                    objs.append(text[start:i + 1])
-                    start = -1
-    return objs
-
-
-def _parse_json_with_keys(text: str, required: dict) -> dict | None:
-    """Estrae il primo oggetto JSON bilanciato nel testo che soddisfa i vincoli
-    `required` (chiave -> validatore/callable, o None = presente). Robusto a
-    preamboli testuali, code-fence e oggetti multipli (es. esempio + reale)."""
-    if not text:
-        return None
-    for cand in _extract_balanced_json(text):
-        try:
-            j = json.loads(cand)
-        except Exception:
-            continue
-        if not isinstance(j, dict):
-            continue
-        ok = True
-        for k, check in required.items():
-            if k not in j:
-                ok = False
-                break
-            if callable(check) and not check(j[k]):
-                ok = False
-                break
-        if ok:
-            return j
-    return None
 
 
 def _parse_plan_text(text: str) -> dict | None:
@@ -3385,219 +3213,6 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
     return web.Response(body=act_raw, status=200, content_type="application/json")
 
 
-# ── INVERSE redesign 2026-07-01: M3 THINK → Opus OPPOSE → M3 ACT (loop max 2) ──
-
-INVERSE_OPPOSE_MODEL = "claude-opus-4-8"
-
-
-def _build_inverse_think_body(orig: dict) -> bytes:
-    """Inverse THINK: M3 genera un piano d'azione (testo libero, no JSON)."""
-    sys_msg = (
-        "Sei M3, l'orchestratore economico. Ricevi una richiesta utente (con possibili tools). "
-        "Il tuo compito: produrre un PIANO D'AZIONE dettagliato in italiano. "
-        "Elenca: (1) obiettivo, (2) passi da eseguire in ordine, (3) tool da chiamare "
-        "con i parametri previsti, (4) edge case da considerare, (5) rischi. "
-        "Rispondi SOLO con il piano, niente JSON obbligatorio, niente meta-commenti."
-    )
-    body = dict(orig)
-    body["model"] = MINIMAX_ORCHESTRATOR_MODEL  # M3 orchestra — remap preserva ('MiniMax')
-    body["system"] = sys_msg
-    body["stream"] = False
-    body["max_tokens"] = max(int(orig.get("max_tokens", 2048)), 2048)
-    return json.dumps(body).encode()
-
-
-def _build_inverse_oppose_body(orig: dict, plan: str) -> bytes:
-    """Inverse OPPOSE: il modello Anthropic scelto dall'utente (fable/opus/sonnet)
-    esamina il piano M3 e decide approved/reject.
-    Risponde JSON: {approved: bool, fixes: [...], warnings: [...]}"""
-    # FIX: usa il modello selezionato dall'utente nel picker (arriva nel body);
-    # INVERSE_OPPOSE_MODEL resta solo come fallback se il body non lo specifica.
-    _oppose_model = orig.get("model") or INVERSE_OPPOSE_MODEL
-    sys_msg = (
-        f"Sei il revisore critico avversariale (modello {_oppose_model}). "
-        "Ricevi un PIANO prodotto da M3. Il tuo compito è bocciare piani deboli, "
-        "rischiosi, incompleti o inefficienti. NON eseguire il piano: solo reviewer.\n\n"
-        "Schema JSON esatto (SOLO JSON, niente testo fuori):\n"
-        '{"approved": <bool>, "fixes": ["<correzione>", ...], "warnings": ["<rischio>", ...]}\n\n'
-        "Regole: approved=true SOLO se il piano è eseguibile senza modifiche rilevanti "
-        "E non ha rischi operativi. Altrimenti approved=false con fixes/warnings azionabili. "
-        "Sii severo: meglio un rifiuto in più che un piano fragile.\n"
-        "FORMATO OBBLIGATORIO: il PRIMO carattere della risposta è '{', l'ULTIMO è '}'. "
-        "Nessun preambolo, nessuna spiegazione fuori dal JSON, nessun blocco markdown."
-    )
-    user_msg = f"PIANO M3:\n{plan}\n\nDecidi: approved? Se no, quali fix? Rispondi SOLO col JSON."
-    return json.dumps({
-        "model": _oppose_model,
-        "max_tokens": 2048,
-        "system": _anthropic_system(sys_msg),
-        "messages": [{"role": "user", "content": user_msg}],
-        "stream": False,
-    }).encode()
-
-
-def _build_inverse_revise_body(orig: dict, plan: str, fixes: list, warnings: list) -> bytes:
-    """Inverse REVISE: M3 corregge il piano sulla base delle critiche Opus."""
-    sys_msg = (
-        "Sei M3. Hai prodotto un piano, Opus l'ha criticato. Rivedilo applicando le "
-        "correzioni richieste e mitigando i warnings. Rispondi SOLO con il piano rivisto, "
-        "stesso formato dell'originale (obiettivo, passi, tool, edge case, rischi)."
-    )
-    user_msg = (
-        f"PIANO ORIGINALE:\n{plan}\n\n"
-        f"FIXES RICHIESTI:\n{json.dumps(fixes, ensure_ascii=False)}\n\n"
-        f"WARNINGS:\n{json.dumps(warnings, ensure_ascii=False)}\n\n"
-        "Restituisci il piano rivisto."
-    )
-    body = dict(orig)
-    body["model"] = MINIMAX_ORCHESTRATOR_MODEL  # M3 rivede il proprio piano — remap preserva
-    body["system"] = sys_msg
-    body["messages"] = [{"role": "user", "content": user_msg}]
-    body["stream"] = False
-    body["max_tokens"] = max(int(orig.get("max_tokens", 2048)), 2048)
-    return json.dumps(body).encode()
-
-
-def _build_inverse_act_body(orig: dict, plan: str) -> bytes:
-    """Inverse ACT: l'executor coder (MiniMax code) esegue il piano approvato (con tool_use)."""
-    sys_msg = (
-        f"Sei {MINIMAX_MODEL}, l'esecutore. Un piano è stato prodotto da M3 e validato da Opus. "
-        "Ora eseguilo. Usa i tool come da piano e rispondi all'utente con i risultati. "
-        "Se il piano è una domanda senza tool, rispondi direttamente.\n\n"
-        f"PIANO APPROVATO:\n{plan}"
-    )
-    body = dict(orig)
-    body["model"] = MINIMAX_MODEL  # executor coder esplicito (M2.7) — remap preserva
-    body["system"] = sys_msg
-    body["stream"] = bool(orig.get("stream"))
-    return json.dumps(body).encode()
-
-
-def _parse_oppose_json(text: str) -> dict | None:
-    """Parsifica JSON emesso da Opus in fase OPPOSE. Schema: {approved, fixes, warnings}.
-    Robusto a preamboli testuali, code-fence e oggetti JSON multipli: prende il primo
-    oggetto bilanciato con 'approved' bool."""
-    j = _parse_json_with_keys(text, {"approved": lambda v: isinstance(v, bool)})
-    if j is None:
-        return None
-    j.setdefault("fixes", [])
-    j.setdefault("warnings", [])
-    return j
-
-
-async def _pipeline_think_oppose_act(request, body, session, orig: dict, relay) -> web.Response:
-    """Redesign 2026-07-01 inverse: M3 THINK → Opus OPPOSE → loop max 2 → M3 ACT."""
-    chat_fp = _resolve_chat_fingerprint(request)
-
-    # THINK: M3 genera piano
-    try:
-        plan = await _m3_think_iter(request, session, orig, None)
-    except Exception as e:
-        log(f"inverse-new THINK EXC: {e} → fallback Anthropic diretto")
-        return await _inverse_rescue_anthropic(request, body, session, relay)
-
-    # Short-circuit B: richiesta senza tool = nessun piano operativo da criticare → salta OPPOSE
-    if not orig.get("tools"):
-        log("inverse-new: richiesta senza tool → skip OPPOSE, ACT diretto (come minimax)")
-    else:
-        # OPPOSE/REVISE loop (max INVERSE_REVIEW_MAX_ITER volte, con budget di tempo)
-        _oppose_t0 = time.time()
-        for i in range(INVERSE_REVIEW_MAX_ITER):
-            _budget_left = INVERSE_REVIEW_BUDGET_SEC - (time.time() - _oppose_t0)
-            if _budget_left <= 0:
-                log(f"inverse-new budget {INVERSE_REVIEW_BUDGET_SEC}s superato a iter{i} → ACT con piano attuale")
-                break
-            # FIX budget reale: passa il residuo a _call_full così una singola OPPOSE/REVISE
-            # non può bloccare 90+90s sforando il budget di 7× (il check era solo pre-iter).
-            _phase_to = max(1.0, _budget_left)
-            op_body = _build_inverse_oppose_body(orig, plan)
-            try:
-                o_status, o_json = await _call_full(forward_anthropic_direct, request, op_body, session, timeout=_phase_to)
-            except Exception as e:
-                log(f"inverse-new OPPOSE iter{i} EXC: {e} → ACT con piano attuale")
-                break
-            if not o_json or o_status in FALLBACK_STATUSES:
-                log(f"inverse-new OPPOSE iter{i} ko {o_status} → ACT con piano attuale")
-                break
-            op_text = _text_from_message(o_json)
-            op = _parse_oppose_json(op_text)
-            if not op:
-                log(f"inverse-new OPPOSE iter{i} parse fail ({len(op_text)}c) → ACT con piano attuale")
-                break
-            log(f"inverse-new OPPOSE iter{i}: approved={op['approved']} fixes={len(op['fixes'])} warnings={len(op['warnings'])}")
-            if op["approved"]:
-                break  # piano ok
-            # M3 revisa (col budget residuo aggiornato, non il 90s fisso)
-            try:
-                _revise_to = max(1.0, INVERSE_REVIEW_BUDGET_SEC - (time.time() - _oppose_t0))
-                plan = await _m3_think_iter(request, session, orig, plan, op["fixes"], op["warnings"], timeout=_revise_to)
-            except Exception as e:
-                log(f"inverse-new REVISE iter{i} EXC: {e} → ACT con piano non rivisto")
-                break
-        else:
-            log(f"inverse-new: max iter ({INVERSE_REVIEW_MAX_ITER}) raggiunto, ACT con piano finale")
-
-    # ACT: M3 esegue il piano
-    act_body = _build_inverse_act_body(orig, plan)
-    try:
-        up = await forward_minimax(request, act_body, session)
-    except Exception as e:
-        n = inverse_fail_inc(chat_fp)
-        log(f"inverse-new ACT EXC ({n}/{INVERSE_FAIL_THRESHOLD}): {e} → rescue Anthropic")
-        return await _inverse_rescue_anthropic(request, body, session, relay)
-    if up.status in MINIMAX_FALLBACK_STATUSES:
-        n = inverse_fail_inc(chat_fp)
-        log(f"inverse-new ACT M3 {up.status} ({n}/{INVERSE_FAIL_THRESHOLD}) → rescue Anthropic")
-        try:
-            await up.release()
-        except Exception:
-            pass
-        return await _inverse_rescue_anthropic(request, body, session, relay)
-    log(f"inverse-new ACT {MINIMAX_MODEL} {up.status} {request.path} fp={chat_fp}")
-    inverse_fail_reset(chat_fp)  # FIX H2: azzera il contatore su ACT riuscito (evita escalation permanente)
-    return await relay(up, extra_headers={"x-ai-verified": f"{MINIMAX_ORCHESTRATOR_MODEL.lower()}-think+anthropic-oppose+{MINIMAX_MODEL.lower()}-act"})
-
-
-async def _m3_think_iter(request, session, orig, prev_plan, fixes=None, warnings=None, timeout: float = 90) -> str:
-    """Helper: una iter M3 THINK (o REVISE se prev_plan+fixes). Ritorna testo piano.
-    `timeout` inoltrato a _call_full: la REVISE dentro il loop OPPOSE passa il budget residuo."""
-    if prev_plan is None:
-        body = _build_inverse_think_body(orig)
-    else:
-        body = _build_inverse_revise_body(orig, prev_plan, fixes or [], warnings or [])
-    s, j = await _call_full(_fwd_minimax_short, request, body, session, timeout=timeout)
-    if not j or s in FALLBACK_STATUSES:
-        raise RuntimeError(f"M3 think iter ko {s}")
-    plan = _text_from_message(j).strip()
-    if not plan:
-        raise RuntimeError("M3 think iter vuoto")
-    return plan
-
-
-async def _inverse_rescue_anthropic(request, body, session, relay) -> web.Response:
-    """Fallback finale: Anthropic esegue la richiesta originale senza pipeline."""
-    # FIX 2026-07-08 (BUG-CTX-PRE): prima di girare il body intero a Anthropic,
-    # se è troppo grande prova shrink — modello utente 1M regge, ma il path
-    # attraverso forward_anthropic può finire su Haiku (200k) e 400.
-    try:
-        rescue_body = body
-        if len(body) > MINIMAX_CONTEXT_BYTE_LIMIT:
-            try:
-                orig_dict = json.loads(body)
-            except Exception:
-                orig_dict = None
-            if orig_dict is not None:
-                shrunk = await _try_shrink_body(orig_dict, MINIMAX_CONTEXT_BYTE_LIMIT)
-                if shrunk is not None:
-                    log(f"inverse-rescue: body {len(body)}b shrink → {len(shrunk)}b")
-                    rescue_body = shrunk
-        up = await forward_anthropic(request, rescue_body, session)
-        return await relay(up, extra_headers={"x-ai-verified": "inverse-rescue-anthropic"})
-    except Exception as e:
-        return web.json_response({"type": "error", "error": {"type": "router_error",
-            "message": f"inverse rescue ko: {e}"}}, status=502)
-
-
 def _sse_events_from_message(j: dict, verified: str) -> list:
     """Ritorna lista di eventi SSE Anthropic-compat (per invio progressivo con flush)."""
     text = _text_from_message(j)
@@ -4160,7 +3775,7 @@ async def handle(request):
     session = request.app["session"]
 
     # FIX 2026-07-09 UnboundLocalError: `orig` è assegnato solo in alcuni rami
-    # (mixed/minimax/inverse via json.loads), ma la closure `relay` sotto lo
+    # (mixed/minimax via json.loads), ma la closure `relay` sotto lo
     # referenzia per debug_capture. Nei path anthropic-pure/mixed che chiamano
     # relay senza mai assegnare orig, Python lo tratta come locale non inizializzata
     # → "cannot access free variable 'orig'". Inizializzalo a None qui a monte.
@@ -4226,7 +3841,7 @@ async def handle(request):
                 continue
             resp.headers[k] = v
         # FIX redesign 2026-07-01: header extra iniettati dal caller (es x-ai-verified).
-        # Evidenzia la pipeline gerarchica mixed/inverse per audit downstream.
+        # Evidenzia la pipeline gerarchica mixed per audit downstream.
         if extra_headers:
             for k, v in extra_headers.items():
                 resp.headers[k] = v
@@ -4547,183 +4162,6 @@ async def handle(request):
             )
 
 
-    # ── MODALITÀ INVERSE: MiniMax orchestra + esegue ─────────────────────
-    # Anthropic verifica i T2; dopo N fail consecutivi (default 2) Anthropic
-    # esegue direttamente, bypassando MiniMax. Il contatore è per-chat.
-    if mode == "inverse":
-        chat_fp = _resolve_chat_fingerprint(request)  # FIX audit v4: NAT-safe
-        is_messages = request.path.endswith("/v1/messages")
-        is_t2 = is_messages and classify_t2(body)
-
-        # NEW PIPELINE redesign 2026-07-01: M3 THINK + Opus OPPOSE + M3 ACT.
-        # Scatta per TUTTE le /v1/messages in mode=inverse (incluso agentico con tools).
-        # Abroga la distinzione T0/T1/T2 che escludeva le richieste agentiche.
-        # ESCALATION ha priorità: se M3 ha già fallito N volte, salta a Anthropic diretto.
-        if NEW_PIPELINE and is_messages and not inverse_should_escalate(chat_fp):
-            try:
-                orig = json.loads(body)
-            except Exception:
-                orig = {}
-            log(f"inverse-new pipeline attivata fp={chat_fp} tools={bool(orig.get('tools'))}")
-            return await _pipeline_think_oppose_act(request, body, session, orig, relay)
-
-        # ESCALATION: dopo N fail consecutivi su questa chat, Anthropic esegue
-        if inverse_should_escalate(chat_fp):
-            log(f"inverse: {chat_fp} ha {_inverse_fails.get(chat_fp, 0)} fail -> Anthropic esegue direttamente")
-            try:
-                up = await forward_anthropic(request, body, session)
-                log(f"inverse (escalated) anthropic -> {up.status} {request.path}")
-                return await relay(up)
-            except Exception as e:
-                log(f"inverse escalated EXC: {e}")
-                return web.json_response(
-                    {"type": "error", "error": {"type": "router_error",
-                     "message": str(e)}}, status=502)  # legacy, vedi _err_response
-
-        # solo /v1/messages è soggetto a verifica; altri path -> minimax passthrough
-        if not is_t2:
-            # T0/T1 (incluso agentico con tools): MiniMax esegue. M3 è agentico ed
-            # emette tool_use nativamente (verificato 2026-06-29). Su 429/5xx -> rescue
-            # Anthropic, così sotto carico (100 agenti) nessuno si blocca sul rate-limit.
-            try:
-                up = await forward_minimax(request, body, session)
-            except Exception as e:
-                n = inverse_fail_inc(chat_fp)
-                log(f"inverse T1 M3 EXC ({n}/{INVERSE_FAIL_THRESHOLD}): {e}")
-                try:
-                    return await relay(await forward_anthropic(request, body, session))
-                except Exception as e2:
-                    return web.json_response(
-                        {"type": "error", "error": {"type": "router_error",
-                         "message": f"both down: {e2}"}}, status=502)
-            if up.status in MINIMAX_FALLBACK_STATUSES:
-                n = inverse_fail_inc(chat_fp)
-                await up.release()
-                log(f"inverse T1 M3 {up.status} ({n}/{INVERSE_FAIL_THRESHOLD}) -> anthropic rescue")
-                try:
-                    up2 = await forward_anthropic(request, body, session)
-                    if up2.status < 400:
-                        inverse_fail_reset(chat_fp)
-                    return await relay(up2)
-                except Exception as e2:
-                    return web.json_response(
-                        {"type": "error", "error": {"type": "router_error",
-                         "message": f"rescue ko: {e2}"}}, status=502)
-            # FIX 2026-07-08 (BUG-CTX-PRE): intercetta 400 context-exceed → shrink/retry
-            # prima di girare il body intero a Anthropic (modello utente 1M regge, ma
-            # se finisce su Haiku 200k siamo daccapo). Shrink tenta comunque.
-            if up.status == 400:
-                is_ctx_pre = up.headers.get("x-ai-context-exceeded") == "true" if hasattr(up, "headers") else False
-                is_ctx_real, _ = await _is_context_exceed_400(up)
-                if is_ctx_pre or is_ctx_real:
-                    log(f"inverse T1 M3 400 context-exceed → shrink/retry fp={chat_fp}")
-                    return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
-            inverse_fail_reset(chat_fp)
-            log(f"inverse T0/T1 -> minimax {up.status} {request.path}")
-            return await relay(up)
-
-        # ---- T2 critico: pipeline collaborativa M3 <-> Anthropic ----
-        # R1: M3 genera bozza
-        # R2: Anthropic produce critica costruttiva
-        # R3: M3 rivede la bozza (v2) usando la critica
-        # R4: Anthropic finalizza (gate qualità)
-        try:
-            orig = json.loads(body)
-        except Exception:
-            orig = {}
-        question = extract_last_user_text(orig)
-        wants_stream = bool(orig.get("stream"))
-
-        # R1: bozza M3
-        try:
-            gen_status, gen_json = await _call_full(_fwd_minimax_short, request, body, session)
-        except Exception as e:
-            gen_status, gen_json = 0, None
-            log(f"inverse T2 R1 EXC: {e}")
-        # FIX 2026-07-13: 400 context-exceed deve fare fallback (non skip)
-        if not gen_json or gen_status in (MINIMAX_FALLBACK_STATUSES | {400}):  # FIX B4.1: solo retryable
-            n = inverse_fail_inc(chat_fp)
-            log(f"inverse T2: M3 R1 fallita ({gen_status}) [{n}/{INVERSE_FAIL_THRESHOLD}]")
-            if inverse_should_escalate(chat_fp):
-                log(f"inverse T2: ESCALATION -> Anthropic esegue ({n} fail)")
-                try:
-                    up = await forward_anthropic(request, body, session)
-                    return await relay(up)
-                except Exception as e:
-                    return web.json_response(
-                        {"type": "error", "error": {"type": "router_error",
-                         "message": f"escalation ko: {e}"}}, status=502)
-            try:
-                up = await forward_anthropic(request, body, session)
-                return await relay(up)
-            except Exception as e:
-                return web.json_response(
-                    {"type": "error", "error": {"type": "router_error",
-                     "message": f"gen+fallback ko: {e}"}}, status=502)
-        inverse_fail_reset(chat_fp)
-        draft_v1 = _text_from_message(gen_json)
-        log(f"inverse T2 R1: M3 bozza v1 ({len(draft_v1)} chars)")
-
-        # R2: Anthropic critica
-        cbody = _build_critique_body(orig, question, draft_v1)
-        critique = ""
-        try:
-            c_status, c_json = await _call_full(forward_anthropic_direct, request, cbody, session)
-            if c_json and c_status < 400:
-                critique = _text_from_message(c_json).strip()
-        except Exception as e:
-            log(f"inverse T2 R2 EXC: {e}")
-        log(f"inverse T2 R2: Anthropic critica ({len(critique)} chars)")
-
-        no_critique = (not critique) or ("NESSUNA CRITICA" in critique.upper())
-        if no_critique:
-            final_text = draft_v1
-            verified_flag = "m3_only"
-            log(f"inverse T2: nessuna critica -> M3 v1 finale")
-        else:
-            # R3: M3 rivede -> v2
-            rbody = _build_revise_body(orig, question, draft_v1, critique)
-            draft_v2 = draft_v1  # fallback
-            try:
-                r_status, r_json = await _call_full(_fwd_minimax_short, request, rbody, session)
-                if r_json and r_status < 400:
-                    draft_v2 = _text_from_message(r_json) or draft_v1
-            except Exception as e:
-                log(f"inverse T2 R3 EXC: {e}")
-            log(f"inverse T2 R3: M3 v2 ({len(draft_v2)} chars)")
-
-            # R4: Anthropic finalizza
-            fbody = _build_finalize_body(orig, question, draft_v2)
-            final_text = draft_v2  # fallback
-            try:
-                f_status, f_json = await _call_full(forward_anthropic_direct, request, fbody, session)
-                if f_json and f_status < 400 and _text_from_message(f_json):
-                    final_text = _text_from_message(f_json)
-                    verified_flag = "collaborative"
-                else:
-                    verified_flag = "m3_v2_unfinalized"
-            except Exception as e:
-                verified_flag = "m3_v2_unfinalized"
-                log(f"inverse T2 R4 EXC: {e}")
-            log(f"inverse T2 R4: flag={verified_flag} ({len(final_text)} chars)")
-
-        # Costruisci final_json (SSE o JSON) da final_text
-        final_json = {
-            "id": f"msg_collab_{int(time.time()*1000)}",
-            "type": "message", "role": "assistant",
-            "model": "minimax-m3+claude" if verified_flag == "collaborative" else "minimax-m3",
-            "content": [{"type": "text", "text": final_text}],
-            "stop_reason": "end_turn", "stop_sequence": None,
-            "usage": {"input_tokens": 0, "output_tokens": max(1, len(final_text) // 4)}  # FIX B4.2: ~4 char/token, meglio di split(),
-        }
-
-        # 3) risposta al client (SSE sintetico se chiedeva stream)
-        if wants_stream:
-            # FIX SSE: invio evento-per-evento con flush + header anti-buffering
-            return await _send_sse_message(request, final_json, verified_flag)
-        return web.json_response(
-            final_json, headers={"x-ai-verified": verified_flag})
-
     # ── MODALITÀ MIXED: Anthropic orchestra SEMPRE + MiniMax esegue SEMPRE ──
     # Pipeline gerarchica:
     #   - T2-classifier (locale, zero-token) marca le richieste 'complesse'
@@ -5009,9 +4447,9 @@ async def _run_multiport():
         # Setup signal handler per crash dump
         RESILIENCE_INST.install_signal_handlers()
 
-    # FIX audit v5 #6: una ClientSession ha UN solo connector (il "pool separato"
+    # FIX audit #6: una ClientSession ha UN solo connector (il "pool separato"
     # del vecchio B1.3 era fittizio: _minimax_connector non veniva mai usato da
-    # session.request). Un unico pool con limit alto basta per un proxy locale.
+    # session.request, #68727). Un unico pool con limit alto basta per un proxy locale.
     # ponytail: limit=100 globale, alzare se servisse throughput multi-tenant.
     connector = TCPConnector(limit=100, limit_per_host=40, ttl_dns_cache=300)
     # Una sola ClientSession condivisa da tutte le porte.

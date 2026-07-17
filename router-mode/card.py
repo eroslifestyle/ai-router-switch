@@ -37,7 +37,6 @@ MODES = [
     {"id": "anthropic", "icon": "🔵", "label": "Anthropic", "exec": "Claude Opus/Sonnet"},
     {"id": "minimax", "icon": "🟠", "label": "MiniMax", "exec": "M3 orch / M2.7 act"},
     {"id": "mixed", "icon": "🔷", "label": "Mixed", "exec": "Anthropic / MiniMax"},
-    {"id": "inverse", "icon": "🔶", "label": "Inverse", "exec": "M3 think / Opus / M2.7"},
     {"id": "glm", "icon": "🟢", "label": "GLM", "exec": "GLM-5.2 orch / tiering"},
     {"id": "glm-minimax", "icon": "🟢🟠", "label": "GLM+MM", "exec": "GLM-5.2 / M2.7 act"},
     {"id": "anthropic-glm", "icon": "🔵🟢", "label": "Ant+GLM", "exec": "Anthropic / GLM"},
@@ -330,7 +329,7 @@ class Card(QWidget):
 
         multi_grid = QGridLayout()
         multi_grid.setSpacing(SPACING)
-        multi_ids = ["mixed", "inverse", "glm-minimax", "anthropic-glm"]
+        multi_ids = ["mixed", "glm-minimax", "anthropic-glm"]
         for i, mid in enumerate(multi_ids):
             m = next(x for x in MODES if x["id"] == mid)
             card = ModeCard(m, self._do_switch)
