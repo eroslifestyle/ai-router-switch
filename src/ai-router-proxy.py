@@ -624,6 +624,13 @@ _request_orig_model = {}  # chat_fp -> orig_model (es. "claude-sonnet-4-6")
 # MIXED: MiniMax esegue tutto; dopo N fail consecutivi Anthropic prende il comando.
 MIXED_FAIL_THRESHOLD = int(os.environ.get("AIROUTER_MIXED_FAILS", "2"))
 _mixed_fails = {}  # chat_fp -> int
+_mixed_fail_ts = {}  # chat_fp -> float — epoch sec ultimo fail (per reset counter + GC)
+_mixed_cooldown_until = {}  # chat_fp -> float — epoch sec fine escalation (rescue→Anthropic)
+
+# FIX AUDIT 2026-07-17: chat_fp|"__remap__" -> modello originale richiesto dal client.
+# Usato da remap_body_for_minimax() e consumato da relay() (riscrittura SSE).
+# Senza questo dict ogni richiesta mixed/MiniMax cadeva in NameError → 500.
+_request_orig_model = {}
 
 # FIX B1.1: lock condiviso per contatori globali (thread-safe + asyncio-safe via run_in_executor)
 _counter_lock = threading.Lock()
