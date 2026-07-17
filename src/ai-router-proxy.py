@@ -489,11 +489,17 @@ class MinimaxRateLimiter:
     """
 
     def __init__(self):
-        self._lock = asyncio.Lock()
-        self._windows = {}          # model -> deque([[ts, tokens], ...])
+        self._model_locks = {}     # model -> asyncio.Lock (uno per modello)
+        self._windows = {}         # model -> deque([[ts, tokens], ...])
         self._cooldown_until = 0.0  # monotonic; globale, condiviso
         self._plan_exhausted_until = ""  # ISO/testo dal body Token Plan (per /health)
         self._backoff_idx = 0
+
+    def _model_lock(self, model: str) -> asyncio.Lock:
+        """Lazily creates one lock per model instead of global lock serialization."""
+        if model not in self._model_locks:
+            self._model_locks[model] = asyncio.Lock()
+        return self._model_locks[model]
 
     def _limits(self, model: str):
         rpm, tpm = MINIMAX_RATE_LIMITS.get(model, MINIMAX_RATE_LIMITS_DEFAULT)
@@ -507,10 +513,14 @@ class MinimaxRateLimiter:
 
     async def acquire(self, model: str, est_tokens: int, budget_sec: float):
         """Attende uno slot RPM/TPM per `model`. Ritorna l'entry mutabile da
-        passare a record(). RateLimitExhausted se il budget si esaurisce."""
+        passare a record(). RateLimitExhausted se il budget si esaurisce.
+        AQ-RL1: per-model lock — richieste su modelli diversi procedono in parallelo."""
         waited = 0.0
         while True:
-            async with self._lock:
+            # AQ-RL1: per-model lock instead of global — concurrent requests on
+            # different models no longer serialize. Cooldown check uses the global
+            # _cooldown_until read (not a lock — worst case is one extra iteration).
+            async with self._model_lock(model):
                 now = time.monotonic()
                 if self._cooldown_until > now:
                     wait = min(self._cooldown_until - now, 60.0)
@@ -627,13 +637,16 @@ _inverse_cooldown_until = {}  # chat_fp -> timestamp fine cooldown
 _mixed_cooldown_until = {}  # chat_fp -> timestamp fine cooldown
 
 
-_FAILS_GC_MAX = 5000  # FIX audit v5 #7: soglia oltre cui ripulire chat_fp stale
+_FAILS_GC_MAX = 5000  # soglia oltre cui ripulire chat_fp stale
+_FAILS_GC_INTERVAL = 1000  # AQ-RL2: GC ogni N incrementi, non ogni volta
+# AQ-RL2: contatore GC separato per ciascun tracker (indipendenti)
+_gc_inv_counter = 0
+_gc_mix_counter = 0
 
 
 def _gc_fail_dicts(fails: dict, ts: dict, cooldown: dict, now: float) -> None:
-    """FIX audit v5 #7: rimuove entry stale (no inc da >FAIL_RESET_SEC) quando i
-    dict crescono troppo. Da chiamare DENTRO _counter_lock. Evita crescita RAM
-    indefinita su proxy long-running con molti chat_fp unici (es. X-Session-ID)."""
+    """AQ-RL2: rimuove entry stale (no inc da >FAIL_RESET_SEC) quando i dict
+    crescono oltre _FAILS_GC_MAX. Chiamata FUORI dal lock, ogni N incrementi."""
     if len(fails) <= _FAILS_GC_MAX:
         return
     stale = [fp for fp, t in ts.items() if now - t > FAIL_RESET_SEC]
@@ -644,10 +657,10 @@ def _gc_fail_dicts(fails: dict, ts: dict, cooldown: dict, now: float) -> None:
 
 
 def inverse_fail_inc(chat_fp: str) -> int:
-    """Incrementa contatore fallimenti MiniMax per chat. Ritorna nuovo valore."""
+    """AQ-RL2: GC fuori dal lock — throttling ogni _FAILs_GC_INTERVAL incrementi."""
+    global _gc_inv_counter
     with _counter_lock:  # FIX B1.1
         now = time.time()
-        _gc_fail_dicts(_inverse_fails, _inverse_fail_ts, _inverse_cooldown_until, now)
         # Reset automatico se ultimo fail > FAIL_RESET_SEC fa
         last_fail = _inverse_fail_ts.get(chat_fp, 0)
         if now - last_fail > FAIL_RESET_SEC:
@@ -655,6 +668,12 @@ def inverse_fail_inc(chat_fp: str) -> int:
         n = _inverse_fails.get(chat_fp, 0) + 1
         _inverse_fails[chat_fp] = n
         _inverse_fail_ts[chat_fp] = now
+        # AQ-RL2: incrementa contatore GC atomico (lock-protected, micro)
+        _gc_inv_counter += 1
+        counter = _gc_inv_counter
+    # AQ-RL2: GC fuori dal lock — O(n) scansione non blocca altri thread/chat_fp
+    if counter % _FAILS_GC_INTERVAL == 0:
+        _gc_fail_dicts(_inverse_fails, _inverse_fail_ts, _inverse_cooldown_until, time.time())
     return n
 
 
@@ -684,9 +703,10 @@ def inverse_should_escalate(chat_fp: str) -> bool:
 
 
 def mixed_fail_inc(chat_fp: str) -> int:
+    """AQ-RL2: GC fuori dal lock — throttling ogni _FAILS_GC_INTERVAL incrementi."""
+    global _gc_mix_counter
     with _counter_lock:  # FIX B1.1
         now = time.time()
-        _gc_fail_dicts(_mixed_fails, _mixed_fail_ts, _mixed_cooldown_until, now)
         # Reset automatico se ultimo fail > FAIL_RESET_SEC fa
         last_fail = _mixed_fail_ts.get(chat_fp, 0)
         if now - last_fail > FAIL_RESET_SEC:
@@ -694,6 +714,12 @@ def mixed_fail_inc(chat_fp: str) -> int:
         n = _mixed_fails.get(chat_fp, 0) + 1
         _mixed_fails[chat_fp] = n
         _mixed_fail_ts[chat_fp] = now
+        # AQ-RL2: incrementa contatore GC atomico (lock-protected, micro)
+        _gc_mix_counter += 1
+        counter = _gc_mix_counter
+    # AQ-RL2: GC fuori dal lock — O(n) scansione non blocca altri thread/chat_fp
+    if counter % _FAILS_GC_INTERVAL == 0:
+        _gc_fail_dicts(_mixed_fails, _mixed_fail_ts, _mixed_cooldown_until, time.time())
     return n
 
 

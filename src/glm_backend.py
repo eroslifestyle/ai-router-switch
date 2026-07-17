@@ -706,7 +706,7 @@ async def forward_glm(request, body: bytes, session, model: str,
                         except Exception as e:
                             log_fn(f"GLM gzip decompress failed: {e}")
                     return aiohttp.web.Response(
-                        body=raw,
+                        body=_rewrite_glm_model(raw, model),
                         status=resp.status,
                         headers=headers,
                     )
@@ -726,6 +726,48 @@ async def forward_glm(request, body: bytes, session, model: str,
 
     # Tutti i tentativi falliti
     return aiohttp.web.Response(status=502, text=f"GLM exhausted after 2 attempts")
+
+
+def _rewrite_glm_model(raw: bytes, orig_model: str) -> bytes:
+    """AQ-FIX1: riscrive 'model' nel body della risposta GLM con il modello
+    originale richiesto dal client (non il tier effettivo, es. 'glm-5.2').
+    Gestisce JSON non-streaming e SSE (data: JSON lines)."""
+    try:
+        decoded = raw.decode("utf-8")
+    except Exception:
+        return raw
+
+    # Caso 1: SSE (righe che iniziano con "data: ")
+    if "data: " in decoded:
+        lines = decoded.split("\n")
+        rewritten = []
+        for line in lines:
+            if line.startswith("data: "):
+                json_str = line[6:]  # togli "data: "
+                try:
+                    obj = json.loads(json_str)
+                    if "model" in obj:
+                        obj["model"] = orig_model
+                    rewritten.append("data: " + json.dumps(obj, ensure_ascii=False))
+                except Exception:
+                    rewritten.append(line)
+            else:
+                rewritten.append(line)
+        try:
+            return "\n".join(rewritten).encode("utf-8")
+        except Exception:
+            return raw
+
+    # Caso 2: JSON non-streaming
+    try:
+        obj = json.loads(decoded)
+        if "model" in obj:
+            obj["model"] = orig_model
+            return json.dumps(obj, ensure_ascii=False).encode("utf-8")
+    except Exception:
+        pass
+
+    return raw
 
 
 def _estimate_tokens(data: bytes) -> int:
