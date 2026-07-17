@@ -7,10 +7,11 @@ updated: 2026-06-29
 
 # Project Global TOD — ai-router-switch
 
-**Main HEAD**: 1091599 · **Branch**: main · **Updated**: 2026-07-12
+**Main HEAD**: 8e40532 · **Branch**: main · **Updated**: 2026-07-17
 
 ## ✅ Done (recenti, evidence-gated)
 
+- [x] **AQ-RL1/RL2/FIX1** — AQ riprogettazione flow gerarchici: (RL1) MinimaxRateLimiter per-model asyncio.Lock — richieste su modelli diversi non serializzano più. (RL2) _gc_fail_dicts() fuori da _counter_lock — O(n) scan non blocca ogni fail increment. Throttling GC ogni 1000 incrementi via contatore atomico. (FIX1) _rewrite_glm_model() riscrive 'model' nel body GLM con il modello richiesto (non il tier effettivo). Commit `8e40532` pushato. (2026-07-17)
 - [x] **D44+D45** — Sessione 2026-07-11 pomeriggio: (D44) Fast-path MiniMax in mixed — skip redundant Anthropic THINK quando il modello è già MiniMax (passthrough diretto a forward_minimax). Test 10 iter: diff medio ≈0s (varianza API upstream, non routing). Commit `2f238a6`. (D45) Bypass THINK per task leggeri in mixed — criteri: <200 char, 1 msg, no tools → passthrough diretto (nessuna orchestrazione). Test misurato: ~4.5s vs ~24s (~5x miglioramento latenza). Commit `3bfa966`. Proxy live. (2026-07-11)
 - [x] **CHUNK-A/B/C-MERGE** — Merge finale 3 stack development: (A) glm_backend.py fix ClientTimeout + _ANTHROPIC_BLOCKED marker, peak_scheduler.py Asia/Shanghai 14-18 UTC+8, GLMRateLimiter dedicato; (B) context_shrink.py adaptive shrink con HHEM + learn(), shrink_policy.json warm-start 8 modelli guardrail 50-92%; (C) _retry_forward 2x in 5 rescue path call sites; sync 4 support modules (token_counter/model_context_map/context_rewrite/summarizer) da progetto; syntax 7/7 OK; test isolato 8795 GLM passthrough Z.ai reale (not_found_error: glm-4.7 = corretto, modello inesistente); rollout live :8787 PID 509251, health + request 429 verficati. Commits `c70ec52` + `1091599` pushati. (2026-07-12)
 - [x] **D37+D38+D41** — Sessione 2026-07-11: (D37) E2E inverse mode — header `x-ai-verified: minimax-m3-think+anthropic-oppose+minimax-m2.7-act` · (D38) test 4 modalità — minimax/mixed/inverse OK, anthropic 429 upstream (proxy OK) · (D41) delta-correction TPM — relay finally corregge entry[1] in-place, log conferma 74-91% overstima corretta (est=1051→88, 136560→26379, 170729→44314). Fix: MOD1 (forward_minimax attach), MOD2 (relay finally correction), MOD3 (_forward_minimax_generative attach). Commit `de18154` pushato, proxy live. (2026-07-11)
@@ -38,7 +39,17 @@ updated: 2026-06-29
 
 ## ⬜ Backlog
 
-*(vuoto — tutti i task completati)*
+- [ ] **AQ-RL1** — Lock-free `MinimaxRateLimiter.acquire()` — lock solo su read-modify-write modello, pruning lock-free su deque — 1h — Q1 (decisione: risolvi subito)
+- [ ] **AQ-RL2** — GC fail dicts fuori dal lock — ogni N incrementi invece di O(n) dentro `_counter_lock` — 30min — Q1
+- [ ] **AQ-FIX1** — Fix model rewrite in `forward_glm()` — SSE response scrive `glm-5.2` invece del modello richiesto dall'utente — 30min — Q4 (decisione: correggi subito)
+- [ ] **AQ-REF1** — Estrarre `StreamingRelay` come classe — estrae ~380 righe da `handle()` — 2h
+- [ ] **AQ-REF2** — FailTracker centralizzato — 1 classe invece di 4 dict sparsi — 1h
+- [ ] **AQ-REF3** — BasePipeline + Step + Pipeline — unifica inverse/mixed in `PipelineConfig` come dati — 4h — Q3 (decisione: unifica)
+- [ ] **AQ-REF4** — Estrarre `providers/base.py` — ProviderBackend interface — 2h
+- [ ] **AQ-REF5** — Estrarre `pipelines/primitives.py` — Step/Pipeline classi — 3h
+- [ ] **AQ-REF6** — TokenRateLimiter unificato — rate limiter generico con `RateLimitRule` dataclass — 2h
+- [ ] **AQ-REF7** — ContextManager in `context/window.py` — trim/shrink/summarize centralizzato — 2h
+- [ ] **AQ-TEST** — Test per 3 pipeline principali (mixed/inverse/minimax) — 6h
 
 ## 🚫 Deferred / Blocked
 
