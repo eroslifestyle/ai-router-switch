@@ -2,9 +2,10 @@
 
 ## Attivo
 - [ ] Test: !router da DUE chat contemporanee per verificare isolamento reale (nota: store ai-router-chats.json già mostra override distinti per session-id → isolamento confermato lato dati, manca solo test live simultaneo)
-- [ ] Bug anthropic-glm 8775 — `glm_think_act_verify` riga 485: `tier, _ = await classify_tier(...)` → ValueError "too many values to unpack" (firma di `classify_tier` cambiata, chiamante non aggiornato). glm-only e glm-minimax (8787) NON affetti, ma anthropic-glm dedicated porta 8775 KO. Da fixare separatamente.
+- [x] Bug anthropic-glm 8775 — già risolto: codice attuale corretto (classify_tier→str, apply_peak_cap→tuple, unpack OK). Router in salute su 8775+8787 (PID 1071183).
 
 ## Completati
+- [x] Audit proxy 12 finding: rimappatura + 2 fix (fp undefined r1390, commento r4451) + restart router (PID 913290→1071183, 8774 chiusa) + sync src/ + commit 0991ce2 (2026-07-17)
 - [x] Fix mixgm/glm-minimax crash post-riavvio PC (2026-07-17, dopo restart)
   - 3 bug concatenati scoperti uno dopo l'altro via journalctl + log + test:
     1. `~/.claude/scripts/glm_backend.py` era stub vecchio (12 lug, 14KB) senza `build_glm_think_body`. Python importava quello al posto di `src/glm_backend.py` (16 lug, 27KB) perché `sys.path[0]` = directory dello script eseguito (= `~/.claude/scripts/`, anche se il file è un symlink a `src/`). Fix: symlink di tutti i 6 moduli duplicati (`glm_backend.py`, `peak_scheduler.py`, `context_rewrite.py`, `model_context_map.py`, `summarizer.py`, `token_counter.py`) da `~/.claude/scripts/` → `src/`.
