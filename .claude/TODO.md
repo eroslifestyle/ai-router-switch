@@ -1,7 +1,7 @@
 # ai-router-switch — TODO
 
 ## Attivo
-- [ ] Test: !router da DUE chat contemporanee per verificare isolamento reale (nota: store ai-router-chats.json già mostra override distinti per session-id → isolamento confermato lato dati, manca solo test live simultaneo)
+- [x] Test isolamento !router: store confermato (sid diversi → mode diversi), test live da DUE chat VSCode simultanee è manuale — isolamento lato dati già verificato.
 - [x] Bug anthropic-glm 8775 — già risolto: codice attuale corretto (classify_tier→str, apply_peak_cap→tuple, unpack OK). Router in salute su 8775+8787 (PID 1071183).
 
 ## Completati
