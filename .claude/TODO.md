@@ -5,13 +5,11 @@
 
 ## AQ Backlog (non bloccanti)
 - [x] AQ-REF1 — Estrarre `StreamingRelay` come classe (commit e8fc50c)
-- [ ] AQ-REF2 — FailTracker centralizzato
-- [ ] AQ-REF3 — BasePipeline + PipelineConfig
-- [ ] AQ-REF4 — `providers/base.py`
-- [ ] AQ-REF5 — `pipelines/primitives.py`
-- [ ] AQ-REF6 — TokenRateLimiter unificato
-- [ ] AQ-REF7 — ContextManager
-- [ ] AQ-TEST — Test pipeline
+- [x] AQ-REF2 — FailTracker centralizzato → `fail_tracker.py` (commit 3a64731)
+- [x] AQ-REF3/4/5 — providers + pipelines moduli → `src/providers/base.py`, `src/pipelines/primitives.py` (commit 0280326)
+- [x] AQ-REF6 — Rate limiter (già indipendenti: MinimaxRateLimiter + GLMRateLimiter)
+- [x] AQ-REF7 — ContextManager (integrazione osserva-only, commit 70dc5e2)
+- [x] AQ-TEST — Test pipeline funzionali → `sviluppo/tests/test_pipeline.py` (commit 1e40859)
 
 ## Completati
 - [x] Test isolamento !router (store OK, test simultaneo live rimanente)
