@@ -1,7 +1,7 @@
 # ai-router-switch — TODO
 
 ## Attivo
-- [ ] **Test live !router da DUE chat contemporanee** — isolamento lato store già OK (`ai-router-chats.json` sid distinti). Aprire 2 chat VSCode su `:8787`, mandare `!router minimax` in una e `!router anthropic` nell'altra, verificare che ogni chat risponda con la propria modalità.
+- [x] **Test live !router da DUE chat contemporanee** — isolamento lato store già OK (`ai-router-chats.json` sid distinti). Aprire 2 chat VSCode su `:8787`, mandare `!router minimax` in una e `!router anthropic` nell'altra, verificare che ogni chat risponda con la propria modalità.
 
 ## AQ Backlog (non bloccanti)
 - [ ] AQ-REF1 — Estrarre `StreamingRelay` come classe (~2h)
