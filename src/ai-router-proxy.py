@@ -2327,7 +2327,7 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
         log(f"shrink: body ancora grande dopo shrink → LLM summarization fp={chat_fp}")
         summary_msgs = await summarize_old_messages(
             messages, MINIMAX_MODEL, chat_fp,
-            MINIMAX_UPSTREAM, MINIMAX_API_KEY
+            MINIMAX_UPSTREAM, await get_minimax_key()
         )
         if summary_msgs is not None:
             summ_shrunk = dict(orig_dict)
