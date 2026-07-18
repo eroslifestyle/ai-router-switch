@@ -30,6 +30,10 @@ from pathlib import Path
 
 from aiohttp import web, ClientSession, ClientTimeout, TCPConnector
 
+# ponytail: reach modules at project root (providers/, pipelines/)
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).parent))  # src/ → progetto root
+
 # Context window fix imports (LAYER 1: intelligent rewrite)
 from token_counter import estimate_tokens, count_tokens
 from model_context_map import get_safe_input_limit, get_context_limit, get_summary_budget
@@ -40,6 +44,18 @@ from context_manager import ContextManager
 
 # Istanza globale ContextManager (AQ-REF3)
 CTX = ContextManager()
+
+# ── Moduli condivisi ─────────────────────────────────────────────────────────
+from providers.base import (
+    FALLBACK_STATUSES, MINIMAX_FALLBACK_STATUSES,
+    extract_last_user_text, _text_from_message,
+    _is_context_too_large_for_minimax, _is_context_exceed_400,
+    strip_images_body, call_full,
+    T2_KEYWORDS, trim_old_messages,
+)
+from pipelines.primitives import (
+    build_think_body, build_act_body, build_finalize_body,
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
