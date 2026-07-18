@@ -1,18 +1,24 @@
 """Context window per ogni modello supportato."""
 
 MODEL_CONTEXT_MAP = {
-    # Anthropic
-    "opus": 1_000_000,       "claude-opus-4-5": 200_000,
-    "sonnet": 200_000,       "claude-sonnet-4-5": 200_000,
-    "sonnet-4-6": 1_000_000, "claude-sonnet-4-7": 1_000_000,
-    "sonnet-4-8": 1_000_000, "claude-sonnet-4-8": 1_000_000,
-    "haiku": 200_000,        "claude-haiku-4-5": 200_000,
-    # MiniMax
-    "MiniMax-M2.7": 200_000, "MiniMax-M3": 200_000,
-    "MiniMax-M3.5": 200_000, "MiniMax-Haiku": 200_000,
-    # GLM
-    "glm-5-turbo": 1_000_000, "glm-5.2": 1_000_000,
-    "glm-4": 128_000,          "glm-4v": 128_000,
+    # Anthropic (SPEC: opus-4-8, sonnet-4-6/4-7/4-8, haiku-4-5)
+    "opus": 1_000_000,          "claude-opus-4-5": 200_000,
+    "claude-opus-4-8": 1_000_000,
+    "sonnet": 200_000,         "claude-sonnet-4-5": 200_000,
+    "sonnet-4-6": 1_000_000,  "claude-sonnet-4-6": 1_000_000,
+    "sonnet-4-7": 1_000_000,  "claude-sonnet-4-7": 1_000_000,
+    "sonnet-4-8": 1_000_000,  "claude-sonnet-4-8": 1_000_000,
+    "haiku": 200_000,          "claude-haiku-4-5": 200_000,
+    # MiniMax (SPEC: M2.5)
+    "MiniMax-M2": 200_000,    "MiniMax-M2.5": 200_000,
+    "MiniMax-M2.7": 200_000,  "MiniMax-M3": 200_000,
+    "MiniMax-M3.5": 200_000,  "MiniMax-Haiku": 200_000,
+    # GLM (SPEC: glm-4.6V, glm-5V-Turbo, glm-5.2)
+    "glm-4.6v": 131_000,      "glm-4.7": 128_000,
+    "glm-4v": 131_000,       "glm-4": 128_000,
+    "glm-5-turbo": 200_000,
+    "glm-5.2": 1_000_000,
+    "glm-5V-Turbo": 200_000,
 }
 
 BUFFER_PERCENT = 20  # 20% libero per output

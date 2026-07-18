@@ -34,6 +34,10 @@ from model_context_map import get_safe_input_limit, get_context_limit, get_summa
 from context_rewrite import rewrite_for_context
 from summarizer import summarize_old_messages
 from streaming_relay import StreamingRelay
+from context_manager import ContextManager
+
+# Istanza globale ContextManager (AQ-REF3)
+CTX = ContextManager()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -3622,6 +3626,22 @@ async def handle(request):
     if "multipart/form-data" in ct:
         return _err_response("multipart not supported", status=415)
     body = await request.read()
+
+    # ══ CTX PRE-CHECK (AQ-REF3): contesto + rate limit pre-chiamata upstream ══
+    fp = _resolve_chat_fingerprint(request)
+    ctx_check = CTX.pre_check(fp, mode, len(body))
+    if ctx_check["action"] == "error":
+        log(f"ctx: ERROR soglia 100% fp={fp} mode={mode} pct={ctx_check['pct']:.1%}")
+        return web.json_response(
+            {"type": "error", "error": {"type": "context_exceeded",
+             "message": f"context limit reached ({ctx_check['pct']:.0%}), cannot serve request"}},
+            status=400,
+            headers={"x-ai-ctx-pct": f"{ctx_check['pct']:.0f}"})
+    elif ctx_check["action"] == "compact":
+        log(f"ctx: COMPACT soglia 90% fp={fp} mode={mode} pct={ctx_check['pct']:.1%}")
+    elif ctx_check["action"] == "warn":
+        log(f"ctx: WARN soglia 80% fp={fp} mode={mode} pct={ctx_check['pct']:.1%}")
+
     # ── TRIM INTERCEPT: carica body pre-trimmato se disponibile ────────────
     fp = _resolve_chat_fingerprint(request)
     trim_file = TRIM_STATE_DIR / f"{fp}.json"
