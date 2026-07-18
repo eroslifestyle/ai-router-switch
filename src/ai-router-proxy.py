@@ -18,6 +18,8 @@ import asyncio
 import gzip
 import json
 import os
+
+from fail_tracker import fail_tracker, mixed_fail_inc, mixed_fail_reset, mixed_anthropic_leads
 import random
 import signal
 import sys
@@ -642,7 +644,7 @@ def _minimax_alert(msg: str):
         pass
 # Circuit breaker (D15): dopo N fail un backend va in cooldown e viene saltato.
 # FIX audit v4: BREAKER_* removed (dead code - mai chiamato nel flusso;
-# la logica di escalation usa _mixed_fails per-chat).
+# la logica di escalation usa fail_tracker per-chat).
 # Se serve circuit-breaker globale, va reintrodotto con test.
 
 # FIX E + FIX AUDIT 2026-07-17: chat_fp|"__remap__" -> modello originale richiesto
@@ -652,81 +654,13 @@ def _minimax_alert(msg: str):
 # DEDUPE 2026-07-17: era definito due volte (seconda definizione azzerava la prima).
 _request_orig_model = {}  # chat_fp -> orig_model (es. "claude-sonnet-4-6")
 
-# MIXED: MiniMax esegue tutto; dopo N fail consecutivi Anthropic prende il comando.
-# DEDUPE 2026-07-17: _mixed_fail_ts/_mixed_cooldown_until erano definiti due volte.
-MIXED_FAIL_THRESHOLD = int(os.environ.get("AIROUTER_MIXED_FAILS", "2"))
-_mixed_fails = {}  # chat_fp -> int
-_mixed_fail_ts = {}  # chat_fp -> float — epoch sec ultimo fail (per reset counter + GC)
-_mixed_cooldown_until = {}  # chat_fp -> float — epoch sec fine escalation (rescue→Anthropic)
-
-# FIX B1.1: lock condiviso per contatori globali (thread-safe + asyncio-safe via run_in_executor)
-_counter_lock = threading.Lock()
-
-# FIX #2: Cooldown e reset automatico per escalation
-RESCUE_COOLDOWN_SEC = 30  # cooldown dopo escalation prima di ritentare
-FAIL_RESET_SEC = 60  # reset counter se ultimo fallimento > 60s fa
-
-
-_FAILS_GC_MAX = 5000  # soglia oltre cui ripulire chat_fp stale
-_FAILS_GC_INTERVAL = 1000  # AQ-RL2: GC ogni N incrementi, non ogni volta
-_gc_mix_counter = 0  # AQ-RL2: contatore GC del tracker mixed
-
-
-def _gc_fail_dicts(fails: dict, ts: dict, cooldown: dict, now: float) -> None:
-    """AQ-RL2: rimuove entry stale (no inc da >FAIL_RESET_SEC) quando i dict
-    crescono oltre _FAILS_GC_MAX. Chiamata FUORI dal lock, ogni N incrementi."""
-    if len(fails) <= _FAILS_GC_MAX:
-        return
-    stale = [fp for fp, t in ts.items() if now - t > FAIL_RESET_SEC]
-    for fp in stale:
-        fails.pop(fp, None)
-        ts.pop(fp, None)
-        cooldown.pop(fp, None)
-
-
-def mixed_fail_inc(chat_fp: str) -> int:
-    """AQ-RL2: GC fuori dal lock — throttling ogni _FAILS_GC_INTERVAL incrementi."""
-    global _gc_mix_counter
-    with _counter_lock:  # FIX B1.1
-        now = time.time()
-        # Reset automatico se ultimo fail > FAIL_RESET_SEC fa
-        last_fail = _mixed_fail_ts.get(chat_fp, 0)
-        if now - last_fail > FAIL_RESET_SEC:
-            _mixed_fails[chat_fp] = 0
-        n = _mixed_fails.get(chat_fp, 0) + 1
-        _mixed_fails[chat_fp] = n
-        _mixed_fail_ts[chat_fp] = now
-        # AQ-RL2: incrementa contatore GC atomico (lock-protected, micro)
-        _gc_mix_counter += 1
-        counter = _gc_mix_counter
-    # AQ-RL2: GC fuori dal lock — O(n) scansione non blocca altri thread/chat_fp
-    if counter % _FAILS_GC_INTERVAL == 0:
-        _gc_fail_dicts(_mixed_fails, _mixed_fail_ts, _mixed_cooldown_until, time.time())
-    return n
-
-
-def mixed_fail_reset(chat_fp: str) -> None:
-    with _counter_lock:  # FIX audit v5 #2: simmetrico con mixed_fail_inc
-        _mixed_fails.pop(chat_fp, None)
-        _mixed_fail_ts.pop(chat_fp, None)
-        _mixed_cooldown_until.pop(chat_fp, None)
-
-
-def mixed_anthropic_leads(chat_fp: str) -> bool:
-    """True se MiniMax ha già fallito >= soglia: Anthropic prende il comando."""
-    with _counter_lock:  # FIX M3: check->write del cooldown atomico
-        # Cooldown attivo: resta in modalità escalation
-        if time.time() < _mixed_cooldown_until.get(chat_fp, 0):
-            return True
-        fails = _mixed_fails.get(chat_fp, 0)
-        if fails >= MIXED_FAIL_THRESHOLD:
-            # Attiva cooldown
-            _mixed_cooldown_until[chat_fp] = time.time() + RESCUE_COOLDOWN_SEC
-            return True
-        return False
+# AQ-REF2: stato fail-tracking spostato in fail_tracker.py (FailTracker)
+# via `from fail_tracker import fail_tracker, mixed_fail_inc, mixed_fail_reset, mixed_anthropic_leads`
+# Stato inline rimosso per evitare duplicazione.
 
 
 _minimax_key_cache = {"key": None, "ts": 0}
+_key_cache_lock = threading.Lock()  # lock per caching key, separato dal fail_tracker
 
 
 def log(msg: str):
@@ -1094,7 +1028,7 @@ async def get_minimax_key() -> str:
     """FIX deadlock 2026-06-30: cache hit sotto lock, subprocess FUORI dal lock.
 
     Bug originale: `asyncio.to_thread(subprocess.check_output)` chiamato DENTRO
-    `with _counter_lock` (threading.Lock). Quando arriva una 2ª richiesta mentre
+    `with _key_cache_lock` (threading.Lock). Quando arriva una 2ª richiesta mentre
     la 1ª è ancora in `await`, il 2° handler thread entra nello stesso lock
     perché `asyncio.to_thread` rilascia il GIL ma NON la threading.Lock tenuta
     dal thread asyncio principale → deadlock su event loop (lock ricorsivo).
@@ -1103,7 +1037,7 @@ async def get_minimax_key() -> str:
     """
     now = time.time()
     # 1) Cache hit: veloce, dentro lock (lettura atomica)
-    with _counter_lock:
+    with _key_cache_lock:
         cached = _minimax_key_cache["key"]
         cached_ts = _minimax_key_cache["ts"]
         if cached and now - cached_ts < 60:
@@ -1136,7 +1070,7 @@ async def get_minimax_key() -> str:
             key = ""
 
     # 4) Scrivi cache dentro lock (write atomico)
-    with _counter_lock:
+    with _key_cache_lock:
         # Doppio check: un altro handler potrebbe aver già popolato la cache
         # nel frattempo. Usa il valore appena letto se la cache è ancora vuota,
         # altrimenti rispetta chi ha scritto prima.
@@ -2820,13 +2754,13 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
         except Exception as e:
             mixed_fail_last_status = None
             n = mixed_fail_inc(chat_fp)
-            log(f"mix-am ACT {exe} EXC ({n}/{MIXED_FAIL_THRESHOLD}): {e}")
+            log(f"mix-am ACT {exe} EXC ({n}/{fail_tracker.threshold}): {e}")
             up = None
             continue
         mixed_fail_last_status = up.status  # traccia PRIMA di ogni altra valutazione
         if up.status in MINIMAX_FALLBACK_STATUSES:
             n = mixed_fail_inc(chat_fp)
-            log(f"mix-am ACT {exe} {up.status} ({n}/{MIXED_FAIL_THRESHOLD})")
+            log(f"mix-am ACT {exe} {up.status} ({n}/{fail_tracker.threshold})")
             # cattura body per debug prima del continue
             _raw = b""
             try:
@@ -4049,7 +3983,7 @@ async def handle(request):
             up = await forwarders["minimax"](request, body, session)
         except Exception as e:
             n = mixed_fail_inc(chat_fp)
-            log(f"mix-am T0/T1 M3 EXC ({n}/{MIXED_FAIL_THRESHOLD}) {request.path}: {e}")
+            log(f"mix-am T0/T1 M3 EXC ({n}/{fail_tracker.threshold}) {request.path}: {e}")
             try:
                 up = await forwarders["anthropic"](request, body, session)
                 log(f"mix-am T0/T1 fallback anthropic {up.status} {request.path}")
@@ -4061,8 +3995,8 @@ async def handle(request):
         if up.status in FALLBACK_STATUSES:  # FIX B4.1: solo retryable, NON 400/404
             n = mixed_fail_inc(chat_fp)
             await up.release()
-            log(f"mix-am T0/T1 M3 {up.status} ({n}/{MIXED_FAIL_THRESHOLD}) {request.path}")
-            if n >= MIXED_FAIL_THRESHOLD:
+            log(f"mix-am T0/T1 M3 {up.status} ({n}/{fail_tracker.threshold}) {request.path}")
+            if n >= fail_tracker.threshold:
                 log(f"mix-am escalation: M3 ha fallito {n}x -> Anthropic prende comando")
             try:
                 up2 = await forwarders["anthropic"](request, body, session)
@@ -4093,7 +4027,7 @@ async def handle(request):
     # FIX 2026-07-13: 400 context-exceed deve fare fallback
     if not gen_json or gen_status in (MINIMAX_FALLBACK_STATUSES | {400}):  # FIX B4.1: solo retryable
         n = mixed_fail_inc(chat_fp)
-        log(f"mix-am T2 M3 R1 ko {gen_status} ({n}/{MIXED_FAIL_THRESHOLD}) {request.path}")
+        log(f"mix-am T2 M3 R1 ko {gen_status} ({n}/{fail_tracker.threshold}) {request.path}")
         try:
             up = await forward_anthropic(request, body, session)
             log(f"mix-am T2 fallback anthropic {up.status} {request.path}")
