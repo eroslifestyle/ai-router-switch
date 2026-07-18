@@ -2375,7 +2375,10 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
         # Il modello stesso che ha fallito riassume i messaggi vecchi con budget
         # calibrato per il modello target. Se anche questo fallisce → Haiku.
         log(f"shrink: body ancora grande dopo shrink → LLM summarization fp={chat_fp}")
-        summary_msgs = await summarize_old_messages(messages)
+        summary_msgs = await summarize_old_messages(
+            messages, MINIMAX_MODEL, chat_fp,
+            MINIMAX_UPSTREAM, MINIMAX_API_KEY
+        )
         if summary_msgs is not None:
             summ_shrunk = dict(orig_dict)
             summ_shrunk["messages"] = summary_msgs
@@ -3627,20 +3630,20 @@ async def handle(request):
         return _err_response("multipart not supported", status=415)
     body = await request.read()
 
-    # ══ CTX PRE-CHECK (AQ-REF3): contesto + rate limit pre-chiamata upstream ══
+    # ══ CTX PRE-CHECK (AQ-REF3): OSSERVA soltanto, MAI blocca ═════════════════
+    # Regola utente (2026-07-18): il pre-check NON deve mai emettere un hard-error
+    # che rifiuta la richiesta. La stima byte//4 esplode su body con immagini
+    # base64 (non sono ~4 char/token) → falsi positivi a 1000%+. La saturazione
+    # reale è gestita dalla pipeline esistente (trim → shrink → rescue), che
+    # comprime senza bloccare. Qui logghiamo solo per osservabilità.
     fp = _resolve_chat_fingerprint(request)
-    ctx_check = CTX.pre_check(fp, mode, len(body))
-    if ctx_check["action"] == "error":
-        log(f"ctx: ERROR soglia 100% fp={fp} mode={mode} pct={ctx_check['pct']:.1%}")
-        return web.json_response(
-            {"type": "error", "error": {"type": "context_exceeded",
-             "message": f"context limit reached ({ctx_check['pct']:.0%}), cannot serve request"}},
-            status=400,
-            headers={"x-ai-ctx-pct": f"{ctx_check['pct']:.0f}"})
-    elif ctx_check["action"] == "compact":
-        log(f"ctx: COMPACT soglia 90% fp={fp} mode={mode} pct={ctx_check['pct']:.1%}")
-    elif ctx_check["action"] == "warn":
-        log(f"ctx: WARN soglia 80% fp={fp} mode={mode} pct={ctx_check['pct']:.1%}")
+    try:
+        ctx_check = CTX.pre_check(fp, mode, len(body))
+        if ctx_check["action"] in ("error", "compact", "warn"):
+            log(f"ctx: {ctx_check['action'].upper()} fp={fp} mode={mode} "
+                f"pct={ctx_check['pct']:.1%} (osserva, pipeline gestisce)")
+    except Exception as e:
+        log(f"ctx: pre_check EXC {e} fp={fp} mode={mode}")
 
     # ── TRIM INTERCEPT: carica body pre-trimmato se disponibile ────────────
     fp = _resolve_chat_fingerprint(request)
