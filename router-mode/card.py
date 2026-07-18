@@ -36,10 +36,10 @@ SPACING = 8
 MODES = [
     {"id": "anthropic", "icon": "🔵", "label": "Anthropic", "exec": "Claude Opus/Sonnet"},
     {"id": "minimax", "icon": "🟠", "label": "MiniMax", "exec": "M3 orch / M2.7 act"},
-    {"id": "mixed", "icon": "🔷", "label": "Mixed", "exec": "Anthropic / MiniMax"},
+    {"id": "mix-am", "icon": "🔷", "label": "MixAM", "exec": "Anthropic THINK + MiniMax ACT"},
     {"id": "glm", "icon": "🟢", "label": "GLM", "exec": "GLM-5.2 orch / tiering"},
-    {"id": "glm-minimax", "icon": "🟢🟠", "label": "GLM+MM", "exec": "GLM-5.2 / M2.7 act"},
-    {"id": "anthropic-glm", "icon": "🔵🟢", "label": "Ant+GLM", "exec": "Anthropic / GLM"},
+    {"id": "mix-gm", "icon": "🟢🟠", "label": "MixGM", "exec": "GLM-5.2 THINK + MiniMax ACT"},
+    {"id": "mix-ag", "icon": "🔵🟢", "label": "MixAG", "exec": "Anthropic THINK + GLM ACT"},
 ]
 
 def hex_c(h, a=255):
@@ -329,7 +329,7 @@ class Card(QWidget):
 
         multi_grid = QGridLayout()
         multi_grid.setSpacing(SPACING)
-        multi_ids = ["mixed", "glm-minimax", "anthropic-glm"]
+        multi_ids = ["mix-am", "mix-gm", "mix-ag"]
         for i, mid in enumerate(multi_ids):
             m = next(x for x in MODES if x["id"] == mid)
             card = ModeCard(m, self._do_switch)
