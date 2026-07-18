@@ -219,6 +219,38 @@ def _analyze_body_structure(body: "dict | bytes") -> dict:
     }
 
 
+def _strip_images_body(body: "dict | bytes") -> bytes:
+    """Rimuove i blocchi immagine dal body per recuperare context.
+
+    Quando Anthropic risponde 400 context window, le immagini sono la causa
+    principale (possono occupare MB). Le sostituisce con placeholder testuale.
+    """
+    try:
+        if isinstance(body, bytes):
+            data = json.loads(body)
+        else:
+            data = body
+        msgs = data.get("messages", [])
+        changed = False
+        for m in msgs:
+            c = m.get("content")
+            if isinstance(c, list):
+                new_c = []
+                for b in c:
+                    if isinstance(b, dict) and b.get("type") == "image":
+                        changed = True
+                        new_c.append({"type": "text", "text": "[image omitted — context limit]"})
+                    else:
+                        new_c.append(b)
+                if changed:
+                    m["content"] = new_c
+        if not changed:
+            return body if isinstance(body, bytes) else json.dumps(body).encode()
+        return json.dumps(data, ensure_ascii=False).encode()
+    except Exception:
+        return body if isinstance(body, bytes) else json.dumps(body).encode()
+
+
 def _rotated_jsonl_path() -> Path:
     """Ritorna il path del JSONL: .1 se .0 supera 10MB."""
     p = _DEBUG_JSONL
@@ -1461,9 +1493,40 @@ async def forward_anthropic(request, body, session):
                 f"orphans={analysis['orphan_tool_results']}")
     except Exception:
         pass
-    return await session.request(
-        request.method, url, data=safe_body, headers=headers, allow_redirects=False
-    )
+
+    # ══ CONTEXT WINDOW RETRY: Anthropic 400 context window → retry con immagini rimosse ══
+    try:
+        up = await session.request(
+            request.method, url, data=safe_body, headers=headers, allow_redirects=False
+        )
+        if up.status == 400:
+            try:
+                raw_err = await up.read()
+            except Exception:
+                raw_err = b""
+            await up.release()
+            low = raw_err.lower()
+            is_ctx = (b"context window" in low or b"reached its context" in low
+                      or b"context_exceeded" in low or b"context limit" in low
+                      or b"exceeds limit" in low)
+            if is_ctx:
+                stripped = _strip_images_body(safe_body)
+                if stripped != safe_body:
+                    log(f"[forward_anthropic] ctx-exceed 400 → retry with images stripped")
+                    up = await session.request(
+                        request.method, url, data=stripped, headers=headers,
+                        allow_redirects=False
+                    )
+                    if up.status < 400:
+                        return up
+                    try:
+                        await up.read()
+                    except Exception:
+                        pass
+                    await up.release()
+        return up
+    except Exception:
+        raise
 
 
 def _minimax_est_tokens(new_body: bytes) -> int:
