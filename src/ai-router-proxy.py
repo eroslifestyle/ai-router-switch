@@ -2948,8 +2948,32 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
             except Exception:
                 pass
         elif up.status == 429:
-            log(f"mix-am ACT rescue: modello utente 429 Rate Limit → relay subito fp={chat_fp}")
-            return await relay(up)
+            should_retry = str(up.headers.get("x-should-retry", "")).lower() == "true"
+            if not should_retry:
+                log(f"mix-am ACT rescue: modello utente 429 Rate Limit → relay subito fp={chat_fp}")
+                return await relay(up)
+            # FIX 2026-07-19: burst-limiter transitorio (stesso pattern di modalità
+            # anthropic pura, righe ~3805-3819) — 1 retry breve prima di arrendersi.
+            # Senza questo, payload grandi (es. richieste con molte immagini, stima
+            # token più alta) colpiscono il burst-limiter e falliscono sempre al
+            # primo colpo, mentre in modalità anthropic pura passerebbero al retry.
+            ra = up.headers.get("retry-after")
+            delay = min(float(ra), 3.0) if ra and ra.isdigit() else 1.5
+            try:
+                await up.release()
+            except Exception:
+                pass
+            log(f"mix-am ACT rescue: modello utente 429 x-should-retry, retry singolo dopo {delay}s fp={chat_fp}")
+            await asyncio.sleep(delay)
+            try:
+                up = await forward_anthropic_direct(request, body_bytes_rescue, session)
+                user_status = up.status
+                if up.status < 400:
+                    mixed_fail_reset(chat_fp)
+                    log(f"mix-am ACT rescue: modello utente retry {up.status} OK fp={chat_fp}")
+                return await relay(up)
+            except Exception as e:
+                log(f"mix-am ACT rescue modello utente retry EXC: {e} → Haiku fp={chat_fp}")
         else:
             try:
                 await up.release()
