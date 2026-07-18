@@ -7,10 +7,11 @@ updated: 2026-06-29
 
 # Project Global TOD — ai-router-switch
 
-**Main HEAD**: 8e40532 · **Branch**: main · **Updated**: 2026-07-17
+**Main HEAD**: e8fc50c · **Branch**: main · **Updated**: 2026-07-18
 
 ## ✅ Done (recenti, evidence-gated)
 
+- [x] **AQ-REF1** — StreamingRelay estratta come classe (commit e8fc50c). Closure `relay` inline in `handle()` (273 righe) → classe `StreamingRelay` stand-alone in `streaming_relay.py` (322 LOC). Import + bound method nel proxy. Rimossi import spurii (RawMessageMessage, AbstractStreamWriter, HttpPayloadFormat, Payload). SPEC in `streaming-relay-SPEC.md`. (2026-07-18)
 - [x] **AQ-RL1/RL2/FIX1** — AQ riprogettazione flow gerarchici: (RL1) MinimaxRateLimiter per-model asyncio.Lock — richieste su modelli diversi non serializzano più. (RL2) _gc_fail_dicts() fuori da _counter_lock — O(n) scan non blocca ogni fail increment. Throttling GC ogni 1000 incrementi via contatore atomico. (FIX1) _rewrite_glm_model() riscrive 'model' nel body GLM con il modello richiesto (non il tier effettivo). Commit `8e40532` pushato. (2026-07-17)
 - [x] **D44+D45** — Sessione 2026-07-11 pomeriggio: (D44) Fast-path MiniMax in mixed — skip redundant Anthropic THINK quando il modello è già MiniMax (passthrough diretto a forward_minimax). Test 10 iter: diff medio ≈0s (varianza API upstream, non routing). Commit `2f238a6`. (D45) Bypass THINK per task leggeri in mixed — criteri: <200 char, 1 msg, no tools → passthrough diretto (nessuna orchestrazione). Test misurato: ~4.5s vs ~24s (~5x miglioramento latenza). Commit `3bfa966`. Proxy live. (2026-07-11)
 - [x] **CHUNK-A/B/C-MERGE** — Merge finale 3 stack development: (A) glm_backend.py fix ClientTimeout + _ANTHROPIC_BLOCKED marker, peak_scheduler.py Asia/Shanghai 14-18 UTC+8, GLMRateLimiter dedicato; (B) context_shrink.py adaptive shrink con HHEM + learn(), shrink_policy.json warm-start 8 modelli guardrail 50-92%; (C) _retry_forward 2x in 5 rescue path call sites; sync 4 support modules (token_counter/model_context_map/context_rewrite/summarizer) da progetto; syntax 7/7 OK; test isolato 8795 GLM passthrough Z.ai reale (not_found_error: glm-4.7 = corretto, modello inesistente); rollout live :8787 PID 509251, health + request 429 verficati. Commits `c70ec52` + `1091599` pushati. (2026-07-12)
