@@ -2291,7 +2291,11 @@ def _trim_context_after_response(req_body: bytes, fp: str) -> None:
     Zero perdita reale: tool_use integrali, solo history ridondante compressa.
     Scrive su file: la prossima richiesta con stesso fp carica il body trimmato."""
     try:
-        data = json.loads(req_body)
+        # FIX 2026-07-18: strip immagini PRIMA del trim per evitare OOM/crash
+        # su body con 10+ immagini base64 (10+ MB). Le immagini non servono
+        # nel file trimmed (saranno ricaricate dall'utente nella prossima request).
+        stripped = _strip_images_body(req_body)
+        data = json.loads(stripped)
     except Exception:
         return
     msgs = data.get("messages", [])
