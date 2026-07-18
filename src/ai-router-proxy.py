@@ -5,7 +5,10 @@ AI Router Proxy — switcher davanti a Claude Code.
 Modalità (file ~/.claude/ai-router-mode):
   - anthropic   : tutto diretto a api.anthropic.com
   - minimax     : tutto diretto a api.minimaxi.chat/anthropic
-  - mixed       : Anthropic primario; su 429/5xx/errore -> fallback MiniMax (bidir)
+  - mix-am      : Anthropic THINK + MiniMax ACT (2 fail MiniMax → Anthropic rescue)
+  - mix-ag      : Anthropic THINK + GLM ACT
+  - mix-gm      : GLM THINK + MiniMax ACT
+  - glm         : GLM tiered (5.2→4.7→4)
 
 
 Claude Code punta qui: ANTHROPIC_BASE_URL=http://127.0.0.1:8787
@@ -30,6 +33,7 @@ from token_counter import estimate_tokens, count_tokens
 from model_context_map import get_safe_input_limit, get_context_limit, get_summary_budget
 from context_rewrite import rewrite_for_context
 from summarizer import summarize_old_messages
+from streaming_relay import StreamingRelay
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -389,12 +393,13 @@ MIXED_EXECUTOR_MODEL = os.environ.get("AIROUTER_MIXED_EXECUTOR", "MiniMax-M2.7")
 NEW_PIPELINE = os.environ.get("AIROUTER_NEW_PIPELINE", "1") == "1"
 # Modello giudice per la verifica/finalize T2 (usato da mixed).
 VERIFY_MODEL = os.environ.get("AIROUTER_VERIFY_MODEL", "claude-opus-4-8")
-VALID_MODES = ("anthropic", "minimax", "mixed",
-               "glm", "glm-minimax", "anthropic-glm")
+VALID_MODES = ("anthropic", "minimax",
+               "mix-am", "mix-ag", "mix-gm",
+               "glm")
 
 # ── GLM/z.ai backend (Anthropic-compatible endpoint) ─────────────────────────
 # 3 modalità GLM (2026-07-10): glm (solo GLM, 5.2 orchestra tiering),
-# glm-minimax (GLM-5.2 THINK → MiniMax ACT → GLM verify), anthropic-glm
+# mix-gm (GLM-5.2 THINK → MiniMax ACT → GLM verify), mix-ag
 # (Anthropic THINK → GLM tiered ACT → Anthropic verify T2). Logica oraria peak
 # (14-18 Asia/Shanghai) per contenere i costi. Moduli: glm_backend + peak_scheduler.
 # Import difensivo: se i moduli mancano, le 4 modalità storiche restano intatte.
@@ -708,11 +713,11 @@ def log_exc(msg: str):  # FIX B5.2: log con traceback
 PORT_MODE = {
     8771: "anthropic",
     8772: "minimax",
-    8773: "mixed",
+    8773: "mix-am",
     # 8774 era "inverse" — modalità rimossa 2026-07-17, porta lasciata libera
     8775: "glm",            # solo GLM, 5.2 orchestra tiering
-    8776: "glm-minimax",    # GLM-5.2 THINK → MiniMax ACT → GLM verify
-    8777: "anthropic-glm",  # Anthropic THINK → GLM tiered ACT → Anthropic verify T2
+    8776: "mix-gm",         # GLM-5.2 THINK → MiniMax ACT → GLM verify
+    8777: "mix-ag",         # Anthropic THINK → GLM tiered ACT → Anthropic verify T2
 }
 # Override porte fisse via env (utile per istanze di test isolate senza conflitti
 # con il servizio live): AIROUTER_PORT_MODE_JSON='{"8795":"glm","8796":"glm-minimax"}'.
@@ -767,7 +772,12 @@ def get_mode(request=None, fp: str = None) -> str:
         cm = get_chat_mode(fp)
         if cm:
             return cm
-    return get_file_mode()
+    mode = get_file_mode()
+    # Reset difensivo: mode obsoleto (vecchi nomi) → default mix-am
+    if mode not in VALID_MODES:
+        log(f"mode '{mode}' non valido → default 'mix-am'")
+        mode = "mix-am"
+    return mode
 
 
 # ── Fingerprint conversazione (chat indipendenti, D3=B/D4) ───────────────
@@ -908,15 +918,15 @@ import re as _re
 
 # Alias CLI: mappa nome digitato -> nome interno del mode.
 _ALIAS_MAP = {
-    "mixam": "mixed",
-    "mixgm": "glm-minimax",
-    "mixag": "anthropic-glm",
+    "mixam": "mix-am",
+    "mixgm": "mix-gm",
+    "mixag": "mix-ag",
 }
 # Nomi display: nome interno -> come appare in chat.
 _INTERNAL_TO_DISPLAY = {
-    "mixed": "Mixam",
-    "glm-minimax": "Mixgm",
-    "anthropic-glm": "Mixag",
+    "mix-am": "MixAM",
+    "mix-gm": "MixGM",
+    "mix-ag": "MixAG",
     "anthropic": "anthropic",
     "minimax": "minimax",
     "glm": "glm",
@@ -924,13 +934,13 @@ _INTERNAL_TO_DISPLAY = {
 
 _NL_MODE = [
     # NB: le regole GLM vanno PRIMA di anthropic/minimax puri (più specifiche):
-    # "anthropic con glm" deve dare anthropic-glm, non anthropic.
-    (_re.compile(r"anthropic\s*[-+ ]?\s*glm|claude\s*[-+ ]?\s*glm|glm\s+esecutore|anthropic\s+con\s+glm", _re.I), "anthropic-glm"),
-    (_re.compile(r"glm\s*[-+ ]?\s*minimax|glm\s+con\s+minimax|glm\s+orchestr\w+\s+minimax", _re.I), "glm-minimax"),
+    # "anthropic con glm" deve dare mix-ag, non anthropic.
+    (_re.compile(r"anthropic\s*[-+ ]?\s*glm|claude\s*[-+ ]?\s*glm|glm\s+esecutore|anthropic\s+con\s+glm", _re.I), "mix-ag"),
+    (_re.compile(r"glm\s*[-+ ]?\s*minimax|glm\s+con\s+minimax|glm\s+orchestr\w+\s+minimax", _re.I), "mix-gm"),
     (_re.compile(r"solo\s+glm|usa\s+glm|glm\b", _re.I), "glm"),
     (_re.compile(r"solo\s+(claude|anthropic)|usa\s+(claude|anthropic)", _re.I), "anthropic"),
     (_re.compile(r"solo\s+minimax|usa\s+minimax", _re.I), "minimax"),
-    (_re.compile(r"mod\w*\s+mist|mixed|mist[ao]\b", _re.I), "mixed"),
+    (_re.compile(r"mod\w*\s+mist|mixed|mist[ao]\b", _re.I), "mix-am"),
 ]
 _CMD_VERB = _re.compile(r"\b(usa|passa|metti|imposta|attiva|cambia|adesso\s+usa)\b", _re.I)
 # FIX 2026-07-15 (regressione): la rimozione totale dell'anchor rendeva la regex
@@ -2616,13 +2626,13 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     # il THINK Anthropic può rispondere "piano vuoto" → fallback forward_minimax
     # → synthetic 400 al client.
     if _is_context_too_large_for_minimax(body):
-        log(f"mixed-new PRE: body {len(body)}b > limit → shrink/retry fp={chat_fp}")
+        log(f"mix-am PRE: body {len(body)}b > limit → shrink/retry fp={chat_fp}")
         return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
 
     # WEB-SEARCH GATE (utente 2026-07-04): in mixed la ricerca web la fa SEMPRE
     # MiniMax via MCP, mai Anthropic. Blocca il server-tool web_search Anthropic.
     if _has_web_search_tool(orig):
-        log(f"mixed-new: web_search Anthropic bloccato -> usa MCP MiniMax fp={chat_fp}")
+        log(f"mix-am: web_search Anthropic bloccato -> usa MCP MiniMax fp={chat_fp}")
         return _web_search_blocked_response()
 
     # SERVER-TOOL GATE (bug 2026-07-04): web_search & co. sono eseguiti lato API
@@ -2630,7 +2640,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     # risultato della ricerca. PRECEDE il vision gate: immagine+web_search →
     # Anthropic (che gestisce entrambi), non M3 (perderebbe la search).
     if _has_server_tools(orig):
-        log(f"mixed-new: server tools nel body → pipeline bypass, ACT Anthropic fp={chat_fp}")
+        log(f"mix-am: server tools nel body → pipeline bypass, ACT Anthropic fp={chat_fp}")
         return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
 
     # VISION GATE (redesign 2026-07-04): MiniMax-M3 LEGGE gli image block
@@ -2642,7 +2652,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
         res = await _serve_minimax_vision(request, orig, session, chat_fp, relay)
         if res is not None:
             return res
-        log(f"mixed-new: vision M3 fallback → Anthropic fp={chat_fp}")
+        log(f"mix-am: vision M3 fallback → Anthropic fp={chat_fp}")
         return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
 
         # D45 BYPASS-THINK: per task leggeri (nessun tool, messaggio singolo, <200 char),
@@ -2667,10 +2677,10 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
             else:
                 up = await forward_anthropic(request, body, session)
             mixed_fail_reset(chat_fp)
-            log(f'mixed BYPASS-THINK direct (light, {content_len}c) fp={chat_fp}')
+            log(f'mix-am BYPASS-THINK direct (light, {content_len}c) fp={chat_fp}')
             return await relay(up)
         except Exception as e:
-            log(f'mixed BYPASS-THINK EXC: {e} -> fallthrough')
+            log(f'mix-am BYPASS-THINK EXC: {e} -> fallthrough')
     # THINK: Anthropic produce piano self-reviewed (JSON puro, no streaming).
     # REGOLA VINCOLANTE (utente 2026-07-03): mixed = il MODELLO SELEZIONATO
     # dall'utente (Fable/Opus/Sonnet) è l'UNICO orchestratore e NON esegue MAI.
@@ -2681,14 +2691,14 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     try:
         t_status, t_json = await _call_full(forward_anthropic_direct, request, think_body, session, timeout=THINK_TIMEOUT_SEC)
     except Exception as e:
-        log(f"mixed-new THINK EXC: {e} → fallback M3 diretto")
+        log(f"mix-am THINK EXC: {e} → fallback M3 diretto")
         try:
             return await relay(await _retry_forward(forward_minimax, request, body, session))
         except Exception as e2:
             return web.json_response({"type": "error", "error": {"type": "router_error",
                 "message": f"think+fallback ko: {e2}"}}, status=502)
     if not t_json or t_status in FALLBACK_STATUSES:
-        log(f"mixed-new THINK ko {t_status} → fallback M3 diretto")
+        log(f"mix-am THINK ko {t_status} → fallback M3 diretto")
         try:
             return await relay(await forward_minimax(request, body, session))
         except Exception as e:
@@ -2698,14 +2708,14 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     # Nessun parse fragile → nessun parse fail. Solo se il testo è VUOTO facciamo fallback.
     plan = _text_from_message(t_json).strip()
     if not plan:
-        log(f"mixed-new THINK: piano vuoto → fallback M3 diretto fp={chat_fp}")
+        log(f"mix-am THINK: piano vuoto → fallback M3 diretto fp={chat_fp}")
         try:
             return await relay(await forward_minimax(request, body, session))
         except Exception as e:
             return web.json_response({"type": "error", "error": {"type": "router_error",
                 "message": f"think vuoto + fallback ko: {e}"}}, status=502)
     tools_to_call = []  # M3 sceglie i tool concreti in ACT (vede il task originale)
-    log(f"mixed-new THINK OK plan={len(plan)}c fp={chat_fp}")
+    log(f"mix-am THINK OK plan={len(plan)}c fp={chat_fp}")
 
     # ACT (decisione utente 2026-07-03): SOLO MiniMax esegue. Catena:
     # 1) executor CODE (M2.7)  2) M3  → dopo 2 fail MiniMax → 3) Haiku esegue
@@ -2720,7 +2730,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     if orig_model and not orig_model.startswith("MiniMax"):
         # (il gate immagini è a monte, prima del THINK → qui non serve ripeterlo)
         if _is_context_too_large_for_minimax(body):
-            log(f"mixed-new ACT: body {len(body)}b > limit → skip MiniMax, rescue Haiku fp={chat_fp}")
+            log(f"mix-am ACT: body {len(body)}b > limit → skip MiniMax, rescue Haiku fp={chat_fp}")
             return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
     up = None
     used_exe = ""
@@ -2736,13 +2746,13 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
         except Exception as e:
             mixed_fail_last_status = None
             n = mixed_fail_inc(chat_fp)
-            log(f"mixed-new ACT {exe} EXC ({n}/{MIXED_FAIL_THRESHOLD}): {e}")
+            log(f"mix-am ACT {exe} EXC ({n}/{MIXED_FAIL_THRESHOLD}): {e}")
             up = None
             continue
         mixed_fail_last_status = up.status  # traccia PRIMA di ogni altra valutazione
         if up.status in MINIMAX_FALLBACK_STATUSES:
             n = mixed_fail_inc(chat_fp)
-            log(f"mixed-new ACT {exe} {up.status} ({n}/{MIXED_FAIL_THRESHOLD})")
+            log(f"mix-am ACT {exe} {up.status} ({n}/{MIXED_FAIL_THRESHOLD})")
             # cattura body per debug prima del continue
             _raw = b""
             try:
@@ -2767,7 +2777,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
         # NON è bad-request: forza rescue verso il modello utente (context 1M).
         is_ctx, _ctx_raw = await _is_context_exceed_400(up)
         if is_ctx:
-            log(f"mixed-new ACT {exe} 400 context-exceed → rescue modello utente fp={chat_fp}")
+            log(f"mix-am ACT {exe} 400 context-exceed → rescue modello utente fp={chat_fp}")
             debug_capture(
                 kind="minimax_context_exceed", request=request, fp=chat_fp,
                 client_model=orig.get("model", ""), upstream_model=exe,
@@ -2785,7 +2795,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
         used_exe = exe
         break
     if up is not None:
-        log(f"mixed-new ACT {used_exe} {up.status} {request.path} fp={chat_fp}")
+        log(f"mix-am ACT {used_exe} {up.status} {request.path} fp={chat_fp}")
         mixed_fail_reset(chat_fp)  # FIX H2: azzera il contatore su ACT riuscito
         return await relay(up, extra_headers={
             "x-ai-verified": f"anthropic-think+{used_exe.lower()}-act"})
@@ -2795,14 +2805,14 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     # (Haiku/Anthropic in hammering peggiorano il backoff). Rispetta il rate limit.
     # Fallback solo per 5xx / errori recuperabili (429 escluso).
     if mixed_fail_last_status == 429:
-        log(f"mixed-new ACT: tutti executor 429 Rate Limit → relay subito fp={chat_fp}")
+        log(f"mix-am ACT: tutti executor 429 Rate Limit → relay subito fp={chat_fp}")
         return web.json_response(
             {"type": "error", "error": {"type": "rate_limit_error",
              "message": "MiniMax rate limited (429). Retry-After rispettato dal client."}},
             status=429)
 
     # Altri fallimenti → rescue: modello utente → Haiku → 502
-    log(f"mixed-new ACT: tutti executor falliti (non-429) → rescue fp={chat_fp}")
+    log(f"mix-am ACT: tutti executor falliti (non-429) → rescue fp={chat_fp}")
     return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
 
 async def _serve_minimax_vision(request, orig: dict, session, chat_fp: str, relay):
@@ -2865,21 +2875,27 @@ async def _serve_minimax_vision(request, orig: dict, session, chat_fp: str, rela
     return await relay(up, extra_headers={"x-ai-verified": "minimax-m3-vision"})
 
 
+async def _anthropic_rescue(request, orig: dict, session, chat_fp: str, relay):
+    """Fallback Anthropic completo: Haiku → Sonnet → Opus (Haiku → modello superiore utente).
+    Wrapper che delega a _mixed_haiku_rescue (già fa rescue Anthropic completo)."""
+    return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
+
+
 async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay):
     """Esegue il rescue Haiku: chiamato sia dal check preventivo che dal fallback.
     relay: callable necessario per restituire la risposta al client."""
-    log(f"mixed-new ACT: Haiku rescue fp={chat_fp}")
+    log(f"mix-am ACT: Haiku rescue fp={chat_fp}")
 
     # ── Gradino 0 (FIX 2026-07-08 BUG-CTX-PRE): se il body è troppo grande per
     # qualsiasi modello, prova prima uno shrink. Se MAI shrink, rescue può solo
     # rinviare al modello utente 1M; se è Haiku selezionato → 400 inevitabile.
     body_bytes_rescue = json.dumps(dict(orig)).encode()
     if len(body_bytes_rescue) > MINIMAX_CONTEXT_BYTE_LIMIT:
-        log(f"mixed-new ACT rescue: body {len(body_bytes_rescue)}b > limit, tento shrink fp={chat_fp}")
+        log(f"mix-am ACT rescue: body {len(body_bytes_rescue)}b > limit, tento shrink fp={chat_fp}")
         shrunk = await _try_shrink_body(orig, MINIMAX_CONTEXT_BYTE_LIMIT)
         if shrunk is not None and shrunk != body_bytes_rescue:
             body_bytes_rescue = shrunk
-            log(f"mixed-new ACT rescue: shrink OK → {len(body_bytes_rescue)}b fp={chat_fp}")
+            log(f"mix-am ACT rescue: shrink OK → {len(body_bytes_rescue)}b fp={chat_fp}")
         # se shrink impossibile, vai dritto al rescue sotto: modello utente 1M
         # può ancora gestirlo; il problema Haiku lo gestiamo dopo se capita.
 
@@ -2895,7 +2911,7 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
         user_status = up.status
         if up.status < 400:
             mixed_fail_reset(chat_fp)
-            log(f"mixed-new ACT rescue: modello utente {up.status} OK fp={chat_fp}")
+            log(f"mix-am ACT rescue: modello utente {up.status} OK fp={chat_fp}")
             return await relay(up)
         # Cattura il body upstream per debug_capture
         if up.status == 400:
@@ -2908,7 +2924,7 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
             except Exception:
                 pass
         elif up.status == 429:
-            log(f"mixed-new ACT rescue: modello utente 429 Rate Limit → relay subito fp={chat_fp}")
+            log(f"mix-am ACT rescue: modello utente 429 Rate Limit → relay subito fp={chat_fp}")
             return await relay(up)
         else:
             try:
@@ -2916,10 +2932,10 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
             except Exception:
                 pass
         if up.status not in (400, 429):
-            log(f"mixed-new ACT rescue: modello utente {up.status} → Haiku")
+            log(f"mix-am ACT rescue: modello utente {up.status} → Haiku")
     except Exception as e:
         user_status = None
-        log(f"mixed-new ACT rescue modello utente EXC: {e} → Haiku")
+        log(f"mix-am ACT rescue modello utente EXC: {e} → Haiku")
 
     # ── Gradino 2: Haiku (fallback, context 200k) ──
     try:
@@ -2933,7 +2949,7 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
         if len(haiku_body_bytes) > ANTHROPIC_HAIKU_CONTEXT_BYTE_LIMIT:
             shrunk_h = await _try_shrink_body(haiku_body_dict, MINIMAX_CONTEXT_BYTE_LIMIT)
             if shrunk_h is None:
-                log(f"mixed-new ACT rescue: body {len(haiku_body_bytes)}b > Haiku limit, skip fp={chat_fp}")
+                log(f"mix-am ACT rescue: body {len(haiku_body_bytes)}b > Haiku limit, skip fp={chat_fp}")
                 return web.json_response(
                     {"type": "error", "error": {"type": "context_exceeded",
                      "message": f"body troppo grande anche per shrink: "
@@ -2941,12 +2957,12 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
                                 "Ridurre la cronologia o usare un modello 1M."}},
                     status=400)
             haiku_body_bytes = shrunk_h
-            log(f"mixed-new ACT rescue: shrink Haiku OK → {len(haiku_body_bytes)}b fp={chat_fp}")
+            log(f"mix-am ACT rescue: shrink Haiku OK → {len(haiku_body_bytes)}b fp={chat_fp}")
         up_h = await forward_anthropic(request, haiku_body_bytes, session)
         haiku_status = up_h.status
         if up_h.status < 400:
             mixed_fail_reset(chat_fp)
-            log(f"mixed-new ACT rescue Haiku OK fp={chat_fp}")
+            log(f"mix-am ACT rescue Haiku OK fp={chat_fp}")
             return await relay(up_h, extra_headers={"x-ai-verified": "haiku-rescue-act"})
         # Cattura il body upstream per debug_capture
         haiku_raw = b""
@@ -2960,10 +2976,10 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
             except Exception:
                 pass
         elif up_h.status == 429:
-            log(f"mixed-new ACT rescue Haiku 429 Rate Limit → relay subito fp={chat_fp}")
+            log(f"mix-am ACT rescue Haiku 429 Rate Limit → relay subito fp={chat_fp}")
             return await relay(up_h)
         elif up_h.status >= 500:
-            log(f"mixed-new ACT rescue: Haiku {up_h.status}, relay upstream body fp={chat_fp}")
+            log(f"mix-am ACT rescue: Haiku {up_h.status}, relay upstream body fp={chat_fp}")
             return await relay(up_h)
         else:
             try:
@@ -2972,7 +2988,7 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
                 pass
         haiku_status = up_h.status
     except Exception as e:
-        log(f"mixed-new ACT rescue Haiku EXC: {e} → 502")
+        log(f"mix-am ACT rescue Haiku EXC: {e} → 502")
 
     # ── DEBUG: cattura TUTTO in chiaro prima del 502 ──────────────────────
     # orig_analysis: body originale; sent_analysis: body EFFETTIVAMENTE inviato (post-shrink)
@@ -3306,60 +3322,8 @@ def _path_allowed(path: str) -> bool:
 # ORCHESTRAZIONE MODALITÀ GLM (2026-07-10)
 # ═══════════════════════════════════════════════════════════════════════════
 
-async def _anthropic_glm_only_chain(request, body, session, model, chat_fp, relay):
-    """Catena anthropic-glm: Anthropic → GLM (SOLO, NO MiniMax).
-
-    Regola utente 2026-07-13: anthropic-glm = SOLO Anthropic + GLM.
-    Se entrambi falliscono → 502. Nessun MiniMax."""
-    # CONTEXT CHECK: se body troppo grande per GLM, skip GLM → Anthropic diretto.
-    if _glm.is_glm_body_too_large(body, model):
-        log(f"anthropic-glm: ctx-limit for {model} → Anthropic diretto fp={chat_fp}")
-        try:
-            up = await forward_anthropic(request, body, session)
-            if up.status < 400:
-                return await relay(up, extra_headers={"x-ai-verified": "anthropic-glm-ctx→anthropic"})
-            await up.release()
-            return _err_response(f"anthropic-glm: Anthropic ko {up.status}", status=502)
-        except Exception as e:
-            log(f"anthropic-glm ctx→anthropic EXC: {e}")
-            return _err_response(f"anthropic-glm: tutti i backend ko: {e}", status=502)
-
-    # 1) Tentativo GLM
-    try:
-        up = await _glm.forward_glm(request, body, session, model, log_fn=log)
-        if up.status < 400:
-            mult = _peak.cost_multiplier(model)
-            return await relay(up, extra_headers={
-                "x-ai-verified": f"anthropic-glm({model})", "x-glm-cost-mult": str(mult)})
-        raw = b""
-        try:
-            raw = await up.read()
-        except Exception:
-            pass
-        await up.release()
-        if up.status == 429 and _glm.classify_429_glm(raw) == "quota_5h":
-            _glm.glm_alert(f"anthropic-glm: GLM quota 5h esaurita → Anthropic. {raw[:200]!r}")
-        log(f"anthropic-glm: GLM {up.status} → Anthropic fp={chat_fp}")
-    except Exception as e:
-        log(f"anthropic-glm: GLM EXC {e} → Anthropic fp={chat_fp}")
-
-    # 2) Fallback Anthropic (SOLO, no MiniMax dopo)
-    try:
-        up2 = await forward_anthropic(request, body, session)
-        if up2.status < 400:
-            log(f"anthropic-glm: GLM→Anthropic rescue OK fp={chat_fp}")
-            return await relay(up2, extra_headers={"x-ai-verified": "anthropic-glm→anthropic-rescue"})
-        await up2.release()
-        log(f"anthropic-glm: Anthropic {up2.status} → chain exhausted fp={chat_fp}")
-    except Exception as e:
-        log(f"anthropic-glm: Anthropic EXC {e} fp={chat_fp}")
-
-    # Tutti ko → 502 (NO MiniMax)
-    return _err_response("anthropic-glm: GLM e Anthropic entrambi ko", status=502)
-
-
 async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp: str, relay):
-    """anthropic-glm: Anthropic THINK → GLM ACT → Anthropic VERIFY."""
+    """mix-ag: Anthropic THINK → GLM ACT → Anthropic VERIFY."""
     orig = json.loads(body) if isinstance(body, bytes) else body
 
     # STEP 1: THINK - Anthropic produce piano
@@ -3367,30 +3331,30 @@ async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp
     try:
         t_status, t_json = await _call_full(forward_anthropic_direct, request, think_body, session, timeout=THINK_TIMEOUT_SEC)
     except Exception as e:
-        log(f"anthropic-glm THINK EXC: {e}")
+        log(f"mix-ag THINK EXC: {e}")
         think_plan = ""
     else:
         if not t_json or t_status in FALLBACK_STATUSES:
             think_plan = ""
         else:
             think_plan = _text_from_message(t_json).strip()
-    log(f"anthropic-glm THINK: plan={len(think_plan)}c fp={chat_fp}")
+    log(f"mix-ag THINK: plan={len(think_plan)}c fp={chat_fp}")
 
     # STEP 2: ACT - GLM con routing multimodale
     tier = await _glm.classify_tier(body, request, session, log_fn=log)
     eff_model, capped = _glm.apply_peak_cap(tier)
-    log(f"anthropic-glm ACT: GLM {eff_model} fp={chat_fp}")
+    log(f"mix-ag ACT: GLM {eff_model} fp={chat_fp}")
     act_resp = await _glm.forward_glm(request, body, session, eff_model, log_fn=log)
 
     if act_resp.status >= 400:
-        log(f"anthropic-glm ACT fail {act_resp.status}")
+        log(f"mix-ag ACT fail {act_resp.status}")
         return await relay(await forward_anthropic(request, body, session))
 
     # forward_glm returns web.Response with body already in memory (.body)
     act_raw = act_resp.body if isinstance(act_resp.body, (bytes, bytearray)) else b""
 
     # STEP 3: VERIFY - Anthropic verifica
-    log(f"anthropic-glm VERIFY: Anthropic fp={chat_fp}")
+    log(f"mix-ag VERIFY: Anthropic fp={chat_fp}")
     try:
         verify_msgs = [
             {"role": "system", "content": "Sei un verifier AI. Rispondi SOLO con VERIFIED se ok, o CORRECTIONS seguito dalle correzioni."},
@@ -3404,16 +3368,16 @@ async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp
         v_status, v_json = await _call_full(forward_anthropic_direct, request, verify_body, session, timeout=30)
         if v_status < 400 and v_json:
             verify_text = _text_from_message(v_json).strip()
-            log(f"anthropic-glm VERIFY: {verify_text[:100]}")
+            log(f"mix-ag VERIFY: {verify_text[:100]}")
     except Exception as e:
-        log(f"anthropic-glm VERIFY EXC: {e}")
+        log(f"mix-ag VERIFY EXC: {e}")
 
     # Return the ACT response (body already in memory)
     return act_resp
 
 
 async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: str, relay):
-    """glm-minimax: GLM-5.2 THINK → MiniMax ACT → GLM-5.2 VERIFY."""
+    """mix-gm: GLM-5.2 THINK → MiniMax ACT → GLM-5.2 VERIFY."""
     orig = json.loads(body) if isinstance(body, bytes) else body
 
     # STEP 1: THINK - GLM-5.2 produce piano
@@ -3433,10 +3397,10 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
     except Exception as e:
         log(f"glm-minimax THINK EXC: {e}")
         think_plan = ""
-    log(f"glm-minimax THINK: plan={len(think_plan)}c fp={chat_fp}")
+    log(f"mix-gm THINK: plan={len(think_plan)}c fp={chat_fp}")
 
     # STEP 2: ACT - MiniMax esegue
-    log(f"glm-minimax ACT: MiniMax fp={chat_fp}")
+    log(f"mix-gm ACT: MiniMax fp={chat_fp}")
     act_resp = await forward_minimax(request, body, session)
 
     if act_resp.status >= 400:
@@ -3444,17 +3408,15 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
         await act_resp.release()
         if is_ctx:
             return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
-        log(f"glm-minimax ACT fail {act_resp.status} → GLM rescue")
-        tier = _glm.heuristic_tier(body)
-        eff_model, _ = _glm.apply_peak_cap(tier)
-        return await _glm_minimax_only_chain(request, body, session, eff_model, chat_fp, relay)
+        # 3) Fallback Anthropic rescue (Haiku → Sonnet → Opus)
+        return await _anthropic_rescue(request, orig, session, chat_fp, relay)
 
     # forward_minimax returns aiohttp client response with .read() needed
     act_raw = await act_resp.read()
     await act_resp.release()
 
     # STEP 3: VERIFY - GLM-5.2 verifica
-    log(f"glm-minimax VERIFY: GLM-5.2 fp={chat_fp}")
+    log(f"mix-gm VERIFY: GLM-5.2 fp={chat_fp}")
     try:
         verify_body = _glm.build_glm_verify_body(orig, think_plan, act_raw.decode(errors="ignore")[:5000])
         verify_resp = await _glm.forward_glm(request, verify_body, session, "glm-5.2", log_fn=log)
@@ -3470,69 +3432,6 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
         log(f"glm-minimax VERIFY EXC: {e}")
 
     return web.Response(body=act_raw, status=200, content_type="application/json")
-
-
-async def _glm_minimax_only_chain(request, body, session, model, chat_fp, relay):
-    """Catena glm-minimax: GLM → MiniMax (SOLO, NO Anthropic).
-
-    Regola utente 2026-07-13: glm-minimax è SOLO GLM + MiniMax.
-    Se entrambi falliscono → 502. Nessun Anthropic."""
-    # Caso peak-blocked: skip GLM (non disponibile), MiniMax SOLO.
-    if model == _glm._ANTHROPIC_BLOCKED:
-        log(f"glm-minimax: peak-blocked → MiniMax solo fp={chat_fp}")
-        try:
-            up = await forward_minimax(request, body, session)
-            if up.status < 400:
-                return await relay(up, extra_headers={"x-ai-verified": "glm-minimax-peak-blocked→minimax"})
-            await up.release()
-            return _err_response(f"glm-minimax peak: MiniMax ko {up.status}", status=502)
-        except Exception as e:
-            log(f"glm-minimax peak→minimax EXC: {e}")
-            return _err_response(f"glm-minimax: tutti i backend ko: {e}", status=502)
-
-    # CONTEXT CHECK: se body troppo grande per GLM, skip GLM → MiniMax diretto.
-    if _glm.is_glm_body_too_large(body, model):
-        log(f"glm-minimax: ctx-limit for {model} → MiniMax diretto fp={chat_fp}")
-        try:
-            up = await forward_minimax(request, body, session)
-            if up.status < 400:
-                return await relay(up, extra_headers={"x-ai-verified": "glm-ctx→minimax-only"})
-            await up.release()
-            return _err_response(f"glm-minimax: MiniMax ko {up.status}", status=502)
-        except Exception as e:
-            log(f"glm-minimax ctx→minimax EXC: {e}")
-            return _err_response(f"glm-minimax: tutti i backend ko: {e}", status=502)
-
-    # 1) Tentativo GLM
-    try:
-        up = await _glm.forward_glm(request, body, session, model, log_fn=log)
-        if up.status < 400:
-            return await relay(up, extra_headers={"x-ai-verified": f"glm-minimax({model})"})
-        raw = b""
-        try:
-            raw = await up.read()
-        except Exception:
-            pass
-        await up.release()
-        if up.status == 429 and _glm.classify_429_glm(raw) == "quota_5h":
-            _glm.glm_alert(f"glm-minimax: GLM quota 5h esaurita → MiniMax solo. {raw[:200]!r}")
-        log(f"glm-minimax: GLM {up.status} → MiniMax fp={chat_fp}")
-    except Exception as e:
-        log(f"glm-minimax: GLM EXC {e} → MiniMax fp={chat_fp}")
-
-    # 2) Fallback MiniMax (SOLO, no Anthropic dopo)
-    try:
-        up2 = await forward_minimax(request, body, session)
-        if up2.status < 400:
-            log(f"glm-minimax: GLM→MiniMax rescue OK fp={chat_fp}")
-            return await relay(up2, extra_headers={"x-ai-verified": "glm-minimax→minimax-rescue"})
-        await up2.release()
-        log(f"glm-minimax: MiniMax {up2.status} → chain exhausted fp={chat_fp}")
-    except Exception as e:
-        log(f"glm-minimax: MiniMax EXC {e} fp={chat_fp}")
-
-    # Tutti ko → 502 (NO Anthropic)
-    return _err_response("glm-minimax: GLM e MiniMax entrambi ko", status=502)
 
 
 async def _glm_execute_with_chain(request, body, session, model, chat_fp, relay,
@@ -3627,20 +3526,20 @@ async def _handle_glm_mode(request, body, session, mode, chat_fp, relay):
         # Pattern THINK → ACT → VERIFY con GLM
         return await _glm.glm_think_act_verify(request, body, session, log_fn=log)
 
-    # ── MODALITÀ anthropic-glm: Anthropic THINK → GLM tiered ACT → Anthropic verify T2 ──
+    # ── MODALITÀ mix-ag: Anthropic THINK → GLM tiered ACT → Anthropic verify T2 ──
     # THINK: l'orchestratore Anthropic (modello richiesto dal client) resta implicito
     # nel system del client. Qui applichiamo: GLM esegue col tier classificato; se il
     # task è T2 (critico) e GLM ha eseguito, Anthropic verifica. Per semplicità e
     # per non raddoppiare la latenza, il verify T2 è un passthrough ad Anthropic solo
     # quando GLM fallisce; sui task critici riusciti, GLM resta la risposta (Anthropic
     # ha già orchestrato via system). Fallback chain identica.
-    if mode == "anthropic-glm":
+    if mode == "mix-ag":
         return await _anthropic_glm_think_act_verify(request, body, session, chat_fp, relay)
 
-    # ── MODALITÀ glm-minimax: GLM-5.2 THINK → MiniMax ACT → GLM verify (task complessi) ──
+    # ── MODALITÀ mix-gm: GLM-5.2 THINK → MiniMax ACT → Anthropic rescue ──
     # GLM-5.2 orchestra (produce il piano nel THINK), MiniMax esegue sempre l'ACT,
-    # GLM verifica SOLO i task complessi/agentici (1 giro correzione poi accetta).
-    if mode == "glm-minimax":
+    # Fallback completo: su fallimento MiniMax → Anthropic rescue (Haiku→Sonnet→Opus).
+    if mode == "mix-gm":
         return await _glm_minimax_think_act_verify(request, body, session, chat_fp, relay)
 
     # difensivo: modalità GLM ignota
@@ -3692,6 +3591,38 @@ async def handle(request):
            "/debug/errors", "/debug/last", "/debug/stats", "/debug/trace"}
     if request.path in _HC:
         return web.Response(status=200, text="ok")
+
+    # ── /v1/models: rispondi con la lista dei modelli Anthropic ───────────
+    # Claude Code (/model picker) chiama GET /v1/models sul BASE_URL per popolare
+    # la lista dei modelli selezionabili. Forward diretto ad Anthropic (no relay).
+    # FIX 2026-07-18: mancava, causava lista vuota nel picker.
+    if request.path in ("/v1/models", "/v1/models/") or request.path.startswith("/v1/models/"):
+        try:
+            # Forward diretto via aiohttp (stesso session del router)
+            _hdrs = {k: v for k, v in request.headers.items()
+                      if k.lower() not in {h.lower() for h in HOP_HEADERS}}
+            # Forza version header se assente
+            _hdrs.setdefault("anthropic-version", "2023-06-01")
+            # Ricarica token OAuth fresco
+            _reload_oauth_token()
+            _tok = os.environ.get("ANTHROPIC_OAUTH_TOKEN", "")
+            if _tok:
+                _hdrs["Authorization"] = f"Bearer {_tok}"
+                _hdrs["anthropic-beta"] = "oauth-2025-04-20"
+            _url = ANTHROPIC_UPSTREAM + request.path_qs
+            _up = await request.app["session"].request(
+                "GET", _url, headers=_hdrs)
+            _body = await _up.read()
+            _up.release()
+            _rhdrs = {}
+            for _k, _v in _up.headers.items():
+                if _k.lower() not in {h.lower() for h in HOP_HEADERS}:
+                    _rhdrs[_k] = _v
+            return web.Response(body=_body, status=_up.status, headers=_rhdrs)
+        except Exception as _e:
+            import traceback
+            log(f"[models] ERRORE: {_e}\n{traceback.format_exc()}")
+            return web.Response(status=500, text=f"internal error: {_e}")
 
     # D43: smista generative tool stubs
     if request.path == "/v1/images/generations":
@@ -3781,279 +3712,21 @@ async def handle(request):
     # → "cannot access free variable 'orig'". Inizializzalo a None qui a monte.
     orig = None
 
-    async def relay(upstream, chat_fp_for_rewrite: str = "default", extra_headers: dict | None = None):
-        # FIX E: leggi e rimuovi orig_model da riscrivere nello SSE/non-stream
-        # NB: i call site passano spesso chat_fp sbagliato (es 'default' vs IP reale).
-        # Soluzione: prova la chiave esplicita; se manca e c'è esattamente UN orig
-        # pending in _request_orig_model, usa quello (single-user loopback tipico).
-        # FIX D38 2026-07-02: escludi la chiave interna '__remap__' (indice remap, dict)
-        # dal fallback single-entry — altrimenti il dict finisce riscritto in body['model'].
-        orig_model = _request_orig_model.pop(chat_fp_for_rewrite, None)
-        if orig_model is None:
-            _pending = [k for k in _request_orig_model if k != "__remap__"]
-            if len(_pending) == 1:
-                orig_model = _request_orig_model.pop(_pending[0])
-        # DEBUG: per errori 4xx/5xx (NON 429 rate-limit), cattura body in chiaro.
-        # Per gli errori il body è piccolo e non streaming — lo logghiamo e poi
-        # lo mandiamo diretto senza passare dal loop iter_any() (che consumerebbe
-        # il body già letto). Il 200 OK prosegue normalmente nel loop streaming.
-        if upstream.status >= 400 and upstream.status not in {429}:
-            try:
-                _raw = await upstream.read()
-            except Exception:
-                _raw = b""
-            _enc = upstream.headers.get("Content-Encoding", "")
-            debug_capture(
-                kind=f"relay_error_{upstream.status}",
-                request=request, fp=chat_fp_for_rewrite,
-                client_model=orig_model or "",
-                status=upstream.status, stage="relay",
-                upstream_status=upstream.status,
-                upstream_raw=_raw,
-                upstream_encoding=_enc,
-                orig=orig,
-                note=f"extra_headers={list((extra_headers or {}).keys())}",
-            )
-            # Invia l'errore direttamente: body già letto, costruisci web.Response
-            upstream.release()
-            err_headers = {}
-            for k, v in upstream.headers.items():
-                lk = k.lower()
-                if lk in HOP_HEADERS:
-                    continue
-                if lk == "content-length":
-                    continue
-                err_headers[k] = v
-            if extra_headers:
-                err_headers.update(extra_headers)
-            return web.Response(body=_raw, status=upstream.status, headers=err_headers)
-        # FIX SSE: rileva text/event-stream per applicare flush immediato + no-buffering
-        is_sse = "text/event-stream" in (upstream.headers.get("content-type") or "").lower()
-        resp = web.StreamResponse(status=upstream.status)
-        for k, v in upstream.headers.items():
-            lk = k.lower()
-            if lk in HOP_HEADERS:
-                continue
-            # FIX #8: Forward Content-Encoding (br/gzip) so client can decode.
-            # We use auto_decompress=False in ClientSession to pass through as-is.
-            # Evita Content-Length su SSE: rompe chunked streaming
-            if is_sse and lk == "content-length":
-                continue
-            resp.headers[k] = v
-        # FIX redesign 2026-07-01: header extra iniettati dal caller (es x-ai-verified).
-        # Evidenzia la pipeline gerarchica mixed per audit downstream.
-        if extra_headers:
-            for k, v in extra_headers.items():
-                resp.headers[k] = v
-        if is_sse:
-            # Header SSE-corretti: nessun buffering downstream, keep-alive
-            resp.headers.setdefault("content-type", "text/event-stream")
-            resp.headers["cache-control"] = "no-cache, no-transform"
-            resp.headers["connection"] = "keep-alive"
-            resp.headers["x-accel-buffering"] = "no"
-        # FIX #6: NON usare enable_chunked_encoding() - aiohttp lo fa automaticamente
-        # quando Transfer-Encoding non è in headers (già skippato da HOP_HEADERS).
-        # Evita doppia codifica/conflitto chunked.
-        await resp.prepare(request)
-        # FIX #2: usa iter_any() anche per SSE - iter_chunked(N) può bloccare aspettando N bytes
-        # mentre SSE invia eventi piccoli (<200 byte). iter_any() yielda appena disponibile.
-        iterator = upstream.content.iter_any()
-        chunk_count = 0
-        total_bytes = 0
-        model_rewrite_done = orig_model is None  # se non c'è orig_model, skip subito
-        # FIX F: accumula chunks per estrarre usage reale dai record SSE/JSON
-        _acc_buf = bytearray()
-        _acc_limit = 16384  # massimo 16KB per evitare OOM su risposte enormi
-        # Precompila pattern per SSE message_start rewrite
-        import re as _re
-        sse_model_pat = _re.compile(rb'"model":"[^"]*"')
-        try:
-            async for chunk in iterator:
-                if not chunk:
-                    continue
-                chunk_count += 1
-                total_bytes += len(chunk)
-                # FIX #4: log primo chunk per debug
-                if chunk_count == 1:
-                    log(f"relay first chunk {len(chunk)}B (SSE={is_sse})")
-                # FIX E: riscrivi il campo 'model' nello stream SSE (solo primo chunk rilevante)
-                if not model_rewrite_done and orig_model:
-                    if is_sse:
-                        # cerca il pattern "model":"<qualsiasi>" e sostituisci SOLO nel primo evento message_start
-                        new_chunk = sse_model_pat.sub(
-                            f'"model":"{orig_model}"'.encode(), chunk, count=1
-                        )
-                        if new_chunk != chunk:
-                            log(f"FIX E: SSE model rewritten to '{orig_model}'")
-                            chunk = new_chunk
-                            model_rewrite_done = True
-                    else:
-                        # non-streaming JSON response: parsifica e riscrivi
-                        try:
-                            j = json.loads(chunk)
-                            if isinstance(j, dict) and "model" in j:
-                                j["model"] = orig_model
-                                chunk = json.dumps(j).encode()
-                                log(f"FIX E: JSON model rewritten to '{orig_model}'")
-                            model_rewrite_done = True
-                        except Exception:
-                            pass  # non-JSON body, skip
-                # FIX F: accumulazione parziale per usage extraction
-                if len(_acc_buf) < _acc_limit:
-                    _acc_buf.extend(chunk[:(_acc_limit - len(_acc_buf))])
-                await resp.write(chunk)
-                if is_sse:
-                    # FIX #5: drain senza try/except - se fallisce vogliamo saperlo
-                    await resp.drain()
-        except Exception as e:
-            # FIX #3: log esplicito eccezioni nel loop streaming
-            log(f"relay loop ERROR after {chunk_count} chunks ({total_bytes}B): {e}")
-            raise
-        finally:
-            # FIX B2.3: garantisce chiusura upstream su client disconnect/cancel/exception
-            if not upstream.closed:
-                upstream.release()
-            # FIX F: log per-request usage. Estrai token reali da _acc_buf.
-            try:
-                _usage = {"input_tokens": 0, "output_tokens": 0,
-                          "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
-                _buf_str = _acc_buf.decode("utf-8", errors="replace")
-                if is_sse:
-                    # Cerca message_start (input) e message_delta (output) nei chunk SSE
-                    import re as _re2
-                    for _data in _re2.findall(r"^data: (.+)$", _buf_str, _re2.MULTILINE):
-                        try:
-                            _ev = json.loads(_data)
-                            if _ev.get("type") == "message_start":
-                                _u = (_ev.get("message") or {}).get("usage") or {}
-                                _usage["input_tokens"] = int(_u.get("input_tokens", 0) or 0)
-                                _usage["cache_read_input_tokens"] = int(_u.get("cache_read_input_tokens", 0) or 0)
-                                _usage["cache_creation_input_tokens"] = int(_u.get("cache_creation_input_tokens", 0) or 0)
-                            elif _ev.get("type") == "message_delta":
-                                _u = _ev.get("usage") or {}
-                                _usage["output_tokens"] = int(_u.get("output_tokens", 0) or 0)
-                        except Exception:
-                            pass
-                    if _usage["output_tokens"] == 0:
-                        _usage["output_tokens"] = max(1, total_bytes // 4)
-                else:
-                    try:
-                        _j = json.loads(_buf_str)
-                        if isinstance(_j, dict):
-                            _u = _j.get("usage") or {}
-                            _usage["input_tokens"] = int(_u.get("input_tokens", 0) or 0)
-                            _usage["output_tokens"] = int(_u.get("output_tokens", 0) or 0)
-                            _usage["cache_read_input_tokens"] = int(_u.get("cache_read_input_tokens", 0) or 0)
-                            _usage["cache_creation_input_tokens"] = int(_u.get("cache_creation_input_tokens", 0) or 0)
-                    except Exception:
-                        _usage["output_tokens"] = max(1, total_bytes // 4)
-                # Input: estrai dal body richiesta (non compresso) se non già noto.
-                # È una stima sicura perché il body request è sempre in chiaro.
-                if _usage["input_tokens"] == 0:
-                    try:
-                        _req_j = json.loads(body.decode("utf-8", errors="replace"))
-                        # Stima da prompt: somma len(c["content"]) per tutti i messaggi
-                        _chars = 0
-                        for _m in (_req_j.get("messages") or []):
-                            c = _m.get("content", "")
-                            if isinstance(c, str):
-                                _chars += len(c)
-                            elif isinstance(c, list):
-                                for _b in c:
-                                    if isinstance(_b, dict) and isinstance(_b.get("text"), str):
-                                        _chars += len(_b["text"])
-                        _sys = _req_j.get("system", "")
-                        if isinstance(_sys, str):
-                            _chars += len(_sys)
-                        _usage["input_tokens"] = max(1, _chars // 4)
-                    except Exception:
-                        _usage["input_tokens"] = max(1, len(body) // 4)
-                # D41: delta-correction TPM — riconcilia la stima del rate limiter con
-                # i token reali (input+output). _lim_entry è la STESSA lista mutabile
-                # nella finestra del limiter; correggerla aggiusta il TPM percepito.
-                # Clamp alla stima già prenotata (evita sforo del budget validato in acquire).
-                try:
-                    _lim_entry = getattr(upstream, "_airouter_limiter_entry", None)
-                    if _lim_entry is not None:
-                        _real_total = int(_usage.get("input_tokens", 0)) + int(_usage.get("output_tokens", 0))
-                        _est_reserved = getattr(upstream, "_airouter_limiter_est", _real_total)
-                        if _real_total > 0:
-                            _lim_entry[1] = min(_real_total, _est_reserved)
-                            log(f"D41 TPM delta-correct: est={_est_reserved} real={_real_total} -> {_lim_entry[1]}")
-                except Exception as _e:
-                    log(f"D41 TPM delta-correct skip: {_e}")
-                # FIX bug stats: passa il FINAL reale (risolto da remap) + fallback al
-                # model nel body della request se orig_model (chat_fp-mismatch) è vuoto.
-                try:
-                    _body_j = json.loads(body.decode("utf-8", errors="replace"))
-                    _body_model = (_body_j.get("model") or "").strip()
-                except Exception:
-                    _body_model = ""
-                _orig = orig_model or _body_model or "?"
-                # FIX bug 2026-07-01: per mode=mixed il final NON è "?" — è il modello
-                # rimappato (MiniMax-M3 se orig è nel remap index) oppure "claude-direct"
-                # se mixed è caduto in fallback Anthropic.
-                if mode == "minimax":
-                    _final = MINIMAX_MODEL
-                elif mode == "anthropic":
-                    _final = "claude-direct"
-                elif mode in ("glm", "glm-minimax", "anthropic-glm"):
-                    # Il modello GLM effettivo è nell'header x-ai-verified (glm(<model>)).
-                    # Registriamo il mode; il modello reale + moltiplicatore costo sono
-                    # già loggati inline da _glm_execute_with_chain (x-glm-cost-mult).
-                    _final = f"glm-mode:{mode}"
-                elif mode == "mixed":
-                    try:
-                        _remap_idx = _request_orig_model.get("__remap__") or {}
-                        if not _remap_idx:
-                            # costruisci al volo dal sidecar (cache 60s gia' presente altrove)
-                            import json as _json
-                            _idx = {}
-                            try:
-                                with open(SIDECAR, "r") as _sf:
-                                    for _sl in _sf:
-                                        _so = _json.loads(_sl) if _sl.strip() else None
-                                        if _so and _so.get("orig") and _so.get("final"):
-                                            _so_o = _so["orig"]
-                                            if _so_o not in _idx:
-                                                _idx[_so_o] = _so["final"]
-                            except Exception:
-                                pass
-                            _request_orig_model["__remap__"] = _idx
-                            _remap_idx = _idx
-                        _final = _remap_idx.get(_orig, "claude-direct") if _orig != "?" else "?"
-                    except Exception:
-                        _final = "?"
-                else:
-                    _final = "?"
-                log_router_usage(
-                    chat_id=chat_fp_for_rewrite,
-                    orig=_orig,
-                    final=_final,
-                    usage=_usage,
-                    mode=mode,
-                    client=request.headers.get("User-Agent", "?")[:40] or "?",
-                    status=upstream.status,
-                    path=request.path,
-                )
-            except Exception:
-                pass
-        # FIX #4: log bytes totali inoltrati
-        if is_sse or total_bytes > 0:
-            log(f"relay done: {chunk_count} chunks, {total_bytes} bytes (SSE={is_sse})")
-        # FIX #5: drain finale prima di write_eof per garantire flush completo
-        await resp.drain()
-        await resp.write_eof()
-
-        # ── TRIM: dopo relay OK, salva trimmed state per la prossima iterazione ──
-        try:
-            _d = json.loads(body.decode("utf-8", errors="replace"))
-            if _d.get("messages"):
-                _trim_context_after_response(body, chat_fp_for_rewrite)
-        except Exception:
-            pass
-
-        return resp
+    _relay = StreamingRelay(
+        request=request,
+        body=body,
+        mode=mode,
+        orig=orig,
+        request_orig_model=_request_orig_model,
+        hop_headers=HOP_HEADERS,
+        sidecar_path=SIDECAR,
+        minimax_model=MINIMAX_MODEL,
+        log_fn=log,
+        debug_capture_fn=debug_capture,
+        log_router_usage_fn=log_router_usage,
+        trim_context_fn=_trim_context_after_response,
+    )
+    relay = _relay.relay  # bound method — call sites unchanged
 
     forwarders = {"anthropic": forward_anthropic, "minimax": forward_minimax}
 
@@ -4111,14 +3784,14 @@ async def handle(request):
 
     # ═══════════════════════════════════════════════════════════════════════
     # MODALITÀ GLM (2026-07-10) — endpoint z.ai Anthropic-compatible.
-    # glm            : GLM-5.2 classifica complessità → tier (turbo→4.7→5.2)
-    # glm-minimax    : GLM-5.2 THINK → MiniMax ACT → GLM verify (task complessi)
-    # anthropic-glm  : Anthropic(client) THINK → GLM tiered ACT → Anthropic verify T2
+    # glm      : GLM-5.2 classifica complessità → tier (turbo→4.7→5.2)
+    # mix-gm   : GLM-5.2 THINK → MiniMax ACT → GLM verify (task complessi)
+    # mix-ag   : Anthropic(client) THINK → GLM tiered ACT → Anthropic verify T2
     # Logica peak (14-18 Asia/Shanghai): 5.2/turbo bloccati (3x). Task complesso
     # in peak → Anthropic esegue; task semplice → glm-4.7. Fallback errore/quota
     # off-peak: catena GLM→MiniMax→Anthropic.
     # ═══════════════════════════════════════════════════════════════════════
-    if mode in ("glm", "glm-minimax", "anthropic-glm"):
+    if mode in ("glm", "mix-gm", "mix-ag"):
         if not GLM_AVAILABLE:
             log(f"GLM mode '{mode}' richiesto ma moduli glm_backend/peak_scheduler assenti → fallback anthropic")
             return await relay(await forward_anthropic(request, body, session),
@@ -4162,7 +3835,7 @@ async def handle(request):
             )
 
 
-    # ── MODALITÀ MIXED: Anthropic orchestra SEMPRE + MiniMax esegue SEMPRE ──
+    # ── MODALITÀ MIX-AM: Anthropic orchestra SEMPRE + MiniMax esegue SEMPRE ──
     # Pipeline gerarchica:
     #   - T2-classifier (locale, zero-token) marca le richieste 'complesse'
     #   - T0/T1 (semplici): MiniMax esegue diretto
@@ -4184,7 +3857,7 @@ async def handle(request):
         # testo e distruggerebbe i tool_use. Relay diretto Anthropic = passthrough
         # che preserva i blocchi tool_use richiesti dall'agente.
         if orig.get("tools"):
-            log("mixed escalation: agentic (tools) -> relay anthropic passthrough")
+            log("mix-am escalation: agentic (tools) -> relay anthropic passthrough")
             try:
                 return await relay(await forward_anthropic(request, body, session))
             except Exception as e:
@@ -4202,7 +3875,7 @@ async def handle(request):
         # FIX 2026-07-13: 400 context-exceed deve fare fallback
         if not gen_json or gen_status in (MINIMAX_FALLBACK_STATUSES | {400}):  # FIX B4.1 residuo
             # M3 ancora giù: Anthropic esegue DIRETTO senza pipeline
-            log(f"mixed escalation: M3 ko {gen_status}, Anthropic esegue diretto")
+            log(f"mix-am escalation: M3 ko {gen_status}, Anthropic esegue diretto")
             try:
                 up = await forward_anthropic(request, body, session)
                 return await relay(up)
@@ -4217,7 +3890,7 @@ async def handle(request):
         # Anthropic-esecutore, violando la regola 'MiniMax esegue'. Il reset riporta le
         # richieste successive alla pipeline normale Anthropic-THINK + M3-ACT.
         mixed_fail_reset(chat_fp)
-        log(f"mixed escalation R1 M3 draft ({len(draft_v1)} chars) → reset escalation (M3 recovered)")
+        log(f"mix-am escalation R1 M3 draft ({len(draft_v1)} chars) → reset escalation (M3 recovered)")
         # Anthropic finalizza direttamente (salta critique+revise per latenza)
         fbody = _build_finalize_body(orig, question, draft_v1)
         try:
@@ -4231,7 +3904,7 @@ async def handle(request):
         except Exception as e:
             final_text = draft_v1
             verified_flag = "m3_only_escalation"
-            log(f"mixed escalation R2 EXC: {e}")
+            log(f"mix-am escalation R2 EXC: {e}")
         final_json = {
             "id": f"msg_mixed_{int(time.time()*1000)}",
             "type": "message", "role": "assistant",
@@ -4250,8 +3923,8 @@ async def handle(request):
     # tranne quando M3 è in escalation (anthropic_leads). Abroga T0/T1/T2.
     # FAST-PATH (D44): se il modello è già MiniMax, skippa THINK Anthropic ridondante
     # e fai passthrough diretto — MiniMax ha già il suo think interno.
-    # L'unico overhead mixed-mode diventa il classification T2 locale (micro-secondi).
-    if NEW_PIPELINE and is_messages and not anthropic_leads:
+    # L'unico overhead mix-am diventa il classification T2 locale (micro-secondi).
+    if mode == "mix-am" and NEW_PIPELINE and is_messages and not anthropic_leads:
         try:
             orig = json.loads(body)
         except Exception:
@@ -4266,14 +3939,14 @@ async def handle(request):
                 if up.status == 400:
                     is_ctx, _ = await _is_context_exceed_400(up)
                     if is_ctx:
-                        log(f"mixed FAST-PATH 400 context-exceed → shrink retry fp={chat_fp}")
+                        log(f"mix-am FAST-PATH 400 context-exceed → shrink retry fp={chat_fp}")
                         return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
                 mixed_fail_reset(chat_fp)
-                log(f"mixed FAST-PATH MiniMax direct fp={chat_fp}")
+                log(f"mix-am FAST-PATH MiniMax direct fp={chat_fp}")
                 return await relay(up)
             except Exception as e:
-                log(f"mixed FAST-PATH MiniMax EXC: {e} -> fallthrough to pipeline")
-        log(f"mixed-new pipeline attivata fp={chat_fp} tools={bool(orig.get('tools'))}")
+                log(f"mix-am FAST-PATH MiniMax EXC: {e} -> fallthrough to pipeline")
+        log(f"mix-am pipeline attivata fp={chat_fp} tools={bool(orig.get('tools'))}")
         return await _pipeline_think_act(request, body, session, orig, relay)
 
     # Path normale: T0/T1 -> M3 diretto; T2 -> pipeline verify gerarchica
@@ -4286,10 +3959,10 @@ async def handle(request):
             up = await forwarders["minimax"](request, body, session)
         except Exception as e:
             n = mixed_fail_inc(chat_fp)
-            log(f"mixed T0/T1 M3 EXC ({n}/{MIXED_FAIL_THRESHOLD}) {request.path}: {e}")
+            log(f"mix-am T0/T1 M3 EXC ({n}/{MIXED_FAIL_THRESHOLD}) {request.path}: {e}")
             try:
                 up = await forwarders["anthropic"](request, body, session)
-                log(f"mixed T0/T1 fallback anthropic {up.status} {request.path}")
+                log(f"mix-am T0/T1 fallback anthropic {up.status} {request.path}")
                 return await relay(up)
             except Exception as e2:
                 return web.json_response(
@@ -4298,12 +3971,12 @@ async def handle(request):
         if up.status in FALLBACK_STATUSES:  # FIX B4.1: solo retryable, NON 400/404
             n = mixed_fail_inc(chat_fp)
             await up.release()
-            log(f"mixed T0/T1 M3 {up.status} ({n}/{MIXED_FAIL_THRESHOLD}) {request.path}")
+            log(f"mix-am T0/T1 M3 {up.status} ({n}/{MIXED_FAIL_THRESHOLD}) {request.path}")
             if n >= MIXED_FAIL_THRESHOLD:
-                log(f"mixed escalation: M3 ha fallito {n}x -> Anthropic prende comando")
+                log(f"mix-am escalation: M3 ha fallito {n}x -> Anthropic prende comando")
             try:
                 up2 = await forwarders["anthropic"](request, body, session)
-                log(f"mixed T0/T1 rescue anthropic {up2.status} {request.path}")
+                log(f"mix-am T0/T1 rescue anthropic {up2.status} {request.path}")
                 if up2.status < 400:
                     mixed_fail_reset(chat_fp)  # FIX audit v3: reset counter su rescue OK
                 return await relay(up2)
@@ -4313,7 +3986,7 @@ async def handle(request):
                      "message": f"rescue ko: {e2}"}}, status=502)
         if up.status < 400:
             mixed_fail_reset(chat_fp)
-        log(f"mixed T0/T1 executor M3 {up.status} {request.path}")
+        log(f"mix-am T0/T1 executor M3 {up.status} {request.path}")
         return await relay(up)
 
     # T2: pipeline verify gerarchica (Anthropic orchestra M3)
@@ -4330,10 +4003,10 @@ async def handle(request):
     # FIX 2026-07-13: 400 context-exceed deve fare fallback
     if not gen_json or gen_status in (MINIMAX_FALLBACK_STATUSES | {400}):  # FIX B4.1: solo retryable
         n = mixed_fail_inc(chat_fp)
-        log(f"mixed T2 M3 R1 ko {gen_status} ({n}/{MIXED_FAIL_THRESHOLD}) {request.path}")
+        log(f"mix-am T2 M3 R1 ko {gen_status} ({n}/{MIXED_FAIL_THRESHOLD}) {request.path}")
         try:
             up = await forward_anthropic(request, body, session)
-            log(f"mixed T2 fallback anthropic {up.status} {request.path}")
+            log(f"mix-am T2 fallback anthropic {up.status} {request.path}")
             return await relay(up)
         except Exception as e:
             return web.json_response(
@@ -4341,7 +4014,7 @@ async def handle(request):
                  "message": str(e)}}, status=502)
     mixed_fail_reset(chat_fp)
     draft_v1 = _text_from_message(gen_json)
-    log(f"mixed T2 R1 M3 draft ({len(draft_v1)} chars)")
+    log(f"mix-am T2 R1 M3 draft ({len(draft_v1)} chars)")
     # Anthropic finalize (gerarchia: decide se la bozza è ok o la riscrive)
     fbody = _build_finalize_body(orig, question, draft_v1)
     final_text = draft_v1
@@ -4352,7 +4025,7 @@ async def handle(request):
             final_text = _text_from_message(f_json)
             verified_flag = "collaborative"
     except Exception as e:
-        log(f"mixed T2 R2 anthropic EXC: {e}")
+        log(f"mix-am T2 R2 anthropic EXC: {e}")
     final_json = {
         "id": f"msg_mixed_{int(time.time()*1000)}",
         "type": "message", "role": "assistant",
