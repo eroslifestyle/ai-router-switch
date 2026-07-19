@@ -49,6 +49,7 @@ from trim_smart import (SHRINK_KEEP_HEAD, SHRINK_KEEP_TAIL,
 from token_counter import estimate_tokens, count_tokens
 from model_context_map import get_safe_input_limit, get_context_limit, get_summary_budget
 from context_rewrite import rewrite_for_context
+from context_alert import notify_context_threshold, maybe_prepend_banner
 from summarizer import summarize_old_messages
 from providers.base import (
     FALLBACK_STATUSES, MINIMAX_FALLBACK_STATUSES,
@@ -205,8 +206,16 @@ async def handle(request):
     ctx_check = {"action": "ok", "pct": 0.0}
     try:
         ctx_check = CTX.pre_check(fp, mode, len(body))
-        if ctx_check["action"] in ("error", "compact", "warn"):
+        if ctx_check["action"] in ("error", "compact", "warn", "warn2"):
             log(f"ctx: {ctx_check['action'].upper()} fp={fp} mode={mode} pct={ctx_check['pct']:.1%}")
+        # ALERT PRE-COMPRESSIONE: avvisa l'utente (3 canali) a 80% (warn) e 88% (warn2),
+        # PRIMA che la compressione lossy scatti a 90%, per dargli tempo di fare checkpoint.
+        if ctx_check["action"] in ("warn", "warn2"):
+            notify_context_threshold(
+                fp, mode, ctx_check["pct"],
+                ctx_check.get("est_tokens", 0), ctx_check.get("limit", 0),
+                ctx_check["action"],
+            )
         # FIX BUG-1: su compact/error, riscrivi proattivamente il body PRIMA di processare.
         # Questo libera spazio prima che upstream torni 400 context-exceeded.
         # post_check compatta_or_clear resta come safety net se la riscrittura non basta.
@@ -505,6 +514,12 @@ async def handle(request):
         }
         if wants_stream:
             return await _send_sse_message(request, final_json, verified_flag)
+        # Inietta l'eventuale banner alert-context pending (non-stream): appare in-chat.
+        _fj_bytes = maybe_prepend_banner(json.dumps(final_json).encode(), fp, is_stream=False)
+        try:
+            final_json = json.loads(_fj_bytes)
+        except Exception:
+            pass
         return web.json_response(final_json, headers={"x-ai-verified": verified_flag})
 
     # NEW PIPELINE redesign: Anthropic THINK + M3 ACT

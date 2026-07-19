@@ -18,6 +18,7 @@ def _count_tokens_stub(request, session, body: bytes) -> int | None:
     return None
 
 WARN_PCT    = 0.80
+WARN2_PCT   = 0.88   # secondo alert, urgente: compressione (90%) imminente
 COMPACT_PCT = 0.90
 ERROR_PCT   = 1.00
 
@@ -73,6 +74,8 @@ class ContextManager:
                 return {'action': 'error', 'est_tokens': est, 'limit': limit, 'pct': pct}
             if pct >= COMPACT_PCT:
                 return {'action': 'compact', 'est_tokens': est, 'limit': limit, 'pct': pct}
+            if pct >= WARN2_PCT:
+                return {'action': 'warn2', 'est_tokens': est, 'limit': limit, 'pct': pct}
             if pct >= WARN_PCT:
                 return {'action': 'warn', 'est_tokens': est, 'limit': limit, 'pct': pct}
             return {'action': 'ok', 'est_tokens': est, 'limit': limit, 'pct': pct}
