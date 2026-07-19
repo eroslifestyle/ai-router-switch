@@ -7,6 +7,7 @@ from router_constants import (
     MINIMAX_CONTEXT_BYTE_LIMIT,
 )
 from router_utils import log, _request_orig_model
+import debug_catalog
 
 
 def _build_minimax_think_body(orig: dict) -> bytes:
@@ -169,15 +170,21 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
         t_status, t_json = await _call_full(_fwd_minimax_short, request, think_body, session)
     except Exception as e:
         log(f"minimax-orch THINK EXC: {e} -> executor diretto")
+        debug_catalog.record_event(severity="error", category="minimax",
+                                    kind="think_exception", chat_fp=chat_fp, snippet=str(e))
         return await _executor_direct()
 
     if not t_json or t_status in {500, 502, 503, 504, 529}:
         log(f"minimax-orch THINK ko {t_status} -> executor diretto")
+        debug_catalog.record_event(severity="error", category="minimax",
+                                    kind="think_failed", chat_fp=chat_fp, code=t_status)
         return await _executor_direct()
 
     plan_json = _parse_think_json(_text_from_message(t_json))
     if not plan_json or not plan_json.get("self_review_ok", False):
         log(f"minimax-orch THINK: piano non valido -> executor diretto")
+        debug_catalog.record_event(severity="block", category="minimax",
+                                    kind="think_plan_invalid", chat_fp=chat_fp)
         return await _executor_direct()
 
     plan = plan_json.get("plan", "")
@@ -190,6 +197,8 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
         up = await forward_minimax(request, act_body, session)
     except Exception as e:
         log(f"minimax-orch ACT EXC: {e} -> executor diretto")
+        debug_catalog.record_event(severity="error", category="minimax",
+                                    kind="act_exception", chat_fp=chat_fp, snippet=str(e))
         return await _executor_direct()
 
     if up.status == 400:
@@ -209,6 +218,8 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
 
     if up.status in {401, 403, 408, 409, 413, 429, 500, 502, 503, 504, 529}:
         log(f"minimax-orch ACT {up.status} -> executor diretto")
+        debug_catalog.record_event(severity="error", category="minimax",
+                                    kind="act_fail", chat_fp=chat_fp, code=up.status)
         try:
             await up.release()
         except Exception:
@@ -237,6 +248,8 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
             log(f"minimax-orch VERIFY: {verify_text[:100]} fp={chat_fp}")
     except Exception as e:
         log(f"minimax-orch VERIFY EXC: {e} fp={chat_fp}")
+        debug_catalog.record_event(severity="block", category="minimax",
+                                    kind="verify_exception", chat_fp=chat_fp, snippet=str(e))
 
     return web.Response(body=act_raw, status=200, content_type="application/json")
 

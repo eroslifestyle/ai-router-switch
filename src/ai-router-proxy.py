@@ -24,6 +24,7 @@ from collections import deque
 from pathlib import Path
 
 import tool_isolation
+import debug_catalog
 from aiohttp import web, ClientSession, ClientTimeout, TCPConnector
 
 # ponytail: reach modules at project root (providers/, pipelines/)
@@ -353,17 +354,24 @@ async def handle(request):
             up = await _retry_forward(forward_anthropic, request, body, session)
         except Exception as e:
             log(f"ERR anthropic (pure) {request.path}: {e}")
+            debug_catalog.record_event(severity="error", category="anthropic",
+                                        kind="forward_exception", snippet=str(e))
             return web.json_response({"type": "error", "error": {"type": "router_error", "message": str(e)}}, status=502)
         should_retry = str(up.headers.get("x-should-retry", "")).lower() == "true"
         if up.status == 429 and should_retry:
             ra = up.headers.get("retry-after")
             delay = min(float(ra), 3.0) if ra and ra.isdigit() else 1.5
+            debug_catalog.record_event(severity="block", category="anthropic",
+                                        kind="burst_limiter_429", code=429,
+                                        snippet=f"retry-after={delay}s")
             up.release()
             await asyncio.sleep(delay)
             try:
                 up = await _retry_forward(forward_anthropic, request, body, session)
             except Exception as e:
                 log(f"ERR anthropic (pure) retry {request.path}: {e}")
+                debug_catalog.record_event(severity="error", category="anthropic",
+                                            kind="forward_retry_exception", snippet=str(e))
                 return web.json_response({"type": "error", "error": {"type": "router_error", "message": str(e)}}, status=502)
         log(f"anthropic (pure) -> {up.status} {request.path}")
         return await relay(up, extra_headers={"x-ai-verified": "anthropic-pure"})

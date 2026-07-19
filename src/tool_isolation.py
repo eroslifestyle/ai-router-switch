@@ -15,6 +15,8 @@ esplicitamente a ogni nuovo mix.
 """
 import json
 
+import debug_catalog
+
 
 def is_anthropic_server_tool(t: dict) -> bool:
     """Server-tool Anthropic (web_search_20250305, computer_use, bash,
@@ -65,6 +67,11 @@ def filter_tools_for_backend(body: bytes, backend: str) -> bytes:
     kept = [t for t in tools if not any(check(t) for check in foreign)]
     if len(kept) == len(tools):
         return body
+    stripped_names = [t.get("name", "?") for t in tools if t not in kept]
+    debug_catalog.record_event(
+        severity="block", category=backend, kind="tool_isolation_strip",
+        snippet=f"stripped={stripped_names[:10]} kept={len(kept)}/{len(tools)}",
+    )
     if kept:
         data["tools"] = kept
     else:
