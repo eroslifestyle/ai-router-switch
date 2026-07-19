@@ -55,6 +55,7 @@ from providers.base import (
     strip_images_body, call_full,
     T2_KEYWORDS, trim_old_messages,
     _body_has_images,
+    classify_t2,
 )
 from pipelines.primitives import (
     build_think_body, build_act_body, build_finalize_body,
