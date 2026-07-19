@@ -3389,8 +3389,11 @@ async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp
     # STEP 2: ACT - GLM con routing multimodale
     tier = await _glm.classify_tier(body, request, session, log_fn=log)
     eff_model, capped = _glm.apply_peak_cap(tier)
-    log(f"mix-ag ACT: GLM {eff_model} fp={chat_fp}")
-    act_resp = await _glm.forward_glm(request, body, session, eff_model, log_fn=log)
+    real_model = _glm.resolve_glm_upstream_model(eff_model)
+    act_body = _glm.set_body_model(body, real_model)
+    log(f"mix-ag ACT: GLM {real_model} (tier={eff_model}) fp={chat_fp}")
+    act_resp = await _glm.forward_glm(request, act_body, session,
+                                       orig.get("model") or real_model, log_fn=log)
 
     if act_resp.status >= 400:
         log(f"mix-ag ACT fail {act_resp.status}")
@@ -3522,11 +3525,10 @@ async def _glm_execute_with_chain(request, body, session, model, chat_fp, relay,
 
     # 1) Tentativo GLM
     try:
-        up = await _glm.forward_glm(request, body, session, model, log_fn=log)
+        up = await _glm.forward_glm(request, body, session, model, log_fn=log, passthrough=True)
         if up.status < 400:
             return await relay(up, extra_headers={
                 "x-ai-verified": f"glm({model})", "x-glm-cost-mult": str(mult)})
-        # Errore GLM: classifica 429 quota vs altro
         raw = b""
         try:
             raw = await up.read()
@@ -3863,7 +3865,9 @@ async def handle(request):
         # Path non-messages (health/count_tokens/...): GLM diretto col tier MID, no orchestrazione.
         if not request.path.endswith("/v1/messages"):
             try:
-                up = await _glm.forward_glm(request, body, session, _glm.GLM_TIER_MID, log_fn=log)
+                up = await _glm.forward_glm(request, body, session,
+                                            _glm.resolve_glm_upstream_model(_glm.GLM_TIER_MID),
+                                            log_fn=log, passthrough=True)
                 return await relay(up)
             except Exception as e:
                 log(f"GLM non-messages EXC: {e} → minimax passthrough")

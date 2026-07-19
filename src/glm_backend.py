@@ -379,6 +379,27 @@ def apply_peak_cap(tier: str):
     return tier, False
 
 
+def resolve_glm_upstream_model(tier: str) -> str:
+    """Mappa una tier key (TOP/MID/TURBO/VISION/MULTIMODAL) al modello GLM
+    reale da inviare a z.ai. Se `tier` è già un nome modello reale (non una
+    tier key nota), lo ritorna invariato (fallback sicuro)."""
+    return GLM_MODEL_FOR_TIER.get(tier, tier)
+
+
+def set_body_model(body: bytes, model: str) -> bytes:
+    """Riscrive il campo 'model' nel body JSON della richiesta in uscita verso
+    z.ai. Necessario perché z.ai onora il campo 'model' della request per
+    scegliere il modello reale: se non viene sovrascritto con il modello
+    risolto dal tiering, z.ai ignora la classificazione del proxy e usa il
+    proprio default (bug verificato: senza questo fix ogni richiesta GLM gira
+    sempre sul default z.ai, mai sul tier scelto dal classificatore)."""
+    try:
+        d = json.loads(body)
+        d["model"] = model
+        return json.dumps(d).encode()
+    except Exception:
+        return body
+
 
 # ── THINK-ACT-VERIFY ───────────────────────────────────────────────────────────
 
@@ -475,8 +496,7 @@ async def glm_think_act_verify(request, body: bytes, session, log_fn=print):
             log_fn(f"GLM THINK fail {think_resp.status} → skip to direct ACT")
             think_plan = ""
         else:
-            think_raw = await think_resp.read()
-            await think_resp.release()
+            think_raw = think_resp.body if isinstance(think_resp.body, (bytes, bytearray)) else b""
             try:
                 think_data = json.loads(think_raw)
                 think_plan = think_data.get("content", [{}])[0].get("text", "") if think_data.get("content") else ""
@@ -491,9 +511,12 @@ async def glm_think_act_verify(request, body: bytes, session, log_fn=print):
     # STEP 2: ACT - modello specifico esegue
     tier = await classify_tier(body, request, session, log_fn)
     eff_model, _ = apply_peak_cap(tier)
+    real_model = resolve_glm_upstream_model(eff_model)
+    act_body = set_body_model(body, real_model)
 
-    log_fn(f"GLM ACT: esecuzione con {eff_model}")
-    act_resp = await forward_glm(request, body, session, eff_model, log_fn)
+    log_fn(f"GLM ACT: esecuzione con {real_model} (tier={eff_model})")
+    act_resp = await forward_glm(request, act_body, session,
+                                  orig.get("model") or real_model, log_fn)
 
     if act_resp.status >= 400:
         log_fn(f"GLM ACT fail {act_resp.status}")
@@ -638,14 +661,13 @@ _GLM_SEM = asyncio.Semaphore(int(os.environ.get("AIROUTER_GLM_SEMAPHORE", "8")))
 
 
 async def forward_glm(request, body: bytes, session, model: str,
-                      log_fn=print):
+                      log_fn=print, passthrough: bool = False):
     """Invia request al backend GLM con retry loop 2 tentativi (R3-#6).
 
-    Retry:
-      - 429 RPM/TPM: retry con backoff
-      - 5xx: retry immediato
-      - Errore Rete: retry con backoff
-    Non retry: 400, 401, 403, 404 (client error puro).
+    Args:
+        passthrough: se True, ritorna la ClientResponse raw (per relay streaming).
+                     Il caller deve chiamare .release() o consumare il body.
+                     se False (default), legge il body e ritorna web.Response.
     """
 
     key = await get_glm_key()
@@ -656,15 +678,21 @@ async def forward_glm(request, body: bytes, session, model: str,
     url = GLM_UPSTREAM + request.path_qs
 
     for attempt in range(2):
+        resp = None
         try:
-            # Rate limiting
             est_tokens = _estimate_tokens(body)
             await GLM_LIMITER.acquire(model, est_tokens,
                                       budget_sec=GLM_RETRY_CAP_SEC)
 
             timeout = ClientTimeout(total=120)
             async with _GLM_SEM:
-                async with session.request(
+                # FIX: NIENTE `async with session.request(...) as resp` — se la
+                # funzione ritorna `resp` da dentro un async with, __aexit__
+                # chiama resp.release() PRIMA che il chiamante possa leggere lo
+                # stream (bug: connessione chiusa in passthrough mode). Pattern
+                # allineato a forward_anthropic/forward_minimax: await esplicito,
+                # release manuale nei soli path di retry/errore.
+                resp = await session.request(
                     method=request.method,
                     url=url,
                     headers={
@@ -675,61 +703,87 @@ async def forward_glm(request, body: bytes, session, model: str,
                     data=body,
                     timeout=timeout,
                     ssl=True,
-                ) as resp:
-                    raw = await resp.read()
-                    GLM_LIMITER.record(None, _estimate_tokens(raw), resp.status < 400)
+                )
 
-                    if resp.status == 429:
-                        step = GLM_LIMITER.on_429()
-                        log_fn(f"GLM 429 attempt {attempt + 1}: backoff {step}s")
-                        if attempt == 0:
-                            await asyncio.sleep(step + random.uniform(0.5, 2))
-                            continue
-                        # Fallisce dopo 2 tentativi
-                        break
+            GLM_LIMITER.record(None, est_tokens, resp.status < 400)
 
-                    if resp.status >= 500 and attempt == 0:
-                        # Retry su 5xx
-                        await asyncio.sleep(0.5)
-                        continue
+            if resp.status == 429:
+                step = GLM_LIMITER.on_429()
+                log_fn(f"GLM 429 attempt {attempt + 1}: backoff {step}s")
+                try:
+                    await resp.read()
+                finally:
+                    resp.release()
+                if attempt == 0:
+                    await asyncio.sleep(step + random.uniform(0.5, 2))
+                    continue
+                break
 
-                    # Risposta diretta (success o client error o 2nd attempt)
-                    headers = dict(resp.headers)
-                    # Rimuovi hop-by-hop (HTTP headers are case-insensitive)
-                    HOP = frozenset(("transfer-encoding", "connection", "keep-alive", "content-encoding"))
-                    for k in list(headers.keys()):
-                        if k.lower() in HOP:
-                            headers.pop(k)
-                    # FIX: GLM API è inconsistente - a volte ritorna gzip-encoded con
-                    # header corretto, a volte ritorna plain JSON con header "gzip" sbagliato.
-                    # Controlla il magic byte (gzip = 0x1f 0x8b) per decidere.
-                    if raw[:2] == b'\x1f\x8b':
-                        try:
-                            raw = gzip.decompress(raw)
-                            log_fn(f"GLM gzip decompressed: {len(raw)}b")
-                        except Exception as e:
-                            log_fn(f"GLM gzip decompress failed: {e}")
-                    return aiohttp.web.Response(
-                        body=_rewrite_glm_model(raw, model),
-                        status=resp.status,
-                        headers=headers,
-                    )
+            if resp.status >= 500 and attempt == 0:
+                try:
+                    await resp.read()
+                finally:
+                    resp.release()
+                await asyncio.sleep(0.5)
+                continue
+
+            # Passthrough: ritorna ClientResponse raw per relay streaming.
+            # Connessione volutamente APERTA: la release avviene nel finally
+            # di StreamingRelay.relay() dopo aver consumato lo stream.
+            if passthrough:
+                return resp
+
+            # Non-passthrough: leggi body, gestisci gzip, ritorna web.Response
+            raw = await resp.read()
+            resp.release()
+            if raw[:2] == b'\x1f\x8b':
+                try:
+                    raw = gzip.decompress(raw)
+                    log_fn(f"GLM gzip decompressed: {len(raw)}b")
+                except Exception as e:
+                    log_fn(f"GLM gzip decompress failed: {e}")
+
+            headers = dict(resp.headers)
+            HOP = frozenset(("transfer-encoding", "connection",
+                             "keep-alive", "content-encoding"))
+            for k in list(headers.keys()):
+                if k.lower() in HOP:
+                    headers.pop(k)
+            return aiohttp.web.Response(
+                body=_rewrite_glm_model(raw, model),
+                status=resp.status,
+                headers=headers,
+            )
 
         except asyncio.TimeoutError:
             log_fn(f"GLM timeout attempt {attempt + 1}")
+            if resp is not None:
+                try:
+                    resp.release()
+                except Exception:
+                    pass
             if attempt == 0:
                 await asyncio.sleep(1)
                 continue
         except aiohttp.ClientError as e:
             log_fn(f"GLM client error attempt {attempt + 1}: {e}")
+            if resp is not None:
+                try:
+                    resp.release()
+                except Exception:
+                    pass
             if attempt == 0:
                 await asyncio.sleep(1)
                 continue
         except Exception as e:
             log_fn(f"GLM error: {e}")
+            if resp is not None:
+                try:
+                    resp.release()
+                except Exception:
+                    pass
 
-    # Tutti i tentativi falliti
-    return aiohttp.web.Response(status=502, text=f"GLM exhausted after 2 attempts")
+    return aiohttp.web.Response(status=502, text="GLM exhausted after 2 attempts")
 
 
 def _rewrite_glm_model(raw: bytes, orig_model: str) -> bytes:
