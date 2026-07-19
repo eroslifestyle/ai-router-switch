@@ -2850,12 +2850,10 @@ async def _serve_minimax_vision(request, orig: dict, session, chat_fp: str, rela
     Context troppo grande → None (screenshot >750KB → no 400 nudo)."""
     if _has_server_tools(orig):
         return None
-    # FIX 2026-07-08 BUG-VISION-400: MiniMax-M3 allucina le immagini (test: dice "black"
-    # per un PNG blue) e restituisce 400 per immagini grandi/strane senza fare rescue.
-    # Anthropic processa le immagini correttamente. Bypass diretto → caller rescue.
-    if _body_has_images(orig):
-        log(f"minimax-vision: body ha immagini → bypass diretto Anthropic fp={chat_fp}")
-        return None
+    # REVERT 2026-07-19: il bypass sistematico di M3 per tutte le immagini era troppo
+    # aggressivo (basato su un singolo caso isolato). M3 supporta le immagini come da
+    # documentazione ufficiale ("multimodal chat input") e il test live lo conferma.
+    # Ora M3 ci prova prima: se fallisce (400/5xx) → fallback Anthropic del caller.
     orig2 = dict(orig)
     orig_model = (orig2.get("model") or "").strip()
     orig2["model"] = "MiniMax-M3"  # remap preserva i model che iniziano con 'MiniMax'

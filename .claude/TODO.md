@@ -1,7 +1,7 @@
 # ai-router-switch — TODO
 
 ## Attivo
-- [x] **Test live !router da DUE chat contemporanee** — isolamento lato store già OK (`ai-router-chats.json` sid distinti). Aprire 2 chat VSCode su `:8787`, mandare `!router minimax` in una e `!router anthropic` nell'altra, verificare che ogni chat risponda con la propria modalità.
+- [ ] **Monitorare consumo Anthropic vs MiniMax** dopo revert bypass visione M3 (2026-07-19) — ora M3 prova per primo su tutte le immagini invece di deviarle subito ad Anthropic. Verificare che il rapporto Anthropic/MiniMax si riequilibri sui prossimi log.
 
 ## AQ Backlog (non bloccanti)
 - [x] AQ-REF1 — Estrarre `StreamingRelay` come classe (commit e8fc50c)
