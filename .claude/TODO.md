@@ -1,10 +1,22 @@
 # ai-router-switch — TODO
 
 ## Attivo
+- [ ] **Osservare scomparsa 404 MiniMax post-fix Host** (`a5c31af`, 2026-07-19 21:30): con `HOP_HEADERS` filtrati in `forward_minimax` i 404 nginx non dovrebbero più comparire. Se ricompaiono → il fix Host non era l'unica causa; usare `logs/debug-errors.jsonl` (note con `alb_receive_time`/url).
+- [ ] **Verificare 400 anthropic post strip-query** (`?beta=true` rimosso dall'URL upstream in `forward_anthropic`/proxy, live da 21:04): 4 episodi `relay_error_400` alle 20:55-20:57 pre-restart, zero dopo. Il nuovo log `[forward_anthropic] 400 body:` cattura il body al prossimo episodio.
+- [ ] **Committare `router-mode/card.py`** (pulsanti Start/Riavvia/Stop UI, +67 righe): modifica pre-esistente dell'utente, non verificata → testare la card e committare separatamente.
 - [ ] **Monitorare consumo Anthropic vs MiniMax** dopo revert bypass visione M3 (2026-07-19) — ora M3 prova per primo su tutte le immagini invece di deviarle subito ad Anthropic. Verificare che il rapporto Anthropic/MiniMax si riequilibri sui prossimi log.
 - [ ] **Registrare Web Search MCP Server z.ai lato client** (`api.z.ai/api/mcp/web_search_prime/mcp`, Bearer con chiave GLM) nelle impostazioni MCP di Claude Code/VSCode — senza questo passo, la modalità glm pura non ha capacità di ricerca web (lo stripping incondizionato rimuove i tool esterni anche se il nativo non è ancora configurato, per design). **Non farlo senza conferma esplicita utente**: è config MCP globale (`~/.claude.json`), impatta tutti i progetti.
 - [ ] **Osservare mix-am post-fix retry-storm** (2026-07-19 sera, commit `c3a2ca8`): la pipeline ora ha THINK non-bloccante (4s) + timeout per-tentativo ACT MiniMax (12s). Verificare sulle prossime chat reali in mix-am che non ricompaiano "chat bloccate" e che `logs/debug-events.jsonl` non mostri più `Server disconnected` in raffica. Env tunabili: `AIROUTER_MIX_AM_THINK_FAST_SEC` (default 4), `AIROUTER_MIX_AM_ACT_TIMEOUT_SEC` (default 12).
 - [ ] **Valutare generazione periodica di BUG-CATALOG.md**: lo script `scripts/generate_bug_report.py` è manuale oggi. Valutare se legarlo a un trigger (es. post-restart, o cron leggero) per mantenere la documentazione dei bug corrente senza intervento umano.
+
+## Completati (sessione 2026-07-19 notte — audit isolamento 6 modalità + ROOT CAUSE Host header)
+- [x] **ROOT CAUSE 404 nginx MiniMax** (`a5c31af`): `forward_minimax` inoltrava `Host: 127.0.0.1:8787` del client all'upstream (aiohttp rispetta l'Host esplicito) → nginx MiniMax non matcha server_name → 404. Prova: stesso body 200 senza Host, 404 con Host farlocco. Corregge la diagnosi «ALB flaky lato loro». Fix: filtro `HOP_HEADERS` (come forward_anthropic) in entrambi i builder header.
+- [x] **mix-gm rotto al 100%** (`a5c31af`): ImportError `_build_minimax_act_body_retry` — pipeline_glm importava da pipeline_anthropic ma post-split vive in pipeline_minimax. Ogni richiesta mix-gm → 500.
+- [x] **Isolamento solo-minimax** (`a5c31af`): `_shrink_and_retry_minimax` param `allow_anthropic_rescue=False` dal call-site solo-minimax → 502 pulito invece di scalare su Haiku. mix-am mantiene il rescue.
+- [x] **Regex `!router` con trattino** (`a5c31af`): `(\w+)` → `([\w-]+)`, prima `!router mix-gm` rispondeva con l'help.
+- [x] **Legacy mode map** (`a5c31af`): override per-chat legacy («mixed»/«inverse»/«glm-minimax»/«anthropic-glm») ora mappati/validati in `get_mode` (prima passavano non validati → dispatch indefinito).
+- [x] **Fallback non-messages GLM per-modo** (`a5c31af`): mix-ag→anthropic, mix-gm→minimax, glm puro→502 (prima sempre minimax).
+- [x] **Smoke test 6/6 modalità** con sessioni isolate post-fix: anthropic/minimax/glm/mix-am/mix-ag/mix-gm tutti OK; catalogo debug pulito, 0 ImportError.
 
 ## Completati (sessione 2026-07-19 sera — fix mix-am raw-relay + ultra deep debug + retry-storm)
 - [x] **Fix 404 raw-relay mix-am** (`bcf4322`): `FALLBACK_STATUSES` in `router_constants.py` non includeva 404 → MiniMax/Anthropic 404 relayato grezzo (HTML nginx) al client invece di fare failover. Aggiunto 404 al set.
