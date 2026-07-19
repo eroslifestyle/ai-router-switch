@@ -3162,6 +3162,14 @@ def _pick_minimax_executor(plan_json: dict) -> str:
     return MINIMAX_MODEL
 
 
+def _build_minimax_act_body_retry(orig: dict, correction: str) -> bytes:
+    """Re-esegue l'ACT con nota correttiva iniettata nel system message."""
+    body = dict(orig)
+    orig_sys = orig.get("system", "")
+    body["system"] = orig_sys + f"\n\n[NOTA CORRETTIVA dal verifier]\n{correction}\n[/NOTA CORRETTIVA]" if orig_sys else f"[NOTA CORRETTIVA dal verifier]\n{correction}\n[/NOTA CORRETTIVA]"
+    return json.dumps(body).encode()
+
+
 def _build_minimax_act_body(orig: dict, plan: str, tools_to_call: list, executor: str) -> bytes:
     """L'executor inferiore esegue il piano prodotto da M3."""
     sys_msg = (
@@ -3503,21 +3511,44 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
     act_raw = await act_resp.read()
     await act_resp.release()
 
-    # STEP 3: VERIFY - GLM-5.2 verifica
+    # STEP 3: VERIFY - GLM-5.2 verifica con retry ×1 su incoerenza
     log(f"mix-gm VERIFY: GLM-5.2 fp={chat_fp}")
-    try:
-        verify_body = _glm.build_glm_verify_body(orig, think_plan, act_raw.decode(errors="ignore")[:5000])
-        verify_resp = await _glm.forward_glm(request, verify_body, session, "glm-5.2", log_fn=log)
-        if verify_resp.status < 400:
-            verify_raw = verify_resp.body if isinstance(verify_resp.body, (bytes, bytearray)) else b""
-            try:
-                verify_data = json.loads(verify_raw)
-                verify_text = verify_data.get("content", [{}])[0].get("text", "") if verify_data.get("content") else ""
-                log(f"glm-minimax VERIFY: {verify_text[:100]}")
-            except Exception:
-                pass
-    except Exception as e:
-        log(f"glm-minimax VERIFY EXC: {e}")
+    verify_ok = False
+    retry_note = ""
+    for attempt in range(2):
+        try:
+            verify_body = _glm.build_glm_verify_body(orig, think_plan,
+                act_raw.decode(errors="ignore")[:5000])
+            verify_resp = await _glm.forward_glm(request, verify_body, session, "glm-5.2", log_fn=log)
+            if verify_resp.status < 400:
+                verify_raw = verify_resp.body if isinstance(verify_resp.body, (bytes, bytearray)) else b""
+                try:
+                    verify_data = json.loads(verify_raw)
+                    verify_text = verify_data.get("content", [{}])[0].get("text", "") if verify_data.get("content") else ""
+                    log(f"mix-gm VERIFY attempt={attempt+1}: {verify_text[:100]} fp={chat_fp}")
+                    if "INCOERENTE" in verify_text:
+                        retry_note = verify_text
+                        log(f"mix-gm VERIFY: incoerenza rilevata, retry ACT/VERIFY fp={chat_fp}")
+                        # Retry ACT con nota correttiva iniettata in system
+                        correction = f"\n[NOTA CORRETTIVA]\n{verify_text}\n[/NOTA CORRETTIVA]"
+                        act_body_retry = _build_minimax_act_body_retry(orig, correction)
+                        act_resp = await forward_minimax(request, act_body_retry, session)
+                        if act_resp.status >= 400:
+                            await act_resp.release()
+                            break
+                        act_raw = await act_resp.read()
+                        await act_resp.release()
+                        continue
+                    verify_ok = True
+                except Exception:
+                    pass
+        except Exception as e:
+            log(f"mix-gm VERIFY EXC: {e}")
+        break
+
+    if not verify_ok and retry_note:
+        act_raw = b"[VERIFY-WARNING] " + act_raw
+        log(f"mix-gm VERIFY-WARNING: {retry_note[:80]} fp={chat_fp}")
 
     return web.Response(body=act_raw, status=200, content_type="application/json")
 

@@ -471,8 +471,8 @@ def build_glm_verify_body(orig: dict, plan: str, act_output: str) -> bytes:
     Chiede al modello di verificare che l'output sia corretto.
     Stesso fix di build_glm_think_body: `system` top-level, non in messages."""
     system = """Sei un verifier AI. Verifica che l'output prodotto sia corretto e completo.
-Se ci sono errori o omissioni, indica cosa corregere.
-Rispondi SOLO con VERIFIED se l'output è ok, o con CORRECTIONS seguito dalle correzioni."""
+Se l'output è coerente col piano → rispondi SOLO con: VERIFIED
+Se l'output è INCOERENTE col piano o ha errori → rispondi SOLO con: INCOERENTE: [motivo breve]"""
 
     verify_body = {
         "model": GLM_THINK_VERIFY_MODEL,
