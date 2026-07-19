@@ -423,6 +423,13 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
     from forward_anthropic import forward_anthropic, forward_anthropic_direct
     from router_utils import log as _log, _analyze_body_structure
     from router_constants import THINK_MODEL, ANTHROPIC_HAIKU_CONTEXT_BYTE_LIMIT
+    tr = getattr(request, "transport", None)
+    if tr is None or tr.is_closing():
+        # Relay al client già iniziato e rotto (o client sparito): ogni rescue
+        # scriverebbe su un transport chiuso -> "Cannot write to closing
+        # transport". Inutile spendere chiamate user-model + Haiku.
+        _log(f"mix-am ACT rescue SKIP: transport client chiuso fp={chat_fp}")
+        raise ConnectionResetError("client transport closing, rescue impossibile")
     _log(f"mix-am ACT: Haiku rescue fp={chat_fp}")
     body_bytes_rescue = json.dumps(dict(orig)).encode()
     if len(body_bytes_rescue) > MINIMAX_CONTEXT_BYTE_LIMIT:

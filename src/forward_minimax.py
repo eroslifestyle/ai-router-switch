@@ -146,10 +146,17 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
         async with _MINIMAX_SEM:
             req_kwargs = dict(data=new_body, headers=headers, allow_redirects=False)
             if act_timeout_sec is not None:
-                req_kwargs["timeout"] = ClientTimeout(total=act_timeout_sec)
-            up = await session.request(
-                request.method, url, **req_kwargs
-            )
+                # Timeout SOLO fino agli header: ClientTimeout(total=...) copriva
+                # anche la lettura del body e tagliava lo stream già in relay al
+                # client (risposta troncata -> InvalidHTTPResponse lato client).
+                up = await asyncio.wait_for(
+                    session.request(request.method, url, **req_kwargs),
+                    timeout=act_timeout_sec,
+                )
+            else:
+                up = await session.request(
+                    request.method, url, **req_kwargs
+                )
         if up.status != 429:
             MINIMAX_LIMITER.record(entry, est, success=True)
             MINIMAX_LIMITER.on_success()
