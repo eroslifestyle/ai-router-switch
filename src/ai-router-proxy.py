@@ -18,6 +18,7 @@ import asyncio
 import gzip
 import json
 import os
+import tempfile
 
 from fail_tracker import fail_tracker, mixed_fail_inc, mixed_fail_reset, mixed_anthropic_leads
 import random
@@ -2133,6 +2134,8 @@ ANTHROPIC_HAIKU_CONTEXT_BYTE_LIMIT = 200 * 1024  # 200k byte per Haiku
 
 TRIM_STATE_DIR = Path(os.environ.get("AIROUTER_TRIM_DIR", "/tmp/ai-router-trim"))
 TRIM_STATE_DIR.mkdir(exist_ok=True)
+# ponytail: global lock dict — one Lock per fingerprint, created on demand
+trim_locks: dict[str, threading.Lock] = {}
 # Trim: taglia proattivamente il context DOPO ogni risposta riuscita
 # Target: 50% del limite M3 → il context NON esplode mai se ritmato ogni risposta
 # Min messages preservati: 4 (sempre abbastanza per coerenza)
@@ -2280,7 +2283,17 @@ def _trim_context_after_response(req_body: bytes, fp: str) -> None:
     trimmed["messages"] = msgs[:-tail_cnt] + msgs[-tail_cnt:]
     try:
         trimmed_bytes = json.dumps(trimmed).encode()
-        (TRIM_STATE_DIR / f"{fp}.json").write_bytes(trimmed_bytes)
+        lock = trim_locks.setdefault(fp, threading.Lock())
+        with lock:
+            tmp = tempfile.NamedTemporaryFile(
+                dir=TRIM_STATE_DIR, delete=False, suffix=".tmp")
+            try:
+                tmp.write(trimmed_bytes)
+                tmp.close()
+                os.replace(tmp.name, str(TRIM_STATE_DIR / f"{fp}.json"))
+            except Exception:
+                Path(tmp.name).unlink(missing_ok=True)
+                raise
         log(f"trim: {len(req_body)}b→{len(trimmed_bytes)}b ({n}→{len(trimmed['messages'])} msg) fp={fp}")
     except Exception as e:
         log(f"trim: write fail {e} fp={fp}")
@@ -3649,19 +3662,18 @@ async def handle(request):
     fp = _resolve_chat_fingerprint(request)
     trim_file = TRIM_STATE_DIR / f"{fp}.json"
     if trim_file.exists():
-        try:
-            trimmed = trim_file.read_bytes()
-            if trimmed and len(trimmed) < len(body):
-                json.loads(trimmed)  # valida JSON
-                body = trimmed
-                log(f"trim: carico pre-trimmato {len(trimmed)}b < {len(body)}b fp={fp}")
-                # Rimuovi file dopo uso (prossima richiesta sarà comunque più recente)
-                try:
-                    trim_file.unlink()
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        lock = trim_locks.setdefault(fp, threading.Lock())
+        with lock:
+            try:
+                if trim_file.exists():
+                    trimmed = trim_file.read_bytes()
+                    if trimmed and len(trimmed) < len(body):
+                        json.loads(trimmed)  # valida JSON
+                        body = trimmed
+                        log(f"trim: carico pre-trimmato {len(trimmed)}b < {len(body)}b fp={fp}")
+                    trim_file.unlink(missing_ok=True)
+            except Exception:
+                pass
     forced = request.app.get("forced_mode")
 
     # health locale
