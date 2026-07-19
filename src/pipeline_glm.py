@@ -11,8 +11,8 @@ from router_utils import log
 
 async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp: str, relay):
     """mix-ag: Anthropic THINK -> GLM ACT -> Anthropic VERIFY."""
-    from forward_anthropic import forward_anthropic, forward_anthropic_direct
-    from pipeline_anthropic import _call_full, _text_from_message, _build_think_body
+    from forward_anthropic import forward_anthropic_direct
+    from pipeline_anthropic import _call_full, _text_from_message, _build_think_body, _anthropic_rescue
     orig = json.loads(body) if isinstance(body, bytes) else body
     think_body = _build_think_body(orig)
     try:
@@ -37,8 +37,8 @@ async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp
     act_resp = await _glm.forward_glm(request, act_body, session,
                                        orig.get("model") or real_model, log_fn=log)
     if act_resp.status >= 400:
-        log(f"mix-ag ACT fail {act_resp.status}")
-        return await relay(await forward_anthropic(request, body, session))
+        log(f"mix-ag ACT fail {act_resp.status} -> rescue (user model -> Haiku)")
+        return await _anthropic_rescue(request, orig, session, chat_fp, relay)
     act_raw = act_resp.body if isinstance(act_resp.body, (bytes, bytearray)) else b""
     log(f"mix-ag VERIFY: Anthropic fp={chat_fp}")
     try:
