@@ -2033,7 +2033,11 @@ def _build_think_body(orig: dict) -> bytes:
         "Sei un ORCHESTRATORE. Leggi la richiesta utente e scrivi un PIANO D'AZIONE "
         "BREVE (2-3 frasi) in italiano: cosa va fatto e in che ordine. "
         "Scrivi SOLO il piano come testo semplice. NON eseguire nulla, NON chiamare "
-        "strumenti, NON rispondere alla domanda — solo il piano operativo essenziale."
+        "strumenti, NON rispondere alla domanda — solo il piano operativo essenziale.\n\n"
+        "OPIANIFICATORE: esplicita:\n"
+        "OBIETTIVO: <cosa vuole ottenere l'utente>\n"
+        "VINCOLI: <requisiti, limiti, contesto da rispettare>\n"
+        "NON FARE: <cose da evitare esplicitamente>"
     )
     body = dict(orig)
     body["system"] = _anthropic_system(sys_msg)
@@ -3511,6 +3515,17 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
     act_raw = await act_resp.read()
     await act_resp.release()
 
+    # HHEM gate: valuta ACT response se >300 char (fail-open)
+    if len(act_raw) > 300:
+        try:
+            import hhem_gate as _hhem
+            score = await _hhem.hhem_score("mix-gm ACT", act_raw.decode(errors="ignore")[:1000])
+            if score is not None and score < _hhem.HHEM_THRESHOLD:
+                log(f"mix-gm ACT HHEM score={score:.3f} → [HHEM-WARNING] fp={chat_fp}")
+                act_raw = b"[HHEM-WARNING] " + act_raw
+        except Exception:
+            pass  # fail-open
+
     # STEP 3: VERIFY - GLM-5.2 verifica con retry ×1 su incoerenza
     log(f"mix-gm VERIFY: GLM-5.2 fp={chat_fp}")
     verify_ok = False
@@ -3526,6 +3541,16 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
                     verify_data = json.loads(verify_raw)
                     verify_text = verify_data.get("content", [{}])[0].get("text", "") if verify_data.get("content") else ""
                     log(f"mix-gm VERIFY attempt={attempt+1}: {verify_text[:100]} fp={chat_fp}")
+                    # HHEM gate sul verify_text se >300 char (fail-open)
+                    if len(verify_text) > 300:
+                        try:
+                            import hhem_gate as _hhem
+                            score = await _hhem.hhem_score("mix-gm VERIFY", verify_text[:1000])
+                            if score is not None and score < _hhem.HHEM_THRESHOLD:
+                                log(f"mix-gm VERIFY HHEM score={score:.3f} → INCOERENTE: hhem flag fp={chat_fp}")
+                                verify_text = f"INCOERENTE: hhem score={score:.3f} {verify_text[:80]}"
+                        except Exception:
+                            pass  # fail-open
                     if "INCOERENTE" in verify_text:
                         retry_note = verify_text
                         log(f"mix-gm VERIFY: incoerenza rilevata, retry ACT/VERIFY fp={chat_fp}")
