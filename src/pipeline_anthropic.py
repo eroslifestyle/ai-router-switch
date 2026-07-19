@@ -38,6 +38,26 @@ MIX_AM_THINK_FAST_SEC = float(os.environ.get("AIROUTER_MIX_AM_THINK_FAST_SEC", "
 # un MiniMax disconnesso ecceziona dopo questo invece di ereditare sock_read=120s.
 MIX_AM_ACT_TIMEOUT_SEC = float(os.environ.get("AIROUTER_MIX_AM_ACT_TIMEOUT_SEC", "12"))
 
+# ── THINK backoff state per chat_fp ──────────────────────────────────────────
+# skip THINK dopo 2 timeout consecutivi per dare respiro al modello.
+_think_lock = __import__("threading").Lock()
+_think_count: dict[str, int] = {}
+_THINK_TIMEOUT_SEQUENCE = [4, 6, 8]   # secondi: 1°=4s, 2°=6s, 3°+=8s
+_THINK_SKIP_AFTER = 2                # salta THINK da questo timeout consecutivo in poi
+
+def _think_timeout_budget(chat_fp: str) -> float:
+    with _think_lock:
+        cnt = _think_count.get(chat_fp, 0)
+    return _THINK_TIMEOUT_SEQUENCE[min(cnt, len(_THINK_TIMEOUT_SEQUENCE) - 1)]
+
+def _think_timeout_record(chat_fp: str) -> None:
+    with _think_lock:
+        _think_count[chat_fp] = _think_count.get(chat_fp, 0) + 1
+
+def _think_timeout_reset(chat_fp: str) -> None:
+    with _think_lock:
+        _think_count[chat_fp] = 0
+
 
 # ── Body builders ──────────────────────────────────────────────────────────────
 def _anthropic_system(instruction: str) -> list:
@@ -463,24 +483,39 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
             if not should_retry:
                 _log(f"mix-am ACT rescue: modello utente 429 Rate Limit -> relay subito fp={chat_fp}")
                 return await relay(up)
-            ra = up.headers.get("retry-after")
-            delay = min(float(ra), 3.0) if ra and ra.isdigit() else 1.5
-            try:
-                await up.release()
-            except Exception:
-                pass
-            _log(f"mix-am ACT rescue: modello utente 429 retry, {delay}s fp={chat_fp}")
-            await asyncio.sleep(delay)
-            try:
-                up = await forward_anthropic_direct(request, body_bytes_rescue, session)
-                user_status = up.status
-                if up.status < 400:
-                    from fail_tracker import mixed_fail_reset
-                    mixed_fail_reset(chat_fp)
-                    _log(f"mix-am ACT rescue: modello utente retry {up.status} OK fp={chat_fp}")
-                return await relay(up)
-            except Exception as e:
-                _log(f"mix-am ACT rescue modello utente retry EXC: {e}")
+            # FIX BUG-2: retry multiplo con backoff esponenziale (max 2 retry).
+            # 1° retry: 1.5s, 2° retry: 3.0s. Poi → Haiku.
+            retry_delays = [1.5, 3.0]
+            last_exc = None
+            for i, delay in enumerate(retry_delays):
+                try:
+                    await up.release()
+                except Exception:
+                    pass
+                _log(f"mix-am ACT rescue: modello utente 429 retry {i+1}/{len(retry_delays)}, {delay}s fp={chat_fp}")
+                await asyncio.sleep(delay)
+                try:
+                    up = await forward_anthropic_direct(request, body_bytes_rescue, session)
+                    user_status = up.status
+                    if up.status < 400:
+                        from fail_tracker import mixed_fail_reset
+                        mixed_fail_reset(chat_fp)
+                        _log(f"mix-am ACT rescue: modello utente retry {i+1} {up.status} OK fp={chat_fp}")
+                        return await relay(up)
+                    if up.status == 429:
+                        _log(f"mix-am ACT rescue: modello utente retry {i+1} ancora 429 -> continua fp={chat_fp}")
+                        last_exc = None
+                        continue
+                    # non-429, non-2xx: esci dal retry loop e vai a Haiku
+                    _log(f"mix-am ACT rescue: modello utente retry {i+1} {up.status} -> Haiku fp={chat_fp}")
+                    break
+                except Exception as e:
+                    last_exc = e
+                    _log(f"mix-am ACT rescue modello utente retry {i+1} EXC: {e}")
+            # tutti i retry esauriti o eccezione: prosegue a Haiku
+            if last_exc:
+                user_status = None
+                _log(f"mix-am ACT rescue: modello utente retry esauriti EXC -> Haiku fp={chat_fp}")
         else:
             try:
                 await up.release()
@@ -662,23 +697,33 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
             log(f'mix-am BYPASS-THINK EXC: {e} -> fallthrough')
 
     think_body = _build_think_body(orig)
-    plan = ""
-    try:
-        t_status, t_json = await asyncio.wait_for(
-            _call_full(forward_anthropic_direct, request, think_body, session, timeout=THINK_TIMEOUT_SEC),
-            timeout=MIX_AM_THINK_FAST_SEC,
-        )
-        if t_json and t_status not in FALLBACK_STATUSES:
-            plan = _text_from_message(t_json).strip()
-    except asyncio.TimeoutError:
-        log(f"mix-am THINK fast-timeout ({MIX_AM_THINK_FAST_SEC}s) -> ACT senza piano fp={chat_fp}")
-        debug_catalog.record_event(severity="block", category="mix-am",
-                                    kind="think_fast_timeout", chat_fp=chat_fp,
-                                    snippet=f"budget={MIX_AM_THINK_FAST_SEC}s")
-    except Exception as e:
-        log(f"mix-am THINK EXC: {e} -> ACT senza piano fp={chat_fp}")
-        debug_catalog.record_event(severity="error", category="mix-am",
-                                    kind="think_exception", chat_fp=chat_fp, snippet=str(e))
+    # FIX BUG-3: backoff esponenziale sul timeout THINK + skip dopo 2 KO consecutivi.
+    # Budget: 4s → 6s → 8s (max). Dopo 2 timeout: ACT diretto senza THINK.
+    think_budget = _think_timeout_budget(chat_fp)
+    if _think_count.get(chat_fp, 0) >= _THINK_SKIP_AFTER:
+        log(f"mix-am THINK skip (>= {_THINK_SKIP_AFTER} timeout consec.) -> ACT diretto fp={chat_fp}")
+        plan = ""
+    else:
+        try:
+            t_status, t_json = await asyncio.wait_for(
+                _call_full(forward_anthropic_direct, request, think_body, session, timeout=THINK_TIMEOUT_SEC),
+                timeout=think_budget,
+            )
+            if t_json and t_status not in FALLBACK_STATUSES:
+                _think_timeout_reset(chat_fp)
+                plan = _text_from_message(t_json).strip()
+        except asyncio.TimeoutError:
+            _think_timeout_record(chat_fp)
+            think_budget = _think_timeout_budget(chat_fp)
+            log(f"mix-am THINK timeout ({think_budget}s) -> ACT senza piano fp={chat_fp}")
+            debug_catalog.record_event(severity="block", category="mix-am",
+                                        kind="think_timeout", chat_fp=chat_fp,
+                                        snippet=f"budget={think_budget}s, seq={_THINK_TIMEOUT_SEQUENCE}")
+        except Exception as e:
+            _think_timeout_reset(chat_fp)
+            log(f"mix-am THINK EXC: {e} -> ACT senza piano fp={chat_fp}")
+            debug_catalog.record_event(severity="error", category="mix-am",
+                                        kind="think_exception", chat_fp=chat_fp, snippet=str(e))
 
     if not plan:
         # THINK assente/scaduto/fallito: ACT diretto con timeout stretto + rescue.

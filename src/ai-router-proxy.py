@@ -201,11 +201,34 @@ async def handle(request):
         return _err_response("multipart not supported", status=415)
     body = await request.read()
 
-    # CTX PRE-CHECK (AQ-REF3): OSSERVA soltanto
+    # CTX PRE-CHECK (AQ-REF3): azione proattiva su compact/error
+    ctx_check = {"action": "ok", "pct": 0.0}
     try:
         ctx_check = CTX.pre_check(fp, mode, len(body))
         if ctx_check["action"] in ("error", "compact", "warn"):
             log(f"ctx: {ctx_check['action'].upper()} fp={fp} mode={mode} pct={ctx_check['pct']:.1%}")
+        # FIX BUG-1: su compact/error, riscrivi proattivamente il body PRIMA di processare.
+        # Questo libera spazio prima che upstream torni 400 context-exceeded.
+        # post_check compatta_or_clear resta come safety net se la riscrittura non basta.
+        if ctx_check["action"] in ("compact", "error"):
+            _ctx_model_map = {
+                "anthropic": "claude-sonnet-4-7", "minimax": "MiniMax-M2.7",
+                "glm": "glm-5.2", "mix-am": "MiniMax-M2.7",
+                "mix-ag": "claude-sonnet-4-7", "mix-gm": "MiniMax-M2.7",
+            }
+            ctx_model = _ctx_model_map.get(mode, "MiniMax-M2.7")
+            rewrit, was_rewrit = rewrite_for_context(body, ctx_model, fp)
+            if was_rewrit and len(rewrit) < len(body):
+                body = rewrit
+                log(f"ctx: proactive rewrite {len(rewrit)}b < {len(body)}b fp={fp}")
+            elif ctx_check["action"] == "error":
+                from aiohttp import web
+                log(f"ctx: ERROR threshold {ctx_check['pct']:.1%} fp={fp}")
+                return web.json_response({
+                    "type": "error",
+                    "error": {"type": "context_window_exceeded",
+                              "message": f"Context a {ctx_check['pct']:.0%}. Usa /compact."}
+                }, status=400)
     except Exception as e:
         log(f"ctx: pre_check EXC {e} fp={fp} mode={mode}")
 
