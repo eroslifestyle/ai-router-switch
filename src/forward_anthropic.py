@@ -14,7 +14,7 @@ from router_constants import (
 from router_utils import (
     _analyze_body_structure, SENT_ANALYSIS, _DEBUG_LAST_SENT, log,
 )
-from router_auth import _reload_oauth_token
+from router_auth import _load_oauth_token, _reload_oauth_token
 
 
 def strip_unsupported_fields(raw: bytes, fields: tuple) -> bytes:

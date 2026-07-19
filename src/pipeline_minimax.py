@@ -123,8 +123,9 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
         _call_full, _text_from_message, _is_context_too_large_for_minimax,
         _is_context_exceed_400, _has_web_search_tool, _web_search_blocked_response,
         _has_server_tools, _body_has_images, _serve_minimax_vision,
-        _shrink_and_retry_minimax, _repair_message_sequence,
+        _shrink_and_retry_minimax,
     )
+    from router_utils import _repair_message_sequence
 
     chat_fp = _resolve_chat_fingerprint(request)
 

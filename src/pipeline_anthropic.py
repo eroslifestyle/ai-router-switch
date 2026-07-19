@@ -15,7 +15,7 @@ from router_constants import (
 from router_utils import (
     log, log_exc, _request_orig_model, _analyze_body_structure,
     SENT_ANALYSIS, _DEBUG_LAST_SENT, _DEBUG_REPAIR_TRACE,
-    debug_capture,
+    debug_capture, _repair_message_sequence,
 )
 from router_mode import _resolve_chat_fingerprint
 from trim_smart import SHRINK_KEEP_HEAD, SHRINK_KEEP_TAIL, build_shrink_summary
@@ -237,63 +237,6 @@ def _web_search_blocked_response():
 
 
 # ── Message repair ──────────────────────────────────────────────────────────────
-def _repair_message_sequence(messages: list) -> list:
-    """Ripara sequenza dopo troncamento: rimuove tool_result orfani, leading non-user."""
-    if not messages:
-        return messages
-    msgs = [dict(m) for m in messages if m.get("role") != "system"]
-    changed = True
-    while changed and msgs:
-        changed = False
-        while msgs and msgs[0].get("role") != "user":
-            msgs.pop(0)
-            changed = True
-        if not msgs:
-            break
-        seen = set()
-        new_msgs = []
-        for m in msgs:
-            content = m.get("content")
-            if isinstance(content, list):
-                nc = []
-                for b in content:
-                    if isinstance(b, dict) and b.get("type") == "tool_result":
-                        if b.get("tool_use_id") in seen:
-                            nc.append(b)
-                        else:
-                            changed = True
-                    else:
-                        nc.append(b)
-                for b in content:
-                    if isinstance(b, dict) and b.get("type") == "tool_use":
-                        seen.add(b.get("id"))
-                if nc:
-                    m["content"] = nc
-                    new_msgs.append(m)
-                else:
-                    changed = True
-            else:
-                new_msgs.append(m)
-        msgs = new_msgs
-    if msgs and msgs[-1].get("role") == "assistant" and isinstance(msgs[-1].get("content"), list):
-        clean = [c for c in msgs[-1]["content"]
-                 if not (isinstance(c, dict) and c.get("type") == "tool_use")]
-        if len(clean) < len(msgs[-1]["content"]):
-            if clean:
-                msgs[-1]["content"] = clean
-            else:
-                msgs.pop()
-    def _first_is_clean_user(ms):
-        if not ms or ms[0].get("role") != "user":
-            return False
-        c = ms[0].get("content")
-        if isinstance(c, list):
-            return not any(isinstance(b, dict) and b.get("type") == "tool_result" for b in c)
-        return True
-    if not _first_is_clean_user(msgs):
-        msgs.insert(0, {"role": "user", "content": "(cronologia precedente troncata)"})
-    return msgs
-
 
 # ── Trim ──────────────────────────────────────────────────────────────────────
 def _trim_context_after_response(req_body: bytes, fp: str) -> None:
