@@ -2,6 +2,18 @@
 
 ## Attivo
 - [ ] **Monitorare consumo Anthropic vs MiniMax** dopo revert bypass visione M3 (2026-07-19) — ora M3 prova per primo su tutte le immagini invece di deviarle subito ad Anthropic. Verificare che il rapporto Anthropic/MiniMax si riequilibri sui prossimi log.
+- [ ] **Registrare Web Search MCP Server z.ai lato client** (`api.z.ai/api/mcp/web_search_prime/mcp`, Bearer con chiave GLM) nelle impostazioni MCP di Claude Code/VSCode — senza questo passo, la modalità glm pura non ha capacità di ricerca web (lo stripping incondizionato rimuove i tool esterni anche se il nativo non è ancora configurato, per design).
+- [ ] **Indagare `GLM THINK fail 400`** ricorrente in background (non bloccante, fire-and-forget dal fix f843cc3) — bassa priorità, non influenza le risposte all'utente.
+
+## Completati (sessione 2026-07-19 — debug modalità GLM pura)
+- [x] Fix 1/5 — connection-release prematura in `forward_glm` (return da dentro `async with`), tier key mai risolta a modello reale, `.read()`/`.release()` su `web.Response` nello STEP THINK (commit 6e51322)
+- [x] Fix 2/5 — mode per-chat non applicato quando manca `X-Claude-Code-Session-Id` (mismatch fingerprint write/read path, commit dd62647)
+- [x] Fix 3/5 — THINK+VERIFY bloccanti (10-20s prima del primo byte) causavano retry-storm lato client con backoff esponenziale; fix ACT immediato + THINK/VERIFY in background (commit f843cc3)
+- [x] Fix comando `!router` intercettava richieste ausiliarie di Claude Code (title-generation) per regex troppo permissiva (commit 73c569e)
+- [x] Fix 5/5 — ROOT CAUSE del sintomo "Insufficient balance": `has_multimodal_content` dirottava qualunque messaggio a image-gen per un tool con "image"/"generation" nel nome (es. mcp__MiniMax__understand_image) → endpoint z.ai senza credito, mai loggato (commit b470dfc)
+- [x] Ricerca web nativa z.ai preferita su MiniMax/Anthropic in modalità glm (commit e4429f9)
+- [x] Isolamento tool nativi per TUTTE le modalità pure (anthropic/minimax/glm) — zero mixing tra provider, tool locali Claude Code mai toccati (commit 462f181)
+- [x] Fix gate DEGRADED (OAuth Anthropic) bloccava anche minimax/glm pure, che non ne hanno bisogno (commit 7e2eaec)
 
 ## AQ Backlog (non bloccanti)
 - [x] AQ-REF1 — Estrarre `StreamingRelay` come classe (commit e8fc50c)
