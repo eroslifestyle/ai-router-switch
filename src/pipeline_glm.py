@@ -7,6 +7,7 @@ from router_constants import (
     MINIMAX_FALLBACK_STATUSES,
 )
 from router_utils import log
+import debug_catalog
 
 
 async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp: str, relay):
@@ -19,9 +20,13 @@ async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp
         t_status, t_json = await _call_full(forward_anthropic_direct, request, think_body, session, timeout=THINK_TIMEOUT_SEC)
     except Exception as e:
         log(f"mix-ag THINK EXC: {e}")
+        debug_catalog.record_event(severity="error", category="mix-ag",
+                                    kind="think_exception", chat_fp=chat_fp, snippet=str(e))
         think_plan = ""
     else:
         if not t_json or t_status in FALLBACK_STATUSES:
+            debug_catalog.record_event(severity="block", category="mix-ag",
+                                        kind="think_failed", chat_fp=chat_fp, code=t_status)
             think_plan = ""
         else:
             think_plan = _text_from_message(t_json).strip()
@@ -38,6 +43,8 @@ async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp
                                        orig.get("model") or real_model, log_fn=log)
     if act_resp.status >= 400:
         log(f"mix-ag ACT fail {act_resp.status} -> rescue (user model -> Haiku)")
+        debug_catalog.record_event(severity="error", category="mix-ag",
+                                    kind="glm_act_fail", chat_fp=chat_fp, code=act_resp.status)
         return await _anthropic_rescue(request, orig, session, chat_fp, relay)
     act_raw = act_resp.body if isinstance(act_resp.body, (bytes, bytearray)) else b""
     log(f"mix-ag VERIFY: Anthropic fp={chat_fp}")
@@ -56,6 +63,8 @@ async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp
             log(f"mix-ag VERIFY: {verify_text[:100]}")
     except Exception as e:
         log(f"mix-ag VERIFY EXC: {e}")
+        debug_catalog.record_event(severity="block", category="mix-ag",
+                                    kind="verify_exception", chat_fp=chat_fp, snippet=str(e))
     return act_resp
 
 
@@ -79,6 +88,8 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
                 think_plan = ""
     except Exception as e:
         log(f"glm-minimax THINK EXC: {e}")
+        debug_catalog.record_event(severity="error", category="mix-gm",
+                                    kind="think_exception", chat_fp=chat_fp, snippet=str(e))
         think_plan = ""
     log(f"mix-gm THINK: plan={len(think_plan)}c fp={chat_fp}")
 
@@ -87,6 +98,9 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
     if act_resp.status >= 400:
         is_ctx, _ = await _is_context_exceed_400(act_resp)
         await act_resp.release()
+        debug_catalog.record_event(severity="error", category="mix-gm",
+                                    kind="minimax_act_fail", chat_fp=chat_fp,
+                                    code=act_resp.status, detail={"context_exceed": is_ctx})
         if is_ctx:
             from pipeline_anthropic import _shrink_and_retry_minimax
             return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
@@ -102,6 +116,9 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
             score = await _hhem.hhem_score("mix-gm ACT", act_raw.decode(errors="ignore")[:1000])
             if score is not None and score < _hhem.HHEM_THRESHOLD:
                 log(f"mix-gm ACT HHEM score={score:.3f} -> [HHEM-WARNING] fp={chat_fp}")
+                debug_catalog.record_event(severity="block", category="mix-gm",
+                                            kind="hhem_warning", chat_fp=chat_fp,
+                                            snippet=f"score={score:.3f} < {_hhem.HHEM_THRESHOLD}")
                 act_raw = b"[HHEM-WARNING] " + act_raw
         except Exception:
             pass
@@ -136,11 +153,16 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
                     pass
         except Exception as e:
             log(f"mix-gm VERIFY EXC: {e}")
+            debug_catalog.record_event(severity="block", category="mix-gm",
+                                        kind="verify_exception", chat_fp=chat_fp, snippet=str(e))
         break
 
     if not verify_ok and retry_note:
         act_raw = b"[VERIFY-WARNING] " + act_raw
         log(f"mix-gm VERIFY-WARNING: {retry_note[:80]} fp={chat_fp}")
+        debug_catalog.record_event(severity="block", category="mix-gm",
+                                    kind="verify_incoherent", chat_fp=chat_fp,
+                                    snippet=retry_note[:80])
     from aiohttp import web
     return web.Response(body=act_raw, status=200, content_type="application/json")
 

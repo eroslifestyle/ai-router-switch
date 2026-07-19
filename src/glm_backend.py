@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Optional
 
 import tool_isolation
+import debug_catalog
 
 # Z.ai Anthropic-compatible endpoint
 # GLM_API_BASE (env da glm.env) ha priorità; fallback su hardcoded
@@ -748,6 +749,9 @@ async def forward_glm(request, body: bytes, session, model: str,
             if resp.status == 429:
                 step = GLM_LIMITER.on_429()
                 log_fn(f"GLM 429 attempt {attempt + 1}: backoff {step}s")
+                debug_catalog.record_event(severity="block", category="glm",
+                                            kind="glm_429_backoff", code=429,
+                                            snippet=f"attempt={attempt + 1} backoff={step}s model={model}")
                 try:
                     await resp.read()
                 finally:
@@ -758,6 +762,9 @@ async def forward_glm(request, body: bytes, session, model: str,
                 break
 
             if resp.status >= 500 and attempt == 0:
+                debug_catalog.record_event(severity="error", category="glm",
+                                            kind="glm_5xx_retry", code=resp.status,
+                                            snippet=f"attempt={attempt + 1} model={model}")
                 try:
                     await resp.read()
                 finally:
@@ -795,6 +802,8 @@ async def forward_glm(request, body: bytes, session, model: str,
 
         except asyncio.TimeoutError:
             log_fn(f"GLM timeout attempt {attempt + 1}")
+            debug_catalog.record_event(severity="error", category="glm",
+                                        kind="glm_timeout", snippet=f"attempt={attempt + 1} model={model}")
             if resp is not None:
                 try:
                     resp.release()
@@ -805,6 +814,8 @@ async def forward_glm(request, body: bytes, session, model: str,
                 continue
         except aiohttp.ClientError as e:
             log_fn(f"GLM client error attempt {attempt + 1}: {e}")
+            debug_catalog.record_event(severity="error", category="glm",
+                                        kind="glm_client_error", snippet=str(e))
             if resp is not None:
                 try:
                     resp.release()
@@ -815,12 +826,16 @@ async def forward_glm(request, body: bytes, session, model: str,
                 continue
         except Exception as e:
             log_fn(f"GLM error: {e}")
+            debug_catalog.record_event(severity="bug", category="glm",
+                                        kind="glm_unexpected_exception", snippet=str(e))
             if resp is not None:
                 try:
                     resp.release()
                 except Exception:
                     pass
 
+    debug_catalog.record_event(severity="error", category="glm",
+                                kind="glm_exhausted", code=502, snippet=f"model={model}")
     return aiohttp.web.Response(status=502, text="GLM exhausted after 2 attempts")
 
 
