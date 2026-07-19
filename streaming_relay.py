@@ -7,6 +7,7 @@ import json
 import re as re_module
 
 from aiohttp import web
+from router_debug import dl
 
 
 class StreamingRelay:
@@ -23,7 +24,6 @@ class StreamingRelay:
         sidecar_path,
         minimax_model: str,
         log_fn,
-        debug_capture_fn,
         log_router_usage_fn,
         trim_context_fn,
     ):
@@ -36,7 +36,6 @@ class StreamingRelay:
         self.sidecar_path = sidecar_path
         self.minimax_model = minimax_model
         self.log_fn = log_fn
-        self.debug_capture_fn = debug_capture_fn
         self.log_router_usage_fn = log_router_usage_fn
         self.trim_context_fn = trim_context_fn
 
@@ -76,7 +75,7 @@ class StreamingRelay:
                 ("server", "cf-ray", "via", "x-served-by", "alb_receive_time")
                 if upstream.headers.get(k)
             }
-            self.debug_capture_fn(
+            dl.capture(
                 kind=f"relay_error_{upstream.status}",
                 request=self.request, fp=chat_fp_for_rewrite,
                 client_model=orig_model or "",

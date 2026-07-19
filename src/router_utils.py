@@ -1,12 +1,12 @@
-# ~270 lines
-"""Debug, logging, and rate limiter extracted from ai-router-proxy.py (~lines 74-627)."""
+# ~320 lines
+"""Router utilities: rate limiter, log, body analysis, sequence repair.
+Debug centralizzato → src/router_debug.py (importato in fondo per retrocompatibilità)."""
 import asyncio
-import gzip
 import json
 import os
 import random
-import threading
 import time
+import traceback
 from collections import deque
 from pathlib import Path
 
@@ -18,64 +18,8 @@ from router_constants import (
     MINIMAX_RETRY_CAP_SEC,
 )
 
-# ── Debug directories ──────────────────────────────────────────────────────────
-_DEBUG_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_DEBUG_LOGS_DIR = _DEBUG_PROJECT_ROOT / "logs"
-_DEBUG_LOGS_DIR.mkdir(exist_ok=True)
-_DEBUG_JSONL = _DEBUG_LOGS_DIR / "debug-errors.jsonl"
-_DEBUG_LAST_REQ = _DEBUG_LOGS_DIR / "debug-last-request.json"
-_DEBUG_LAST_SENT = _DEBUG_LOGS_DIR / "debug-last-sent.json"
-_DEBUG_REPAIR_TRACE = _DEBUG_LOGS_DIR / "debug-repair-trace.json"
-
-DEBUG_EVENTS: deque = deque(maxlen=100)
+# ── Analysis & tracking ──────────────────────────────────────────────────────────
 SENT_ANALYSIS: deque = deque(maxlen=50)
-
-# ── Decompression helpers ──────────────────────────────────────────────────────
-def _decompress_upstream(raw: bytes, content_encoding: str = "") -> str:
-    """Decomprime gzip/brotli/deflate un body upstream in testo leggibile UTF-8."""
-    if not raw:
-        return ""
-    try:
-        enc = (content_encoding or "").lower()
-        if raw[:2] == b"\x1f\x8b" or "gzip" in enc:
-            raw = gzip.decompress(raw)
-        elif "br" in enc or "brotli" in enc:
-            try:
-                import brotli
-                raw = brotli.decompress(raw)
-            except Exception:
-                pass
-        elif "deflate" in enc:
-            import zlib
-            try:
-                raw = zlib.decompress(raw, -zlib.MAX_WBITS)
-            except Exception:
-                raw = zlib.decompress(raw)
-    except Exception:
-        pass
-    return raw.decode("utf-8", errors="replace")
-
-
-def _orig_flags(orig: dict | None) -> dict:
-    """Estrae flags diagnostici dal body richiesta originale."""
-    if not orig:
-        return {}
-    msgs = orig.get("messages", [])
-    img_count = 0
-    for m in msgs:
-        c = m.get("content", [])
-        if isinstance(c, list):
-            for b in c:
-                if isinstance(b, dict) and b.get("type") == "image":
-                    img_count += 1
-    return {
-        "msg_count": len(msgs),
-        "has_tools": bool(orig.get("tools")),
-        "has_images": img_count > 0,
-        "has_thinking": bool(orig.get("thinking")),
-        "cache_control_count": img_count,
-        "system_is_list": isinstance(orig.get("system"), list),
-    }
 
 
 # ── Body structure analysis ────────────────────────────────────────────────────
@@ -168,157 +112,8 @@ def _analyze_body_structure(body: "dict | bytes") -> dict:
     }
 
 
-def _rotated_jsonl_path() -> Path:
-    """Ritorna il path del JSONL: .1 se .0 supera 10MB."""
-    p = _DEBUG_JSONL
-    try:
-        if p.exists() and p.stat().st_size > 10 * 1024 * 1024:
-            rot = p.with_suffix(".jsonl.1")
-            try:
-                rot.unlink()
-            except Exception:
-                pass
-            p.rename(rot)
-    except Exception:
-        pass
-    return p
-
-
-# ── Debug capture ──────────────────────────────────────────────────────────────
-def debug_capture(*, kind: str, request=None, fp: str = "", client_model: str = "",
-                  upstream_model: str = "", status: int | None = None, stage: str = "",
-                  upstream_status: int | None = None, upstream_raw: bytes = b"",
-                  upstream_encoding: str = "", sent_bytes: int = 0, orig: dict | None = None,
-                  sent_analysis: dict | None = None, note: str = "", mode: str = None,
-                  severity: str = "error") -> None:
-    """Registra un evento di errore in RAM + JSONL. Decomprime il body upstream.
-
-    FIX 2026-07-19: 'mode' era sempre get_file_mode() (il file globale), MAI il
-    mode realmente risolto per la richiesta -> attribuzione fuorviante quando il
-    file globale differiva dall'override per-chat. Ora usa get_mode(request, fp)
-    (stessa risoluzione canonica forced->per-chat->file), a meno che il chiamante
-    passi esplicitamente il mode gia' risolto (es. StreamingRelay.mode)."""
-    try:
-        from router_mode import get_mode
-        resolved_mode = mode or get_mode(request, fp)
-        err_text = _decompress_upstream(upstream_raw, upstream_encoding)
-        flags = _orig_flags(orig)
-        record = {
-            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "kind": kind, "fp": fp,
-            "mode": resolved_mode,
-            "path": getattr(request, "path", "") if request else "",
-            "client_model": client_model, "upstream_model": upstream_model,
-            "status": status, "stage": stage,
-            "upstream_status": upstream_status,
-            "upstream_error": err_text[:2000],
-            "sent_bytes": sent_bytes,
-            "sent_analysis": sent_analysis, "flags": flags, "note": note,
-        }
-        DEBUG_EVENTS.append(record)
-        try:
-            import debug_catalog
-            debug_catalog.record_event(
-                severity=severity, category=resolved_mode, kind=kind,
-                chat_fp=fp, code=upstream_status or status,
-                snippet=err_text or note,
-                detail={"client_model": client_model, "upstream_model": upstream_model,
-                        "stage": stage, "path": record["path"]},
-            )
-        except Exception:
-            pass
-        p = _rotated_jsonl_path()
-        try:
-            with open(p, "a") as f:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        except Exception:
-            pass
-        if orig:
-            req_copy = dict(orig)
-            for m in req_copy.get("messages", []):
-                c = m.get("content", [])
-                if isinstance(c, list):
-                    for b in c:
-                        if isinstance(b, dict) and b.get("type") == "image":
-                            d = b.get("data", "")
-                            if len(d) > 200:
-                                b["data"] = d[:200] + f"... [TRUNCATED {len(d) - 200} chars]"
-            try:
-                with open(_DEBUG_LAST_REQ, "w") as f:
-                    json.dump(req_copy, f, ensure_ascii=False)
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-
-async def debug_errors(request) -> web.Response:
-    n = int(request.query.get("n", "20"))
-    return web.json_response(list(DEBUG_EVENTS)[-n:])
-
-
-async def debug_last(request) -> web.Response:
-    if not DEBUG_EVENTS:
-        return web.Response(text="No errors captured yet.", content_type="text/plain")
-    ev = DEBUG_EVENTS[-1]
-    lines = [f"{k}: {json.dumps(v, ensure_ascii=False)}" for k, v in ev.items()]
-    return web.Response(text="\n".join(lines), content_type="text/plain")
-
-
-async def debug_stats(request) -> web.Response:
-    from collections import Counter
-    c_kind = Counter(e.get("kind") for e in DEBUG_EVENTS)
-    c_stage = Counter(e.get("stage") for e in DEBUG_EVENTS)
-    c_upstream = Counter(str(e.get("upstream_status")) for e in DEBUG_EVENTS)
-    return web.json_response({
-        "total": len(DEBUG_EVENTS),
-        "by_kind": dict(c_kind), "by_stage": dict(c_stage),
-        "by_upstream_status": dict(c_upstream),
-    })
-
-
-async def debug_trace(request) -> web.Response:
-    ev = DEBUG_EVENTS[-1] if DEBUG_EVENTS else None
-    last_sent = None
-    try:
-        if _DEBUG_LAST_SENT.exists():
-            last_sent = json.loads(_DEBUG_LAST_SENT.read_text(encoding="utf-8"))
-    except Exception:
-        pass
-    repair_trace = None
-    try:
-        if _DEBUG_REPAIR_TRACE.exists():
-            repair_trace = json.loads(_DEBUG_REPAIR_TRACE.read_text(encoding="utf-8"))
-    except Exception:
-        pass
-    recent_analysis = list(SENT_ANALYSIS)[-10:]
-    return web.json_response({
-        "last_event": ev, "last_sent": last_sent,
-        "repair_trace": repair_trace, "recent_sent_analysis": recent_analysis,
-    })
-
-
-async def debug_catalog_endpoint(request) -> web.Response:
-    """Catalogo deduplicato bug/blocco/errore, vedi DEBUG-CATALOG-SPEC.md."""
-    import debug_catalog
-    category = request.query.get("mode") or request.query.get("category")
-    severity = request.query.get("severity")
-    items = debug_catalog.get_catalog(category=category, severity=severity)
-    return web.json_response({"total": len(items), "items": items})
-
-
-async def debug_catalog_entry(request) -> web.Response:
-    import debug_catalog
-    sig = request.match_info.get("signature", "")
-    entry = debug_catalog.get_catalog_entry(sig)
-    if entry is None:
-        return web.json_response({"error": f"signature '{sig}' non trovata"}, status=404)
-    return web.json_response(entry)
-
-
 # ── Rate limiter ───────────────────────────────────────────────────────────────
 def _classify_429(raw: bytes) -> str:
-    """Classifica un body 429 MiniMax: 'token_plan' vs 'rpm_tpm'."""
     low = raw[:2000].lower()
     if b"usage limit" in low or b"resets at" in low:
         return "token_plan"
@@ -330,8 +125,6 @@ class RateLimitExhausted(Exception):
 
 
 class MinimaxRateLimiter:
-    """Pacing client-side sui limiti ufficiali MiniMax (sliding window 60s per modello)."""
-
     def __init__(self):
         self._model_locks = {}
         self._windows = {}
@@ -417,7 +210,6 @@ _ALERT_MIN_INTERVAL_SEC = 300
 
 
 def _minimax_alert(msg: str):
-    """Notifica Token Plan esaurito: notify-send + file."""
     global _last_alert_ts
     try:
         with open(MINIMAX_ALERTS_LOG, "a") as f:
@@ -449,13 +241,11 @@ def log(msg: str):
 
 
 def log_exc(msg: str):
-    import traceback
     log(f"{msg}\n{traceback.format_exc()}")
 
 
 # ── Message sequence repair ────────────────────────────────────────────────────
 def _repair_message_sequence(messages: list) -> list:
-    """Ripara sequenza dopo troncamento: rimuove tool_result orfani, leading non-user."""
     if not messages:
         return messages
     msgs = [dict(m) for m in messages if m.get("role") != "system"]
@@ -513,7 +303,20 @@ def _repair_message_sequence(messages: list) -> list:
 
 
 # ── Original model tracking ────────────────────────────────────────────────────
-# FIX E + FIX AUDIT 2026-07-17: chat_fp|"__remap__" -> modello originale richiesto
-# dal client. Scritto da remap_body_for_minimax(), consumato da relay() per
-# riscrivere il campo 'model' nella SSE response.
 _request_orig_model: dict = {}
+
+
+# ── Retrocompatibilità: re-export debug da router_debug ─────────────────────────
+# Tutti i call site esistenti importano da router_utils. Il debug è ora in
+# router_debug.py, ma re-exportiamo qui per non dover cambiare centinaia di
+# import nei file del progetto.
+from router_debug import debug_capture, DEBUG_EVENTS, dl, _DEBUG_LAST_SENT, _DEBUG_REPAIR_TRACE, DEBUG_LAST_REQ  # noqa: E402, F401
+
+# Retrocompat: funzioni HTTP endpoint spostate in router_debug
+from router_debug import dl as _dl_global
+debug_errors = _dl_global.errors_endpoint
+debug_last = _dl_global.last_endpoint
+debug_stats = _dl_global.stats_endpoint
+debug_trace = _dl_global.trace_endpoint
+debug_catalog_endpoint = _dl_global.catalog_endpoint
+debug_catalog_entry = _dl_global.catalog_entry_endpoint

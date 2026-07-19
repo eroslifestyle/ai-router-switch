@@ -10,10 +10,8 @@ _CATALOG_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _CATALOG_LOGS_DIR = _CATALOG_PROJECT_ROOT / "logs"
 _CATALOG_LOGS_DIR.mkdir(exist_ok=True)
 
-EVENTS_JSONL = _CATALOG_LOGS_DIR / "debug-events.jsonl"
 CATALOG_JSONL = _CATALOG_LOGS_DIR / "BUG-CATALOG.jsonl"
 
-MAX_EVENTS_BYTES = 10 * 1024 * 1024
 SNIPPET_MAX_CHARS = 300
 VALID_SEVERITIES = ("bug", "block", "error")
 
@@ -21,19 +19,10 @@ _catalog_cache = {"data": None, "ts": 0}
 _CACHE_TTL_SEC = 5
 
 
-def _rotated_events_path() -> Path:
-    p = EVENTS_JSONL
-    try:
-        if p.exists() and p.stat().st_size > MAX_EVENTS_BYTES:
-            rot = p.with_suffix(".jsonl.1")
-            try:
-                rot.unlink()
-            except Exception:
-                pass
-            p.rename(rot)
-    except Exception:
-        pass
-    return p
+def _dl():
+    """Lazy import di router_debug per evitare circular import."""
+    from router_debug import dl
+    return dl
 
 
 def _signature(category: str, kind: str, mode: str, code, snippet: str) -> str:
@@ -103,18 +92,8 @@ def record_event(*, severity: str, category: str, kind: str, chat_fp: str = "",
     snippet = (snippet or "")[:SNIPPET_MAX_CHARS]
     sig = _signature(category, kind, "", code, snippet)
 
-    raw_event = {
-        "ts": ts, "sig": sig, "severity": severity, "category": category,
-        "kind": kind, "fp": chat_fp, "code": code,
-        "snippet": snippet, "detail": detail or {},
-    }
-    try:
-        p = _rotated_events_path()
-        with open(p, "a") as f:
-            f.write(json.dumps(raw_event, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-
+    # Note: DEBUG_EVENTS_JSONL è gia' scritto da router_debug.capture()
+    # che chiama qui dentro _catalog_event(). Scriviamo SOLO il BUG-CATALOG dedup.
     try:
         catalog = _load_catalog()
         entry = catalog.get(sig)
@@ -137,8 +116,8 @@ def record_event(*, severity: str, category: str, kind: str, chat_fp: str = "",
                 entry["example_fp"] = chat_fp
         catalog[sig] = entry
         _save_catalog(catalog)
-    except Exception:
-        pass
+    except Exception as e:
+        _dl()._debug_err(f"record_event failed: {e}")
 
     return sig
 

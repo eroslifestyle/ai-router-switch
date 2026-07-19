@@ -87,6 +87,7 @@ from router_utils import (
     MINIMAX_LIMITER, _MINIMAX_SEM,
     _request_orig_model,
 )
+from router_debug import dl
 from router_mode import (
     get_file_mode, _current_mode, _err_response, get_mode,
     conversation_fingerprint, _resolve_chat_fingerprint,
@@ -333,7 +334,6 @@ async def handle(request):
         sidecar_path=SIDECAR,
         minimax_model=MINIMAX_MODEL,
         log_fn=log,
-        debug_capture_fn=debug_capture,
         log_router_usage_fn=log_router_usage,
         trim_context_fn=_trim_context_after_response,
     )
@@ -625,12 +625,13 @@ def _make_app(session, forced_mode):
 
     app.router.add_get("/health", healthz)
     app.router.add_get("/__resilience", resiliencez)
-    app.router.add_get("/debug/errors", debug_errors)
-    app.router.add_get("/debug/last", debug_last)
-    app.router.add_get("/debug/stats", debug_stats)
-    app.router.add_get("/debug/trace", debug_trace)
-    app.router.add_get("/debug/catalog", debug_catalog_endpoint)
-    app.router.add_get("/debug/catalog/{signature}", debug_catalog_entry)
+    app.router.add_get("/debug/errors", dl.errors_endpoint)
+    app.router.add_get("/debug/last", dl.last_endpoint)
+    app.router.add_get("/debug/stats", dl.stats_endpoint)
+    app.router.add_get("/debug/trace", dl.trace_endpoint)
+    app.router.add_get("/debug/health", dl.health_endpoint)
+    app.router.add_get("/debug/catalog", dl.catalog_endpoint)
+    app.router.add_get("/debug/catalog/{signature}", dl.catalog_entry_endpoint)
     app.router.add_post("/admin/mode/{mode}", admin_mode_switch)
     app.router.add_route("*", "/{tail:.*}", handle)
     return app

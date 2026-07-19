@@ -15,6 +15,7 @@ from router_utils import (
     _analyze_body_structure, SENT_ANALYSIS, _DEBUG_LAST_SENT, log,
 )
 from router_auth import _load_oauth_token, _reload_oauth_token
+from router_debug import dl
 
 
 def strip_unsupported_fields(raw: bytes, fields: tuple) -> bytes:
@@ -184,6 +185,11 @@ async def forward_anthropic(request, body, session):
                     )
                     if up.status < 400:
                         return up
+                    dl.capture(kind="forward_anthropic_ctx_exceed_retry_fail",
+                             request=request, stage="forward",
+                             upstream_status=up.status,
+                             note="context exceed retry with images stripped failed", mode="anthropic",
+                             severity="error")
                     try:
                         await up.read()
                     except Exception:

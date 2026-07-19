@@ -7,6 +7,7 @@ import time
 from aiohttp import ClientTimeout
 
 import tool_isolation
+from router_debug import dl
 
 from router_constants import (
     MINIMAX_UPSTREAM, MINIMAX_MODEL, MINIMAX_GENERATIVE_HOST,
@@ -181,6 +182,9 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
             MINIMAX_LIMITER.set_plan_exhausted(snippet)
             _log(f"minimax 429 TOKEN-PLAN: {snippet[:200]}")
             _minimax_alert(f"Token Plan esaurito: {snippet[:200]}")
+            dl.capture(kind="minimax_429_token_plan", request=request, fp="",
+                      upstream_status=429, upstream_raw=raw, mode="minimax",
+                      snippet=snippet[:300], severity="error")
             if not plan_retry_done:
                 plan_retry_done = True
                 await asyncio.sleep(10)
@@ -188,6 +192,10 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
             return _synthetic_429(f"MiniMax Token Plan esaurito. {snippet[:300]}")
         step = MINIMAX_LIMITER.on_429_rpm()
         _log(f"minimax 429 RPM/TPM: backoff {step}s (budget left {budget_left:.0f}s) model={model}")
+        dl.capture(kind="minimax_429_rpm", request=request, fp="",
+                  upstream_status=429, upstream_raw=raw,
+                  note=f"backoff {step}s, budget {budget_left:.0f}s", mode="minimax",
+                  severity="block")
 
 
 async def _fwd_minimax_short(request, body, session):
@@ -252,6 +260,10 @@ async def _forward_minimax_generative(request, body: bytes, session,
         MINIMAX_LIMITER.record(entry, 0, success=False)
         step = MINIMAX_LIMITER.on_429_rpm()
         log(f"minimax-generative 429: backoff {step}s")
+        dl.capture(kind="minimax_generative_429", request=request, fp="",
+                  upstream_status=429,
+                  note=f"generative path, backoff {step}s", mode="minimax",
+                  severity="block")
         await asyncio.sleep(step)
 
 
