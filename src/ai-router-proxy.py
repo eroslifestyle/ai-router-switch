@@ -1006,52 +1006,6 @@ def _synthetic_message(text: str, model: str = "ai-router") -> dict:
     }
 
 
-# ── Classificatore criticità T2 (euristiche locali, zero latenza) ──────────
-T2_KEYWORDS = (
-    "quant", "quando", "data", "prezzo", "costo", "percentual", "formula",
-    "calcol", "converti", "differenza tra", "versione", "compatibil",
-    "sicurezz", "security", "vulnerab", "password", "credenzial", "token",
-    "produzione", "production", "deploy", "migrazione", "migration",
-    "irreversibil", "cancell", "delete", "drop ", "rm -rf", "truncate",
-    "legale", "medic", "fiscal", "contratt", "normativ",
-    "esatt", "preciso", "accurat", "verifica", "corretto", "sicuro che",
-    "sei sicuro", "è vero che", "dimostra", "prova che",
-)
-
-
-def extract_last_user_text(data: dict) -> str:
-    for msg in reversed(data.get("messages", [])):
-        if msg.get("role") == "user":
-            c = msg.get("content", "")
-            if isinstance(c, list):
-                return " ".join(b.get("text", "") for b in c if isinstance(b, dict))
-            return str(c)
-    return ""
-
-
-def classify_t2(body: bytes) -> bool:
-    """True se la richiesta è 'critica' (T2) -> merita verifica Opus."""
-    try:
-        data = json.loads(body)
-    except Exception:
-        return False
-    # Richieste agentiche (Claude Code/VSCode) contengono "tools" e si aspettano
-    # blocchi tool_use in risposta. La pipeline collaborativa T2 appiattisce la
-    # risposta a solo testo, distruggendo i tool_use -> l'agente non esegue nulla.
-    # Mai farle entrare in T2: vanno in passthrough rel() che preserva i tool.
-    if data.get("tools"):
-        return False
-    if os.environ.get("AIROUTER_FORCE_T2") == "1":
-        return True
-    text = extract_last_user_text(data)
-    low = text.lower()
-    if any(k in low for k in T2_KEYWORDS):
-        return True
-    if "?" in text and any(ch.isdigit() for ch in text):
-        return True
-    return False
-
-
 async def get_minimax_key() -> str:
     """FIX deadlock 2026-06-30: cache hit sotto lock, subprocess FUORI dal lock.
 
