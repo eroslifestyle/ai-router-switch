@@ -54,9 +54,11 @@ from providers.base import (
     _is_context_too_large_for_minimax, _is_context_exceed_400,
     strip_images_body, call_full,
     T2_KEYWORDS, trim_old_messages,
+    _body_has_images,
 )
 from pipelines.primitives import (
     build_think_body, build_act_body, build_finalize_body,
+    to_json_bytes,
 )
 
 
@@ -87,17 +89,6 @@ def _decompress_upstream(raw: bytes, content_encoding: str = "") -> str:
     except Exception:
         pass
     return raw.decode("utf-8", errors="replace")
-
-
-def _body_has_images(data: dict) -> bool:
-    """True se il body request contiene blocchi immagine."""
-    for m in (data or {}).get("messages", []):
-        c = m.get("content", [])
-        if isinstance(c, list):
-            for b in c:
-                if isinstance(b, dict) and b.get("type") == "image":
-                    return True
-    return False
 
 
 def _orig_flags(orig: dict | None) -> dict:
@@ -241,38 +232,6 @@ def _analyze_body_structure(body: "dict | bytes") -> dict:
         "tool_use_ids": len(tool_use_ids),
         "tool_result_ids": len(tool_result_ids),
     }
-
-
-def _strip_images_body(body: "dict | bytes") -> bytes:
-    """Rimuove i blocchi immagine dal body per recuperare context.
-
-    Quando Anthropic risponde 400 context window, le immagini sono la causa
-    principale (possono occupare MB). Le sostituisce con placeholder testuale.
-    """
-    try:
-        if isinstance(body, bytes):
-            data = json.loads(body)
-        else:
-            data = body
-        msgs = data.get("messages", [])
-        changed = False
-        for m in msgs:
-            c = m.get("content")
-            if isinstance(c, list):
-                new_c = []
-                for b in c:
-                    if isinstance(b, dict) and b.get("type") == "image":
-                        changed = True
-                        new_c.append({"type": "text", "text": "[image omitted — context limit]"})
-                    else:
-                        new_c.append(b)
-                if changed:
-                    m["content"] = new_c
-        if not changed:
-            return body if isinstance(body, bytes) else json.dumps(body).encode()
-        return json.dumps(data, ensure_ascii=False).encode()
-    except Exception:
-        return body if isinstance(body, bytes) else json.dumps(body).encode()
 
 
 def _rotated_jsonl_path() -> Path:
@@ -1432,7 +1391,7 @@ async def forward_anthropic(request, body, session):
                       or b"context_exceeded" in low or b"context limit" in low
                       or b"exceeds limit" in low)
             if is_ctx:
-                stripped = _strip_images_body(safe_body)
+                stripped = strip_images_body(safe_body)
                 if stripped != safe_body:
                     log(f"[forward_anthropic] ctx-exceed 400 → retry with images stripped")
                     up = await session.request(
@@ -1945,24 +1904,8 @@ def _anthropic_system(instruction: str) -> list:
 
 
 def _build_finalize_body(orig: dict, question: str, draft_v2: str) -> bytes:
-    """Round 3: Anthropic finalizza — gateway di qualità, decide se la v2 e' pubblicabile."""
-    sys_msg = (
-        "Sei il finalizzatore. Ricevi DOMANDA e v2 prodotta da M3 dopo la tua critica. "
-        "Se la v2 risponde correttamente, restituiscila identica. "
-        "Se contiene ancora errori gravi, correggili SOLO dove necessario. "
-        "Rispondi in italiano, SOLO la risposta finale, senza meta-commenti."
-    )
-    user_msg = (
-        f"DOMANDA:\n{question}\n\nRISPOSTA v2 (M3):\n{draft_v2}\n\n"
-        "Restituisci la risposta finale."
-    )
-    return json.dumps({
-        "model": VERIFY_MODEL,
-        "max_tokens": int(orig.get("max_tokens", 1024)),
-        "system": _anthropic_system(sys_msg),
-        "messages": [{"role": "user", "content": user_msg}],
-        "stream": False,
-    }).encode()
+    """Bridge bytes→dict: delega a primitives.build_finalize_body."""
+    return to_json_bytes(build_finalize_body(orig, question, draft_v2))
 
 
 THINK_MAX_TOKENS = int(os.environ.get("AIROUTER_THINK_MAX_TOKENS", "200"))
@@ -2067,22 +2010,8 @@ def _parse_think_json(text: str) -> dict | None:
 
 def _build_act_body(orig: dict, plan: str, tools_to_call: list,
                     executor: str = "") -> bytes:
-    """Version D 2026-07-03: l'executor MiniMax ESEGUE il piano-guida Anthropic.
-    L'esecutore sceglie e chiama i tool concreti (ha il body originale con tutti
-    i tools); il piano è solo una guida di orchestrazione. `executor` (es.
-    MiniMax-M2.7 code) forza il modello: inizia con 'MiniMax' → remap lo preserva."""
-    sys_msg = (
-        "Sei l'esecutore. Un orchestratore Anthropic ha analizzato la richiesta e "
-        "prodotto questo PIANO-GUIDA. Segui il piano usando i tuoi strumenti come "
-        "necessario. Rispondi normalmente all'utente eseguendo le azioni del piano.\n\n"
-        f"PIANO-GUIDA:\n{plan}"
-    )
-    body = dict(orig)  # conserva i tools originali → l'executor può chiamarli
-    body["system"] = sys_msg
-    body["stream"] = bool(orig.get("stream"))  # preserva stream se client lo chiedeva
-    if executor:
-        body["model"] = executor
-    return json.dumps(body).encode()
+    """Bridge bytes→dict: delega a primitives.build_act_body."""
+    return to_json_bytes(build_act_body(orig, plan, tools_to_call, executor))
 
 
 # ── Context window thresholds (byte → token ≈ /4 per English+code) ────────
@@ -2226,7 +2155,7 @@ def _trim_context_after_response(req_body: bytes, fp: str) -> None:
         # FIX 2026-07-18: strip immagini PRIMA del trim per evitare OOM/crash
         # su body con 10+ immagini base64 (10+ MB). Le immagini non servono
         # nel file trimmed (saranno ricaricate dall'utente nella prossima request).
-        stripped = _strip_images_body(req_body)
+        stripped = strip_images_body(req_body)
         data = json.loads(stripped)
     except Exception:
         return
@@ -2543,20 +2472,6 @@ async def _try_shrink_body(orig: dict, target_bytes: int) -> "bytes | None":
         return None
 
 
-def _has_image_blocks(orig: dict) -> bool:
-    """True se il body contiene blocchi image (vision). MiniMax è text-only:
-    ignora i blocchi image e ALLUCINA la descrizione dal contesto chat
-    (bug gravissimo 2026-07-04: screenshot descritto con contenuto inventato
-    dal CLAUDE.md). Con immagini l'ACT DEVE andare a un modello Anthropic."""
-    for m in orig.get("messages", []):
-        c = m.get("content")
-        if isinstance(c, list):
-            for blk in c:
-                if isinstance(blk, dict) and blk.get("type") == "image":
-                    return True
-    return False
-
-
 def _has_server_tools(orig: dict) -> bool:
     """True se il body dichiara server tool Anthropic (web_search_20250305, ...).
     Si riconoscono perché NON hanno input_schema (obbligatorio per i client tool).
@@ -2565,23 +2480,6 @@ def _has_server_tools(orig: dict) -> bool:
     mostra come risultato della ricerca (bug grave 2026-07-04). ACT → Anthropic."""
     return any(isinstance(t, dict) and "input_schema" not in t
                for t in orig.get("tools") or [])
-
-
-def _body_has_images(orig: dict) -> bool:
-    """FIX 2026-07-08 BUG-VISION-400: True se il body contiene image block.
-    Usato per bypassare _serve_minimax_vision: M3 allucina le immagini (test: dice
-    "black" per PNG blue) e restituisce 400 per immagini grandi/strane, 400 perso
-    senza rescue. Anthropic gestisce le immagini correttamente → bypass diretto."""
-    try:
-        for msg in (orig.get("messages") or []):
-            content = msg.get("content")
-            if isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "image":
-                        return True
-    except Exception:
-        pass
-    return False
 
 
 def _has_web_search_tool(orig: dict) -> bool:
@@ -2669,7 +2567,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay) -> web.
     # non più deviate ad Anthropic. Eccezione dichiarata alla REGOLA VINCOLANTE
     # sotto: per le immagini M3 orchestra+esegue senza il modello utente.
     # Fallback: se M3 non regge (5xx/context/server-tool) → _mixed_haiku_rescue.
-    if _has_image_blocks(orig):
+    if _body_has_images(orig):
         res = await _serve_minimax_vision(request, orig, session, chat_fp, relay)
         if res is not None:
             return res
@@ -3193,7 +3091,7 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
 
     # VISION (2026-07-04): l'orchestrate manderebbe l'immagine a un executor
     # M2.x cieco → serve M3. Immagini → M3 diretto, bypass orchestrate.
-    if _has_image_blocks(orig):
+    if _body_has_images(orig):
         res = await _serve_minimax_vision(request, orig, session, chat_fp, relay)
         if res is not None:
             return res

@@ -68,6 +68,20 @@ def _is_context_exceed_400(body: bytes) -> tuple[bool, str]:
     return False, ""
 
 # ── Body manipulation ────────────────────────────────────────────────────────
+def _body_has_images(orig: dict) -> bool:
+    """True se il body contiene blocchi image. MiniMax allucina le immagini
+    (bug 2026-07-08) → bypass diretto a Anthropic."""
+    try:
+        for msg in (orig.get("messages") or []):
+            content = msg.get("content")
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "image":
+                        return True
+    except Exception:
+        pass
+    return False
+
 def strip_images_body(body: bytes) -> bytes:
     """Rimuove blocchi immagine dal body (context exceed workaround)."""
     try:
