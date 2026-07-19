@@ -29,6 +29,8 @@ from collections import deque
 from pathlib import Path
 from typing import Optional
 
+import tool_isolation
+
 # Z.ai Anthropic-compatible endpoint
 # GLM_API_BASE (env da glm.env) ha priorità; fallback su hardcoded
 GLM_UPSTREAM = os.environ.get(
@@ -398,47 +400,9 @@ def set_body_model(body: bytes, model: str) -> bytes:
         return body
 
 
-def strip_foreign_branded_tools_for_glm(body: bytes) -> bytes:
-    """Isolamento tool nativi per la modalità glm pura (decisione utente
-    2026-07-19: zero mixing tra provider — solo glm deve usare solo tool
-    GLM). Rimuove SEMPRE dall'array tools i tool brandizzati Anthropic
-    (server-tool privi di input_schema: web_search_20250305, computer_use,
-    bash, code_execution, ...) e MiniMax (tool con 'minimax' nel nome, es.
-    mcp__MiniMax__web_search/understand_image) prima di inoltrare a GLM.
-
-    I tool locali di Claude Code (Bash/Read/Write/Edit/...) non sono mai
-    toccati: non sono brandizzati di un provider AI, servono a tutte le
-    modalità indipendentemente dal backend LLM.
-
-    A differenza della versione precedente (prefer_glm_native_search),
-    questo stripping è INCONDIZIONATO: avviene anche se l'utente non ha
-    ancora registrato il Web Search MCP Server nativo z.ai lato client —
-    in quel caso GLM semplicemente non ha capacità di ricerca web finché
-    non viene configurato, invece di usare quella di un altro provider."""
-    try:
-        data = json.loads(body)
-    except Exception:
-        return body
-    tools = data.get("tools")
-    if not isinstance(tools, list) or not tools:
-        return body
-
-    def _is_anthropic_server_tool(t):
-        return isinstance(t, dict) and "input_schema" not in t
-
-    def _is_minimax_branded(t):
-        return isinstance(t, dict) and "minimax" in (t.get("name") or "").lower()
-
-    filtered = [t for t in tools
-                if not (_is_anthropic_server_tool(t) or _is_minimax_branded(t))]
-    if len(filtered) == len(tools):
-        return body
-    if filtered:
-        data["tools"] = filtered
-    else:
-        data.pop("tools", None)
-        data.pop("tool_choice", None)
-    return json.dumps(data).encode()
+# Isolamento tool per provider centralizzato in tool_isolation.py, applicato
+# dentro forward_glm (choke-point) — copre pure glm + mix-ag + mix-gm senza
+# bisogno della vecchia strip_foreign_branded_tools_for_glm (rimossa 2026-07-19).
 # ── THINK-ACT-VERIFY ───────────────────────────────────────────────────────────
 
 def _extract_text(content) -> str:
@@ -598,7 +562,7 @@ async def glm_think_act_verify(request, body: bytes, session, log_fn=print):
     eff_model, _ = apply_peak_cap(tier)
     real_model = resolve_glm_upstream_model(eff_model)
     act_body = set_body_model(body, real_model)
-    act_body = strip_foreign_branded_tools_for_glm(act_body)
+    # Isolamento tool: gestito dentro forward_glm (choke-point tool_isolation).
 
     log_fn(f"GLM ACT: esecuzione con {real_model} (tier={eff_model})")
     act_resp = await forward_glm(request, act_body, session,
@@ -745,6 +709,9 @@ async def forward_glm(request, body: bytes, session, model: str,
     if not key:
         log_fn("GLM: chiave assente (GLM_API_KEY o secrets.sh glm.api_key)")
         return aiohttp.web.Response(status=502, text="GLM key missing")
+
+    # ISOLAMENTO TOOL (2026-07-19): choke-point unico, vedi tool_isolation.py.
+    body = tool_isolation.filter_tools_for_backend(body, "glm")
 
     url = GLM_UPSTREAM + request.path_qs
 

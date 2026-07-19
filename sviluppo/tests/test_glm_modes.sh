@@ -45,6 +45,7 @@ PY
 echo "── [3] Avvio istanza isolata ──"
 LOG_TEST="/tmp/glm-test-proxy.log"
 AIROUTER_PORT=$DYN_PORT AIROUTER_PORT_MODE_JSON="$PORT_JSON" \
+  PYTHONPATH="$ROOT:$ROOT/src" \
   python3 "$PROXY" >"$LOG_TEST" 2>&1 &
 TEST_PID=$!
 cleanup(){ kill "$TEST_PID" 2>/dev/null; wait "$TEST_PID" 2>/dev/null; }

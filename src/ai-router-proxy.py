@@ -28,6 +28,7 @@ import time
 from collections import deque
 from pathlib import Path
 
+import tool_isolation
 from aiohttp import web, ClientSession, ClientTimeout, TCPConnector
 
 # ponytail: reach modules at project root (providers/, pipelines/)
@@ -1402,6 +1403,8 @@ async def forward_anthropic(request, body, session):
     # il path esatto, altrimenti context_management su count_tokens -> 400.
     safe_body = strip_unsupported_fields(body, ANTHROPIC_UNSUPPORTED_FIELDS) \
         if "/v1/messages" in request.path else body
+    # ISOLAMENTO TOOL (2026-07-19): choke-point unico, vedi tool_isolation.py.
+    safe_body = tool_isolation.filter_tools_for_backend(safe_body, "anthropic")
     # FIX 2026-07-01: anthropic-version obbligatorio per /v1/messages (Anthropic
     # restituisce 400 "anthropic-version: header is required" se mancante). Se il
     # client non lo passa (es. curl di test, proxy custom), il router lo aggiunge
@@ -1601,6 +1604,8 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
             headers.pop(h)
     headers["X-Api-Key"] = key
     new_body = remap_body_for_minimax(body, request=request)  # FIX A: pass request per modello log
+    # ISOLAMENTO TOOL (2026-07-19): choke-point unico, vedi tool_isolation.py.
+    new_body = tool_isolation.filter_tools_for_backend(new_body, "minimax")
     try:
         model = json.loads(new_body).get("model", "") or MINIMAX_MODEL
     except Exception:
@@ -1809,6 +1814,8 @@ async def forward_anthropic_direct(request, body, session):
     # Strip campi beta che api.anthropic.com rifiuta senza il beta header opportuno
     safe_body = strip_unsupported_fields(body, ANTHROPIC_UNSUPPORTED_FIELDS) \
         if "/v1/messages" in request.path else body  # FIX audit v5 #4: copri count_tokens
+    # ISOLAMENTO TOOL (2026-07-19): choke-point unico, vedi tool_isolation.py.
+    safe_body = tool_isolation.filter_tools_for_backend(safe_body, "anthropic")
     # ══ SANITIZZAZIONE FINALE (ROOT CAUSE FIX): ogni body verso Anthropic passa
     # dal repair — elimina role=system da messages e tool_result orfani residuali.
     # Il repair è idempotente: body già validi restano identici.
@@ -2622,61 +2629,14 @@ def _web_search_blocked_response() -> web.Response:
         status=400)
 
 
-def _is_glm_branded_tool(t: dict) -> bool:
-    """Tool nativo z.ai/GLM (es. MCP webSearchPrime) — riconosciuto per nome,
-    indipendentemente dall'alias del server MCP scelto dall'utente."""
-    if not isinstance(t, dict):
-        return False
-    name = (t.get("name") or "").lower()
-    return "websearchprime" in name or name.startswith("mcp__zai__")
 
 
-def _is_minimax_branded_tool(t: dict) -> bool:
-    """Tool nativo MiniMax (es. MCP mcp__MiniMax__web_search/understand_image)."""
-    return isinstance(t, dict) and "minimax" in (t.get("name") or "").lower()
 
-
-def _strip_foreign_branded_tools(body: bytes, keep: str) -> bytes:
-    """Isolamento tool nativi per modalità PURE (decisione utente 2026-07-19:
-    zero mixing tra provider — solo anthropic/solo minimax/solo glm devono
-    usare esclusivamente i propri tool). Rimuove dall'array `tools` i tool
-    brandizzati di provider diversi da `keep` ('anthropic'|'minimax'|'glm').
-
-    I tool locali di Claude Code (Bash/Read/Write/Edit/Glob/Grep/WebFetch/...)
-    non sono mai toccati: non sono brandizzati di un provider AI, sono
-    infrastruttura del client eseguita localmente e servono a tutte le
-    modalità indipendentemente dal backend LLM scelto.
-
-    Non va usata nelle modalità MISTE (mix-am/mix-gm/mix-ag), che combinano
-    provider per design (THINK su un provider, ACT su un altro) — solo nelle
-    3 modalità pure."""
-    try:
-        data = json.loads(body)
-    except Exception:
-        return body
-    tools = data.get("tools")
-    if not isinstance(tools, list) or not tools:
-        return body
-
-    def _is_anthropic_server_tool(t):
-        # Server-tool Anthropic (web_search_20250305, computer_use, bash,
-        # code_execution, ...): eseguiti server-side, riconoscibili perché
-        # privi di input_schema (i tool client-eseguiti/MCP ce l'hanno sempre).
-        return isinstance(t, dict) and "input_schema" not in t
-
-    checks = {"anthropic": _is_anthropic_server_tool,
-              "minimax": _is_minimax_branded_tool,
-              "glm": _is_glm_branded_tool}
-    foreign = [c for name, c in checks.items() if name != keep]
-    kept = [t for t in tools if not any(c(t) for c in foreign)]
-    if len(kept) == len(tools):
-        return body
-    if kept:
-        data["tools"] = kept
-    else:
-        data.pop("tools", None)
-        data.pop("tool_choice", None)
-    return json.dumps(data).encode()
+# Isolamento tool per provider centralizzato in tool_isolation.py (choke-point
+# dentro forward_anthropic/forward_anthropic_direct/forward_minimax/forward_glm):
+# copre automaticamente anche le modalità miste (mix-am/mix-ag/mix-gm), prima
+# scoperte dalle vecchie funzioni ad-hoc _strip_foreign_branded_tools /
+# strip_foreign_branded_tools_for_glm (rimosse 2026-07-19).
 
 def _is_context_too_large_for_minimax(body_bytes: bytes) -> bool:
     """Stima preventiva: se il body supera ~MINIMAX_CONTEXT_BYTE_LIMIT byte,
@@ -3891,9 +3851,8 @@ async def handle(request):
             log(f"anthropic mode: model MiniMax '{_am}' -> forward_minimax (fuori-banda)")
             return await relay(await forward_minimax(request, body, session),
                                extra_headers={"x-ai-verified": "minimax-oob"})
-        # Isolamento tool nativi (utente 2026-07-19): solo anthropic pura usa
-        # solo tool Anthropic — rimuove tool brandizzati MiniMax/GLM.
-        body = _strip_foreign_branded_tools(body, "anthropic")
+        # Isolamento tool nativi: gestito dentro forward_anthropic (choke-point
+        # tool_isolation.filter_tools_for_backend, vedi tool_isolation.py).
         # FIX 2026-07-15 (rev2): il 429 di Anthropic su Opus/Sonnet NON è
         # saturazione di quota ma un burst-limiter TRANSITORIO (x-should-retry:true,
         # verificato: 200 e 429 sullo stesso model nello stesso minuto). Il proxy
@@ -3964,12 +3923,10 @@ async def handle(request):
         if not request.path.endswith("/v1/messages"):
             up = await forward_minimax(request, body, session)
             return await relay(up)
-        # Isolamento tool nativi (utente 2026-07-19): solo minimax pura usa
-        # solo tool MiniMax — rimuove tool brandizzati Anthropic/GLM (il
-        # server-tool Anthropic web_search è già bloccato con errore esplicito
-        # da _has_web_search_tool più sotto in _pipeline_minimax_orchestrate;
-        # qui copriamo anche gli altri server-tool Anthropic + i tool GLM).
-        body = _strip_foreign_branded_tools(body, "minimax")
+        # Isolamento tool nativi: gestito dentro forward_minimax (choke-point
+        # tool_isolation.filter_tools_for_backend, vedi tool_isolation.py). Il
+        # server-tool Anthropic web_search resta comunque bloccato con errore
+        # esplicito da _has_web_search_tool più sotto in _pipeline_minimax_orchestrate.
         if NEW_PIPELINE:
             try:
                 orig = json.loads(body)
