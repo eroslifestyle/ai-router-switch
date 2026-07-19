@@ -3,7 +3,10 @@
 import asyncio
 import gzip
 import json
+import os
 import time
+
+import debug_catalog
 
 from router_constants import (
     THINK_MAX_TOKENS, THINK_MODEL, THINK_TIMEOUT_SEC,
@@ -26,6 +29,14 @@ from providers.base import (
     _body_has_images,
 )
 from pipelines.primitives import build_finalize_body, build_act_body, to_json_bytes
+
+# Fix retry-storm 2026-07-19: THINK non deve bloccare la risposta (precedente
+# GLM in glm_backend.py). Budget stretto locale a mix-am; ACT senza piano se
+# scade. Non tocca THINK_TIMEOUT_SEC globale (usato da mix-ag/mix-gm/glm).
+MIX_AM_THINK_FAST_SEC = float(os.environ.get("AIROUTER_MIX_AM_THINK_FAST_SEC", "4"))
+# Timeout totale per-tentativo verso MiniMax nel loop executor / ACT diretto:
+# un MiniMax disconnesso ecceziona dopo questo invece di ereditare sock_read=120s.
+MIX_AM_ACT_TIMEOUT_SEC = float(os.environ.get("AIROUTER_MIX_AM_ACT_TIMEOUT_SEC", "12"))
 
 
 # ── Body builders ──────────────────────────────────────────────────────────────
@@ -631,50 +642,39 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
             log(f'mix-am BYPASS-THINK EXC: {e} -> fallthrough')
 
     think_body = _build_think_body(orig)
+    plan = ""
     try:
-        t_status, t_json = await _call_full(forward_anthropic_direct, request, think_body, session, timeout=THINK_TIMEOUT_SEC)
+        t_status, t_json = await asyncio.wait_for(
+            _call_full(forward_anthropic_direct, request, think_body, session, timeout=THINK_TIMEOUT_SEC),
+            timeout=MIX_AM_THINK_FAST_SEC,
+        )
+        if t_json and t_status not in FALLBACK_STATUSES:
+            plan = _text_from_message(t_json).strip()
+    except asyncio.TimeoutError:
+        log(f"mix-am THINK fast-timeout ({MIX_AM_THINK_FAST_SEC}s) -> ACT senza piano fp={chat_fp}")
+        debug_catalog.record_event(severity="block", category="mix-am",
+                                    kind="think_fast_timeout", chat_fp=chat_fp,
+                                    snippet=f"budget={MIX_AM_THINK_FAST_SEC}s")
     except Exception as e:
-        log(f"mix-am THINK EXC: {e} -> fallback M3 diretto")
-        try:
-            up = await _retry_forward(forward_minimax, request, body, session)
-            if up.status not in FALLBACK_STATUSES:
-                return await relay(up)
-            log(f"mix-am THINK EXC: M3 diretto anche lui {up.status} -> rescue fp={chat_fp}")
-            try:
-                await up.release()
-            except Exception:
-                pass
-        except Exception as e2:
-            log(f"mix-am THINK EXC + fallback EXC: {e2} -> rescue")
-        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
-    if not t_json or t_status in FALLBACK_STATUSES:
-        log(f"mix-am THINK ko {t_status} -> fallback M3 diretto")
-        try:
-            up = await forward_minimax(request, body, session)
-            if up.status not in FALLBACK_STATUSES:
-                return await relay(up)
-            log(f"mix-am THINK ko: M3 diretto anche lui {up.status} -> rescue fp={chat_fp}")
-            try:
-                await up.release()
-            except Exception:
-                pass
-        except Exception as e:
-            log(f"mix-am THINK ko + fallback EXC: {e} -> rescue")
-        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
-    plan = _text_from_message(t_json).strip()
+        log(f"mix-am THINK EXC: {e} -> ACT senza piano fp={chat_fp}")
+        debug_catalog.record_event(severity="error", category="mix-am",
+                                    kind="think_exception", chat_fp=chat_fp, snippet=str(e))
+
     if not plan:
-        log(f"mix-am THINK: piano vuoto -> fallback M3 diretto fp={chat_fp}")
+        # THINK assente/scaduto/fallito: ACT diretto con timeout stretto + rescue.
+        # (precedentemente 3 path duplicati: EXC / status-ko / piano-vuoto — unificati)
+        log(f"mix-am senza piano THINK -> ACT diretto fp={chat_fp}")
         try:
-            up = await forward_minimax(request, body, session)
+            up = await forward_minimax(request, body, session, act_timeout_sec=MIX_AM_ACT_TIMEOUT_SEC)
             if up.status not in FALLBACK_STATUSES:
                 return await relay(up)
-            log(f"mix-am THINK vuoto: M3 diretto anche lui {up.status} -> rescue fp={chat_fp}")
+            log(f"mix-am ACT diretto (no plan) {up.status} -> rescue fp={chat_fp}")
             try:
                 await up.release()
             except Exception:
                 pass
         except Exception as e:
-            log(f"mix-am THINK vuoto + fallback EXC: {e} -> rescue")
+            log(f"mix-am ACT diretto (no plan) EXC: {e} -> rescue fp={chat_fp}")
         return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
     tools_to_call = []
     log(f"mix-am THINK OK plan={len(plan)}c fp={chat_fp}")
@@ -702,7 +702,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
                 pass
             _request_orig_model[chat_fp] = orig_model
         try:
-            up = await forward_minimax(request, act_body, session)
+            up = await forward_minimax(request, act_body, session, act_timeout_sec=MIX_AM_ACT_TIMEOUT_SEC)
         except Exception as e:
             mixed_fail_last_status = None
             n = mixed_fail_inc(chat_fp)

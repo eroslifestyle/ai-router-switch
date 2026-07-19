@@ -4,6 +4,8 @@ import asyncio
 import json
 import time
 
+from aiohttp import ClientTimeout
+
 import tool_isolation
 
 from router_constants import (
@@ -73,8 +75,16 @@ def _minimax_est_tokens(new_body: bytes) -> int:
     return est
 
 
-async def forward_minimax(request, body, session, retry_budget_sec: float = None):
-    """Chiama MiniMax con pacing preventivo (MinimaxRateLimiter) + retry 429."""
+async def forward_minimax(request, body, session, retry_budget_sec: float = None,
+                          act_timeout_sec: float = None):
+    """Chiama MiniMax con pacing preventivo (MinimaxRateLimiter) + retry 429.
+
+    act_timeout_sec: se settato, timeout totale (ClientTimeout.total) applicato
+    a ogni tentativo HTTP verso MiniMax per questa chiamata. Pensato per i loop
+    executor di mix-am: un MiniMax disconnesso/degradato ecceziona dopo
+    act_timeout_sec invece di ereditare il sock_read=120s della sessione,
+    evitando che un singolo tentativo blocchi il turno per minuti (retry-storm
+    lato client). None = comportamento invariato (timeout di sessione)."""
     from minimax_body import remap_body_for_minimax
     from router_utils import _repair_message_sequence
     from context_rewrite import rewrite_for_context
@@ -134,8 +144,11 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
         except RateLimitExhausted as e:
             return _synthetic_429(f"MiniMax rate limited (pacing): {e}")
         async with _MINIMAX_SEM:
+            req_kwargs = dict(data=new_body, headers=headers, allow_redirects=False)
+            if act_timeout_sec is not None:
+                req_kwargs["timeout"] = ClientTimeout(total=act_timeout_sec)
             up = await session.request(
-                request.method, url, data=new_body, headers=headers, allow_redirects=False
+                request.method, url, **req_kwargs
             )
         if up.status != 429:
             MINIMAX_LIMITER.record(entry, est, success=True)
