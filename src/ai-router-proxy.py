@@ -28,8 +28,10 @@ from aiohttp import web, ClientSession, ClientTimeout, TCPConnector
 
 # ponytail: reach modules at project root (providers/, pipelines/)
 import sys as _sys
-# ai-router-proxy.py lives in src/; project root is parent of src/
-_sys.path.insert(0, str(Path(__file__).parent.parent))
+# ai-router-proxy.py lives in src/; project root is parent of src/.
+# resolve() is required: when deployed via symlink (~/.claude/scripts),
+# __file__ is the symlink path, not the real src/ location.
+_sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import sys  # for resilience module
 
 from fail_tracker import fail_tracker, mixed_fail_inc, mixed_fail_reset, mixed_anthropic_leads

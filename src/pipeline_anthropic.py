@@ -10,7 +10,7 @@ from router_constants import (
     MINIMAX_CONTEXT_BYTE_LIMIT, ANTHROPIC_HAIKU_CONTEXT_BYTE_LIMIT,
     SUMMARY_BUDGET, TRIM_TARGET_BYTES, TRIM_MIN_MESSAGES,
     CLAUDE_CODE_MARKER, FALLBACK_STATUSES, MINIMAX_FALLBACK_STATUSES,
-    MIXED_EXECUTOR_MODEL,
+    MIXED_EXECUTOR_MODEL, MINIMAX_MODEL,
 )
 from router_utils import (
     log, log_exc, _request_orig_model, _analyze_body_structure,
