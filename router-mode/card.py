@@ -69,6 +69,17 @@ def get_current():
         return MODE_FILE.read_text().strip()
     return "?"
 
+def get_service_status():
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["systemctl", "--user", "is-active", "ai-router"],
+            capture_output=True, text=True, timeout=3,
+        )
+        return r.stdout.strip()
+    except Exception:
+        return "unknown"
+
 class TitleBar(QWidget):
     def __init__(self, parent):
         super().__init__()
@@ -88,7 +99,6 @@ class TitleBar(QWidget):
         layout.addWidget(title)
         layout.addStretch()
         self._make_btn("─", "minimize", self._minimize, C["muted"], C["txt"]).setFont(QFont("Sans", 13))
-        self._make_btn("↻", "restart", parent._restart, C["muted"], C["warn"]).setFont(QFont("Sans", 11))
         self._make_btn("✕", "close", parent.close, C["muted"], C["err"]).setFont(QFont("Sans", 11, QFont.Weight.Bold))
 
     def _make_btn(self, text, tooltip, cb, normal_col, hover_col):
@@ -299,6 +309,26 @@ class Card(QWidget):
         spacer0.setFixedHeight(6)
         body_layout.addWidget(spacer0)
 
+        # ── Sezione ROUTER (Start / Riavvia / Stop) ──────────────────
+        ctrl_lbl = QLabel("ROUTER")
+        ctrl_lbl.setFont(QFont("Sans", 9, QFont.Weight.Bold))
+        ctrl_lbl.setStyleSheet("background:transparent;color:#5a6470")
+        body_layout.addWidget(ctrl_lbl)
+
+        ctrl_row = QHBoxLayout()
+        ctrl_row.setSpacing(SPACING)
+        self._start_btn = self._make_ctrl_btn("▶  Start", C["accent"], self._start_router)
+        self._restart_btn = self._make_ctrl_btn("↻  Riavvia", C["warn"], self._restart)
+        self._stop_btn = self._make_ctrl_btn("■  Stop", C["err"], self._stop_router)
+        ctrl_row.addWidget(self._start_btn)
+        ctrl_row.addWidget(self._restart_btn)
+        ctrl_row.addWidget(self._stop_btn)
+        body_layout.addLayout(ctrl_row)
+
+        spacer_ctrl = QWidget()
+        spacer_ctrl.setFixedHeight(8)
+        body_layout.addWidget(spacer_ctrl)
+
         # ── Sezione SOLO (3 colonne) ─────────────────────────────────
         solo_lbl = QLabel("SOLO")
         solo_lbl.setFont(QFont("Sans", 9, QFont.Weight.Bold))
@@ -342,10 +372,25 @@ class Card(QWidget):
         inner.addWidget(body)
 
         self._center()
+        self._service_status = "unknown"
         self._timer = QTimer()
         self._timer.timeout.connect(self._refresh)
         self._timer.start(5000)
         self._refresh()
+
+    def _make_ctrl_btn(self, text, color, cb):
+        btn = QPushButton(text)
+        btn.setFixedHeight(30)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setFont(QFont("Sans", 9, QFont.Weight.Bold))
+        btn.setStyleSheet(
+            f"QPushButton {{ background: {C['bg1']}; color: {color}; border: 1.5px solid {color}; "
+            f"border-radius: 8px; }} "
+            f"QPushButton:hover:enabled {{ background: {color}; color: #0a0e13; }} "
+            f"QPushButton:disabled {{ color: {C['faint']}; border-color: {C['border']}; }}"
+        )
+        btn.clicked.connect(cb)
+        return btn
 
     def _center(self):
         s = QApplication.primaryScreen()
@@ -357,6 +402,7 @@ class Card(QWidget):
         self._current = get_current()
         j = http_get(f"{ROUTER}/health")
         self._health_ok = bool(j and j.get("ok"))
+        self._service_status = get_service_status()
         self._update_ui()
 
     def _update_ui(self):
@@ -366,6 +412,10 @@ class Card(QWidget):
         self._hero.set_state(self._current, exec_text, self._health_ok)
         for mid, card in self._cards.items():
             card.set_active(mid == self._current)
+        is_active = self._service_status == "active"
+        self._start_btn.setEnabled(not is_active)
+        self._restart_btn.setEnabled(True)
+        self._stop_btn.setEnabled(is_active)
 
     def _do_switch(self, mode):
         j = http_post(f"{ROUTER}/admin/mode/{mode}")
@@ -373,14 +423,23 @@ class Card(QWidget):
             self._current = mode
         self._update_ui()
 
-    def _restart(self):
+    def _run_systemctl(self, action, wait_s):
         import subprocess, time
         try:
-            subprocess.run(["systemctl", "--user", "restart", "ai-router"], capture_output=True, timeout=10)
-            time.sleep(2.5)
+            subprocess.run(["systemctl", "--user", action, "ai-router"], capture_output=True, timeout=10)
+            time.sleep(wait_s)
         except Exception:
             pass
         self._refresh()
+
+    def _start_router(self):
+        self._run_systemctl("start", 1.5)
+
+    def _restart(self):
+        self._run_systemctl("restart", 2.5)
+
+    def _stop_router(self):
+        self._run_systemctl("stop", 1.0)
 
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
