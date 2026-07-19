@@ -2622,6 +2622,62 @@ def _web_search_blocked_response() -> web.Response:
         status=400)
 
 
+def _is_glm_branded_tool(t: dict) -> bool:
+    """Tool nativo z.ai/GLM (es. MCP webSearchPrime) — riconosciuto per nome,
+    indipendentemente dall'alias del server MCP scelto dall'utente."""
+    if not isinstance(t, dict):
+        return False
+    name = (t.get("name") or "").lower()
+    return "websearchprime" in name or name.startswith("mcp__zai__")
+
+
+def _is_minimax_branded_tool(t: dict) -> bool:
+    """Tool nativo MiniMax (es. MCP mcp__MiniMax__web_search/understand_image)."""
+    return isinstance(t, dict) and "minimax" in (t.get("name") or "").lower()
+
+
+def _strip_foreign_branded_tools(body: bytes, keep: str) -> bytes:
+    """Isolamento tool nativi per modalità PURE (decisione utente 2026-07-19:
+    zero mixing tra provider — solo anthropic/solo minimax/solo glm devono
+    usare esclusivamente i propri tool). Rimuove dall'array `tools` i tool
+    brandizzati di provider diversi da `keep` ('anthropic'|'minimax'|'glm').
+
+    I tool locali di Claude Code (Bash/Read/Write/Edit/Glob/Grep/WebFetch/...)
+    non sono mai toccati: non sono brandizzati di un provider AI, sono
+    infrastruttura del client eseguita localmente e servono a tutte le
+    modalità indipendentemente dal backend LLM scelto.
+
+    Non va usata nelle modalità MISTE (mix-am/mix-gm/mix-ag), che combinano
+    provider per design (THINK su un provider, ACT su un altro) — solo nelle
+    3 modalità pure."""
+    try:
+        data = json.loads(body)
+    except Exception:
+        return body
+    tools = data.get("tools")
+    if not isinstance(tools, list) or not tools:
+        return body
+
+    def _is_anthropic_server_tool(t):
+        # Server-tool Anthropic (web_search_20250305, computer_use, bash,
+        # code_execution, ...): eseguiti server-side, riconoscibili perché
+        # privi di input_schema (i tool client-eseguiti/MCP ce l'hanno sempre).
+        return isinstance(t, dict) and "input_schema" not in t
+
+    checks = {"anthropic": _is_anthropic_server_tool,
+              "minimax": _is_minimax_branded_tool,
+              "glm": _is_glm_branded_tool}
+    foreign = [c for name, c in checks.items() if name != keep]
+    kept = [t for t in tools if not any(c(t) for c in foreign)]
+    if len(kept) == len(tools):
+        return body
+    if kept:
+        data["tools"] = kept
+    else:
+        data.pop("tools", None)
+        data.pop("tool_choice", None)
+    return json.dumps(data).encode()
+
 def _is_context_too_large_for_minimax(body_bytes: bytes) -> bool:
     """Stima preventiva: se il body supera ~MINIMAX_CONTEXT_BYTE_LIMIT byte,
     MiniMax fallirà con 400 context-exceed (2013). Salta MiniMax e vai diretto
@@ -3829,6 +3885,9 @@ async def handle(request):
             log(f"anthropic mode: model MiniMax '{_am}' -> forward_minimax (fuori-banda)")
             return await relay(await forward_minimax(request, body, session),
                                extra_headers={"x-ai-verified": "minimax-oob"})
+        # Isolamento tool nativi (utente 2026-07-19): solo anthropic pura usa
+        # solo tool Anthropic — rimuove tool brandizzati MiniMax/GLM.
+        body = _strip_foreign_branded_tools(body, "anthropic")
         # FIX 2026-07-15 (rev2): il 429 di Anthropic su Opus/Sonnet NON è
         # saturazione di quota ma un burst-limiter TRANSITORIO (x-should-retry:true,
         # verificato: 200 e 429 sullo stesso model nello stesso minuto). Il proxy
@@ -3899,6 +3958,12 @@ async def handle(request):
         if not request.path.endswith("/v1/messages"):
             up = await forward_minimax(request, body, session)
             return await relay(up)
+        # Isolamento tool nativi (utente 2026-07-19): solo minimax pura usa
+        # solo tool MiniMax — rimuove tool brandizzati Anthropic/GLM (il
+        # server-tool Anthropic web_search è già bloccato con errore esplicito
+        # da _has_web_search_tool più sotto in _pipeline_minimax_orchestrate;
+        # qui copriamo anche gli altri server-tool Anthropic + i tool GLM).
+        body = _strip_foreign_branded_tools(body, "minimax")
         if NEW_PIPELINE:
             try:
                 orig = json.loads(body)
