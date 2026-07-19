@@ -3775,7 +3775,13 @@ async def handle(request):
     # Se OAuth subscription è mancante o scaduto, accettiamo SOLO health/probe.
     # /v1/* e /v1/messages tornano 503 con istruzioni re-login
     # (`claude login` nel terminale aggiorna automaticamente, no restart).
-    if RESILIENCE_INST is not None and not RESILIENCE_INST.state_is_ok():
+    # FIX 2026-07-19 (isolamento pure mode): il gate controlla SOLO l'OAuth
+    # Anthropic — irrilevante per minimax/glm pure, che non chiamano mai
+    # Anthropic. Senza questo skip, un OAuth Anthropic scaduto/mancante
+    # bloccava l'intero router anche in modalità che di Anthropic non hanno
+    # bisogno, vanificando lo scopo di averle come alternative indipendenti.
+    if (RESILIENCE_INST is not None and mode not in ("minimax", "glm")
+            and not RESILIENCE_INST.state_is_ok()):
         probe_paths = {
             "/", "/health", "/readyz", "/livez", "/stats", "/metrics", "/status",
             "/__router_health", "/__resilience",
