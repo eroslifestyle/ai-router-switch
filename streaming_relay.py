@@ -67,6 +67,15 @@ class StreamingRelay:
             except Exception:
                 _raw = b""
             _enc = upstream.headers.get("Content-Encoding", "")
+            # FIX diagnostica 2026-07-19: cattura server/cf-ray/via per capire se
+            # il 404/errore arriva davvero dall'upstream atteso (Cloudflare/ALB)
+            # o da un middlebox di rete locale (nginx generico non riconducibile
+            # né ad Anthropic né a MiniMax) — vedi relay_error_404 intermittenti.
+            _diag_headers = {
+                k: upstream.headers.get(k) for k in
+                ("server", "cf-ray", "via", "x-served-by", "alb_receive_time")
+                if upstream.headers.get(k)
+            }
             self.debug_capture_fn(
                 kind=f"relay_error_{upstream.status}",
                 request=self.request, fp=chat_fp_for_rewrite,
@@ -76,7 +85,7 @@ class StreamingRelay:
                 upstream_raw=_raw,
                 upstream_encoding=_enc,
                 orig=self.orig,
-                note=f"extra_headers={list((extra_headers or {}).keys())}",
+                note=f"extra_headers={list((extra_headers or {}).keys())} upstream_headers={_diag_headers} url={getattr(upstream, 'url', '')}",
             )
             # Invia l'errore direttamente: body già letto, costruisci web.Response
             upstream.release()
