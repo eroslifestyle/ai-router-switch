@@ -30,7 +30,11 @@ from pathlib import Path
 from typing import Optional
 
 # Z.ai Anthropic-compatible endpoint
-GLM_UPSTREAM = os.environ.get("GLM_UPSTREAM", "https://api.z.ai/api/anthropic")
+# GLM_API_BASE (env da glm.env) ha priorità; fallback su hardcoded
+GLM_UPSTREAM = os.environ.get(
+    "GLM_API_BASE",
+    os.environ.get("GLM_UPSTREAM", "https://api.z.ai/api/anthropic")
+)
 
 # Endpoint per generazione media
 GLM_IMAGE_ENDPOINT = "https://api.z.ai/api/paas/v4/images/generations"
@@ -87,7 +91,7 @@ async def get_glm_key() -> str:
     if _glm_key_cache["key"] and now - _glm_key_cache["ts"] < 60:
         return _glm_key_cache["key"]
 
-    key = os.environ.get("GLM_API_KEY", "")
+    key = os.environ.get("GLM_API_KEY", "") or os.environ.get("ZAI_API_KEY", "")
     if not key:
         try:
             proc = await asyncio.to_thread(
