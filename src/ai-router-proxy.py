@@ -37,6 +37,8 @@ import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))  # src/ → progetto root
 
 from minimax_body import remap_body_for_minimax, strip_server_tools_for_minimax
+from trim_smart import (SHRINK_KEEP_HEAD, SHRINK_KEEP_TAIL,
+                        build_shrink_summary, _smart_truncate, _smart_sample_middle)
 
 # Context window fix imports (LAYER 1: intelligent rewrite)
 from token_counter import estimate_tokens, count_tokens
@@ -1954,123 +1956,10 @@ trim_locks: dict[str, threading.Lock] = {}
 # Min messages preservati: 4 (sempre abbastanza per coerenza)
 TRIM_TARGET_BYTES = MINIMAX_CONTEXT_BYTE_LIMIT // 2  # ~375k byte = ~94k token
 TRIM_MIN_MESSAGES = 4
-# Shrink: keep head+tail when context explosion already happened
-SHRINK_KEEP_HEAD = int(os.environ.get("AIROUTER_SHRINK_KEEP_HEAD", "6"))
-SHRINK_KEEP_TAIL = int(os.environ.get("AIROUTER_SHRINK_KEEP_TAIL", "6"))
 # Budget per il summary compresso: circa il limite MiniMax stesso
 # byte/token ≈ 4 per English+code → 750k byte ≈ 188k token ≈ 192k token limit
 # Usiamo 3/4 del limite per dare spazio anche a system e overhead JSON
 SUMMARY_BUDGET = MINIMAX_CONTEXT_BYTE_LIMIT * 3 // 4
-
-def _build_shrink_summary(messages: list, budget: int) -> str:
-    """Comprime una lista di messaggi preservando QUALITÀ MASSIMA con budget token.
-    Algoritmo content-aware:
-    - TOOL_USE output: PRESERVA INTEGRALMENTE (denso, critico, tipicamente <500 token)
-    - Contenuto lungo (user/assistant >2000c): PRESERVA la prima parte + "..."
-    - Contenuto breve (<2000c): PRESERVA INTEGRALMENTE
-    - MIDDLE: smart-sampling diversificato (prende ogni N-esimo, non solo i primi)
-    Questo dà al modello: (a) contesto iniziale, (b) varietà di azioni intermedie,
-    (c) contesto recente — senza perdere tool results che contengono output reali."""
-    n = len(messages)
-    if n == 0:
-        return ""
-
-    # HEAD + TAIL preservati tal quale
-    tail = messages[-SHRINK_KEEP_TAIL:]
-    head_count = min(SHRINK_KEEP_HEAD, n - SHRINK_KEEP_TAIL)
-    head = messages[:head_count] if head_count > 0 else []
-    middle = messages[head_count:n - SHRINK_KEEP_TAIL] if head_count < n - SHRINK_KEEP_TAIL else []
-
-    parts = []
-
-    # ── TESTA: preserva tal quale (contesto iniziale) ──────────────────────
-    if head:
-        head_lines = "\n".join(
-            f"[{m.get('role','?')}]: {_smart_truncate(m)}"
-            for m in head
-        )
-        parts.append(f"=== CONTESTO INIZIALE ({len(head)} msg) ===\n{head_lines}")
-
-    # ── MEZZO: smart-sampling ───────────────────────────────────────────────
-    if middle:
-        sampled = _smart_sample_middle(middle, budget)
-        middle_lines = "\n".join(
-            f"[{m.get('role','?')}]: {_smart_truncate(m)}"
-            for m in sampled
-        )
-        parts.append(f"=== FASE INTERMEDIA ({len(sampled)}/{len(middle)} msg selezionati) ===\n{middle_lines}")
-
-    # ── CODA: preserva tal quale (contesto più recente) ───────────────────
-    tail_lines = "\n".join(
-        f"[{m.get('role','?')}]: {_smart_truncate(m)}"
-        for m in tail
-    )
-    parts.append(f"=== MESSAGGI RECENTI ({len(tail)} msg) ===\n{tail_lines}")
-
-    return "\n\n".join(parts)
-
-
-def _smart_truncate(msg: dict, max_len: int = 1800) -> str:
-    """Truncation intelligente: preserva tool_use integrali, tronca resto."""
-    content = msg.get("content", "")
-    tool_use = msg.get("tool_use", [])
-    role = msg.get("role", "?")
-
-    # Tool use: PRESERVA INTEGRALMENTE (denso, critico, piccolo)
-    if tool_use:
-        tool_block = "\n[TOOL_USE]: " + "\n[TOOL_USE]: ".join(
-            f"{t.get('name','?')}({json.dumps(t.get('input',{}), ensure_ascii=False)[:300]})"
-            for t in tool_use
-        )
-        # Normalizza content (può essere str o list di blocchi tool_result/text)
-        content_str = json.dumps(content, ensure_ascii=False) if isinstance(content, list) else (content or "")
-        # Se content è lungo, aggiungi solo l'inizio
-        if len(content_str) > max_len:
-            return content_str[:max_len] + f"\n... [+{len(content_str)-max_len}c troncatI]"
-        return content_str + tool_block if content_str else tool_block
-
-    # Text content: truncation con segnalazione
-    if isinstance(content, list):
-        content = json.dumps(content, ensure_ascii=False)
-    if len(content) > max_len:
-        return content[:max_len] + f"\n... [+{len(content)-max_len}c troncatI]"
-    return content
-
-
-def _smart_sample_middle(messages: list, budget: int) -> list:
-    """Campiona il mezzo in modo diversificato: copre l'intera finestra temporale
-    prendendo messaggi distribuiti, non solo i primi. Priorità:
-    1. tool_use messages (sempre: contengono output reali)
-    2. Messaggi "svolta" (messaggi lunghi di assistant = ragionamento/decisioni)
-    3. Campionamento uniforme distribuito nel tempo"""
-    if not messages:
-        return []
-
-    sampled = []
-    tool_msgs = []
-    non_tool = []
-
-    for m in messages:
-        if m.get("tool_use") or (m.get("role") == "user" and len(str(m.get("content",""))) > 3000):
-            tool_msgs.append(m)
-        else:
-            non_tool.append(m)
-
-    # Tutti i tool_use messages (sono pochi e densi)
-    sampled.extend(tool_msgs)
-
-    # Campionamento uniforme: skip ratio basato su budget
-    # byte/token ≈ 4, budget per il mezzo ≈ budget / 3
-    byte_per_msg = 500  # stima conservativa per messaggio "medio" (contexto + content)
-    max_items = max(3, (budget // 3) // byte_per_msg)
-    if non_tool:
-        total = len(non_tool)
-        step = max(1, total // max_items)
-        for i in range(0, total, step):
-            sampled.append(non_tool[i])
-
-    return sampled
-
 
 def _trim_context_after_response(req_body: bytes, fp: str) -> None:
     """Taglia proattivamente il context DOPO ogni risposta riuscita.
@@ -2137,7 +2026,7 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
 
     # Budget token per il summary (~1/4 del contesto M3)
     budget = SUMMARY_BUDGET
-    summary_content = _build_shrink_summary(messages, budget)
+    summary_content = build_shrink_summary(messages, budget)
 
     # Costruisci body compresso
     shrunk = dict(orig_dict)
