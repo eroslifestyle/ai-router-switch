@@ -947,6 +947,16 @@ def parse_router_command(text: str):
     # esplicito: !router <x>
     m = _EXPLICIT.search(t)
     if m:
+        # FIX 2026-07-19: il comando deve essere l'ultima cosa nel messaggio
+        # (a parte eventuale tag di chiusura tipo </session>). Senza questo
+        # check, richieste ausiliarie di Claude Code che ricitano il primo
+        # messaggio utente wrappato (es. generazione titolo chat: '<session>
+        # !router glm </session>\n\nWrite the title in it...') vengono
+        # intercettate come comando reale, restituendo la reply sintetica
+        # al posto del titolo e confondendo lo stato del client.
+        trailing = _re.sub(r"</?\w[\w-]*>", "", t[m.end():]).strip()
+        if len(trailing) > 5:
+            return None
         arg = m.group(1).lower()
         resolved = _ALIAS_MAP.get(arg, arg)  # alias -> nome interno
         if resolved in VALID_MODES:
