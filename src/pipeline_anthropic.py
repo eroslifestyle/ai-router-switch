@@ -699,6 +699,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
     think_body = _build_think_body(orig)
     # FIX BUG-3: backoff esponenziale sul timeout THINK + skip dopo 2 KO consecutivi.
     # Budget: 4s → 6s → 8s (max). Dopo 2 timeout: ACT diretto senza THINK.
+    plan = ""
     think_budget = _think_timeout_budget(chat_fp)
     if _think_count.get(chat_fp, 0) >= _THINK_SKIP_AFTER:
         log(f"mix-am THINK skip (>= {_THINK_SKIP_AFTER} timeout consec.) -> ACT diretto fp={chat_fp}")

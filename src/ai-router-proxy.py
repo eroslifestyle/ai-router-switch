@@ -222,7 +222,6 @@ async def handle(request):
                 body = rewrit
                 log(f"ctx: proactive rewrite {len(rewrit)}b < {len(body)}b fp={fp}")
             elif ctx_check["action"] == "error":
-                from aiohttp import web
                 log(f"ctx: ERROR threshold {ctx_check['pct']:.1%} fp={fp}")
                 return web.json_response({
                     "type": "error",
