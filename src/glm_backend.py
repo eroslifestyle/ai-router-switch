@@ -273,22 +273,19 @@ def has_multimodal_content(body: bytes) -> tuple[str, str]:
                                 return ("video", "")
                             return ("image", "")
 
-        # Check per generazione immagine (tool call o body type)
-        tools = data.get("tools", [])
-        for tool in tools:
-            name = tool.get("name", "").lower()
-            if "image" in name or "generation" in name:
-                return ("image_gen", "")
-        # Check body per type: image_generation
+        # Check per generazione immagine/video: SOLO via marker esplicito nel
+        # body (type: image_generation/video_generation). FIX 2026-07-19:
+        # rimosso il matching su substring del NOME tool ("image" in name,
+        # "generation" in name, "video" in name) — troppo fragile, causava
+        # falsi positivi con QUALSIASI tool disponibile nella richiesta che
+        # contenesse quelle sottostringhe (es. mcp__MiniMax__understand_image,
+        # presente di default in molte sessioni Claude Code), dirottando OGNI
+        # messaggio verso l'endpoint immagini z.ai (senza credito sul piano
+        # coding) invece della chat normale — causa root del 429
+        # "Insufficient balance" apparentemente casuale e mai loggato
+        # (forward_glm_image non logga sul percorso di successo/risposta).
         if '"type": "image_generation"' in body.decode(errors="ignore"):
             return ("image_gen", "")
-
-        # Check per generazione video
-        for tool in tools:
-            name = tool.get("name", "").lower()
-            if "video" in name or "cogvideox" in name:
-                return ("video_gen", "")
-        # Check body per type: video_generation
         if '"type": "video_generation"' in body.decode(errors="ignore"):
             return ("video_gen", "")
 
