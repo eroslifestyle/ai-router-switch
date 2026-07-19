@@ -36,6 +36,8 @@ from aiohttp import web, ClientSession, ClientTimeout, TCPConnector
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))  # src/ → progetto root
 
+from minimax_body import remap_body_for_minimax, strip_server_tools_for_minimax
+
 # Context window fix imports (LAYER 1: intelligent rewrite)
 from token_counter import estimate_tokens, count_tokens
 from model_context_map import get_safe_input_limit, get_context_limit, get_summary_budget
@@ -1023,11 +1025,6 @@ async def get_minimax_key() -> str:
     return key
 
 
-# Campi beta/Anthropic-only che MiniMax (api.minimaxi.chat) rifiuta con 400.
-MINIMAX_UNSUPPORTED_FIELDS = ("context_management", "mcp_servers", "thinking")
-# FIX 2026-07-02: floor max_tokens per MiniMax reasoning-first (vedi remap_body_for_minimax)
-MINIMAX_MIN_MAX_TOKENS = int(os.environ.get("AIROUTER_MINIMAX_MIN_MAX_TOKENS", "1024"))
-
 # Anthropic public API: 'context_management' è beta-only gated da
 # 'anthropic-beta: context-management-2025-06-27'. Senza quel header,
 # api.anthropic.com restituisce 400 "Extra inputs are not permitted".
@@ -1108,88 +1105,6 @@ def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
     except Exception:
         pass  # silent fallback
 
-
-# Blocchi prodotti dai server tool Anthropic: restano nella history dopo un turno
-# di WebSearch e MiniMax li rifiuta con 400 (2013) → chat rotta per sempre.
-_SERVER_TOOL_BLOCK_TYPES = (
-    "server_tool_use", "web_search_tool_result", "web_fetch_tool_result",
-    "code_execution_tool_result",
-)
-
-
-def _strip_server_tools_for_minimax(data: dict) -> None:
-    """Bug 2026-07-04: MiniMax non conosce i server tool Anthropic (web_search_20250305...).
-    Rifiuta sia le definizioni in `tools` (niente input_schema) sia i blocchi
-    server_tool_use/web_search_tool_result rimasti nella history → 400 (2013).
-    Strip delle definizioni + conversione dei blocchi in testo. Muta `data`."""
-    tools = data.get("tools")
-    if isinstance(tools, list):
-        kept = [t for t in tools if not (isinstance(t, dict) and "input_schema" not in t)]
-        if len(kept) != len(tools):
-            if kept:
-                data["tools"] = kept
-            else:
-                data.pop("tools", None)
-                data.pop("tool_choice", None)
-    for m in data.get("messages", []):
-        c = m.get("content")
-        if not isinstance(c, list):
-            continue
-        for i, blk in enumerate(c):
-            if isinstance(blk, dict) and blk.get("type") in _SERVER_TOOL_BLOCK_TYPES:
-                payload = {k: v for k, v in blk.items() if k != "type"}
-                c[i] = {"type": "text",
-                        "text": f"[{blk['type']}] "
-                                + json.dumps(payload, ensure_ascii=False, default=str)[:4000]}
-
-
-def remap_body_for_minimax(raw: bytes, request=None) -> bytes:
-    """Riscrive il model Claude -> MiniMax-M3 e rimuove i campi beta non supportati.
-
-    FIX A: Se request è fornito, estrae chat_fp e loga il modello originale.
-    FIX E: salva anche in _request_orig_model[chat_fp] il modello originale,
-    così il relay SSE può riscrivere il campo 'model' nella risposta upstream
-    e il jsonl di Claude Code riceve il modello realmente richiesto (no leak di MiniMax-M3).
-    """
-    try:
-        data = json.loads(raw)
-        orig = data.get("model", "")
-        if orig and not orig.startswith("MiniMax"):
-            chat_id = "?"
-            if request:
-                chat_id = _resolve_chat_fingerprint(request)
-                _log_original_model(orig, MINIMAX_MODEL, chat_id)
-            # FIX E: ricorda per riscrittura SSE — consumato dal relay()
-            # FIX M2: bound anti-leak. Le entry sono consumate da relay(), ma i path
-            # d'errore che saltano relay() le lasciano; nessun GC dedicato -> cap duro.
-            if len(_request_orig_model) > 2000:
-                _keep = _request_orig_model.get("__remap__")
-                _request_orig_model.clear()
-                if _keep is not None:
-                    _request_orig_model["__remap__"] = _keep
-            _request_orig_model[chat_id] = orig
-            data["model"] = MINIMAX_MODEL
-        # Strip campi che MiniMax non accetta (causano 400 "Extra inputs not permitted")
-        for f in MINIMAX_UNSUPPORTED_FIELDS:
-            data.pop(f, None)
-        # Bug 2026-07-04: server tool Anthropic + blocchi web_search nella history
-        # → MiniMax 400 (2013). Sanitizza SEMPRE (choke point di tutti i path MiniMax).
-        _strip_server_tools_for_minimax(data)
-        # FIX 2026-07-02: MiniMax-M2.7 è reasoning-first — il blocco <think> consuma
-        # i token PRIMA del testo. Con max_tokens piccolo (chiamate interne Claude Code:
-        # titoli/topic/commit-msg, spesso 20-100) il thinking mangia tutto il budget →
-        # content vuoto. Floor a MINIMAX_MIN_MAX_TOKENS garantisce spazio per il testo.
-        # (Il modello si ferma comunque da solo con end_turn: nessuno spreco di token.)
-        try:
-            _mt = int(data.get("max_tokens", 0) or 0)
-            if 0 < _mt < MINIMAX_MIN_MAX_TOKENS:
-                data["max_tokens"] = MINIMAX_MIN_MAX_TOKENS
-        except (TypeError, ValueError):
-            pass
-        return json.dumps(data).encode()
-    except Exception:
-        log("remap_body: json parse fail, passthrough")  # FIX B5.1 residuo: log silenzioso
-        return raw
 
 
 _CREDS_PATH = Path.home() / ".claude" / ".credentials.json"
@@ -1518,7 +1433,11 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
         if h.lower() in ("authorization", "x-api-key"):
             headers.pop(h)
     headers["X-Api-Key"] = key
-    new_body = remap_body_for_minimax(body, request=request)  # FIX A: pass request per modello log
+    new_body = remap_body_for_minimax(body, request=request,
+                                       orig_model_store=_request_orig_model,
+                                       resolve_fp=_resolve_chat_fingerprint,
+                                       log_model_fn=_log_original_model,
+                                       log_fn=log)
     # ISOLAMENTO TOOL (2026-07-19): choke-point unico, vedi tool_isolation.py.
     new_body = tool_isolation.filter_tools_for_backend(new_body, "minimax")
     try:
