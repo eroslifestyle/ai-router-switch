@@ -3762,6 +3762,14 @@ async def handle(request):
                 return web.json_response(_msg)
             # nessun comando: applica eventuale marca-chat (D5)
             _cm = get_chat_mode(_fp)
+            if not _cm:
+                # FIX 2026-07-19: stesso fallback usato dal path comando (riga ~3753).
+                # Se X-Claude-Code-Session-Id manca su QUESTA richiesta (ma era presente
+                # o assente in modo consistente quando l'utente ha lanciato !router),
+                # _resolve_chat_fingerprint cade su request.remote/"default" mentre il
+                # comando aveva salvato sotto conversation_fingerprint -> mismatch, il
+                # mode impostato in chat non si applica mai ai messaggi successivi.
+                _cm = get_chat_mode(conversation_fingerprint(_data))
             if _cm in VALID_MODES:
                 mode = _cm
         except Exception:
