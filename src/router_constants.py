@@ -101,7 +101,7 @@ if _pm_override:
 LISTEN_PORTS = [LISTEN_PORT] + list(PORT_MODE.keys())
 
 # ── Fallback statuses ─────────────────────────────────────────────────────────
-FALLBACK_STATUSES = {401, 403, 408, 409, 413, 429, 500, 502, 503, 504, 529}
+FALLBACK_STATUSES = {401, 403, 404, 408, 409, 413, 429, 500, 502, 503, 504, 529}
 MINIMAX_FALLBACK_STATUSES = FALLBACK_STATUSES - {429}
 
 # ── Generative paths ──────────────────────────────────────────────────────────
