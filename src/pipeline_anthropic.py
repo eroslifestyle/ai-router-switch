@@ -618,9 +618,15 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
                 up = await forward_minimax(request, body, session)
             else:
                 up = await forward_anthropic(request, body, session)
-            mixed_fail_reset(chat_fp)
-            log(f'mix-am BYPASS-THINK direct (light, {content_len}c) fp={chat_fp}')
-            return await relay(up)
+            if up.status not in FALLBACK_STATUSES:
+                mixed_fail_reset(chat_fp)
+                log(f'mix-am BYPASS-THINK direct (light, {content_len}c) fp={chat_fp}')
+                return await relay(up)
+            log(f'mix-am BYPASS-THINK {up.status} -> fallthrough pipeline fp={chat_fp}')
+            try:
+                await up.release()
+            except Exception:
+                pass
         except Exception as e:
             log(f'mix-am BYPASS-THINK EXC: {e} -> fallthrough')
 
@@ -630,22 +636,46 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
     except Exception as e:
         log(f"mix-am THINK EXC: {e} -> fallback M3 diretto")
         try:
-            return await relay(await _retry_forward(forward_minimax, request, body, session))
+            up = await _retry_forward(forward_minimax, request, body, session)
+            if up.status not in FALLBACK_STATUSES:
+                return await relay(up)
+            log(f"mix-am THINK EXC: M3 diretto anche lui {up.status} -> rescue fp={chat_fp}")
+            try:
+                await up.release()
+            except Exception:
+                pass
         except Exception as e2:
-            return web.json_response({"type": "error", "error": {"type": "router_error", "message": f"think+fallback ko: {e2}"}}, status=502)
+            log(f"mix-am THINK EXC + fallback EXC: {e2} -> rescue")
+        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
     if not t_json or t_status in FALLBACK_STATUSES:
         log(f"mix-am THINK ko {t_status} -> fallback M3 diretto")
         try:
-            return await relay(await forward_minimax(request, body, session))
+            up = await forward_minimax(request, body, session)
+            if up.status not in FALLBACK_STATUSES:
+                return await relay(up)
+            log(f"mix-am THINK ko: M3 diretto anche lui {up.status} -> rescue fp={chat_fp}")
+            try:
+                await up.release()
+            except Exception:
+                pass
         except Exception as e:
-            return web.json_response({"type": "error", "error": {"type": "router_error", "message": f"think ko + fallback ko: {e}"}}, status=502)
+            log(f"mix-am THINK ko + fallback EXC: {e} -> rescue")
+        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
     plan = _text_from_message(t_json).strip()
     if not plan:
         log(f"mix-am THINK: piano vuoto -> fallback M3 diretto fp={chat_fp}")
         try:
-            return await relay(await forward_minimax(request, body, session))
+            up = await forward_minimax(request, body, session)
+            if up.status not in FALLBACK_STATUSES:
+                return await relay(up)
+            log(f"mix-am THINK vuoto: M3 diretto anche lui {up.status} -> rescue fp={chat_fp}")
+            try:
+                await up.release()
+            except Exception:
+                pass
         except Exception as e:
-            return web.json_response({"type": "error", "error": {"type": "router_error", "message": f"think vuoto + fallback ko: {e}"}}, status=502)
+            log(f"mix-am THINK vuoto + fallback EXC: {e} -> rescue")
+        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
     tools_to_call = []
     log(f"mix-am THINK OK plan={len(plan)}c fp={chat_fp}")
 
