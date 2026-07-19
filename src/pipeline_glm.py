@@ -71,7 +71,8 @@ async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp
 async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: str, relay):
     """mix-gm: GLM-5.2 THINK -> MiniMax ACT -> GLM-5.2 VERIFY."""
     from forward_minimax import forward_minimax
-    from pipeline_anthropic import _call_full, _build_minimax_act_body_retry, _is_context_exceed_400
+    from pipeline_anthropic import _call_full, _is_context_exceed_400
+    from pipeline_minimax import _build_minimax_act_body_retry
     import glm_backend as _glm
     orig = json.loads(body) if isinstance(body, bytes) else body
     think_body = _glm.build_glm_think_body(orig, "")
@@ -101,11 +102,20 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
         debug_catalog.record_event(severity="error", category="mix-gm",
                                     kind="minimax_act_fail", chat_fp=chat_fp,
                                     code=act_resp.status, detail={"context_exceed": is_ctx})
+        # MiniMax retry — NEVER Anthropic
         if is_ctx:
-            from pipeline_anthropic import _shrink_and_retry_minimax
-            return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
-        from pipeline_anthropic import _anthropic_rescue
-        return await _anthropic_rescue(request, orig, session, chat_fp, relay)
+            retry_orig = {k: v for k, v in orig.items() if k != "thinking"}
+            retry_orig["messages"] = orig.get("messages", [])[-3:]
+            retry_body = json.dumps(retry_orig).encode()
+        else:
+            retry_body = body
+        log(f"mix-gm ACT retry fp={chat_fp}")
+        act_resp = await forward_minimax(request, retry_body, session)
+        if act_resp.status >= 400:
+            await act_resp.release()
+            from aiohttp import web
+            return web.json_response({"error": {"type": "minimax_unavailable",
+                "message": "mix-gm: MiniMax ACT unavailable after retry"}}, status=502)
     act_raw = await act_resp.read()
     await act_resp.release()
 

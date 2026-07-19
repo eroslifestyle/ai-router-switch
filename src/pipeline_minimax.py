@@ -210,7 +210,8 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
                 await up.release()
             except Exception:
                 pass
-            return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
+            return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay,
+                                                   allow_anthropic_rescue=False)
         try:
             await up.release()
         except Exception:

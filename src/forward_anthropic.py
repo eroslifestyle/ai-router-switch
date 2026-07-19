@@ -74,7 +74,7 @@ async def forward_anthropic(request, body, session):
     from router_auth import get_minimax_key as _unused  # bridge import for tool isolation
     from router_utils import _repair_message_sequence
 
-    url = ANTHROPIC_UPSTREAM + request.path_qs
+    url = ANTHROPIC_UPSTREAM + request.path  # strip query string (Anthropic API uses body/headers, not query params)
     headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS}
     auth = headers.get("Authorization", "") or headers.get("authorization", "")
 
@@ -168,6 +168,7 @@ async def forward_anthropic(request, body, session):
             except Exception:
                 raw_err = b""
             await up.release()
+            log(f"[forward_anthropic] 400 body: {raw_err[:300]}")
             low = raw_err.lower()
             is_ctx = (b"context window" in low or b"reached its context" in low
                       or b"context_exceeded" in low or b"context limit" in low
@@ -203,7 +204,7 @@ async def forward_anthropic_direct(request, body, session):
     if _reload_oauth_token():
         ANTHROPIC_OAUTH_TOKEN = os.environ.get("ANTHROPIC_OAUTH_TOKEN", "")
 
-    url = ANTHROPIC_DIRECT_URL + request.path_qs
+    url = ANTHROPIC_DIRECT_URL + request.path  # strip query string
     headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS}
     for h in list(headers):
         if h.lower() in ("authorization", "x-api-key"):

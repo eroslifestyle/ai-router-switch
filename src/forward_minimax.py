@@ -11,7 +11,7 @@ import tool_isolation
 from router_constants import (
     MINIMAX_UPSTREAM, MINIMAX_MODEL, MINIMAX_GENERATIVE_HOST,
     MINIMAX_RETRY_CAP_SEC, MINIMAX_RETRY_BUDGET_SHORT,
-    MINIMAX_CONTEXT_BYTE_LIMIT, _GENERATIVE_PATHS,
+    MINIMAX_CONTEXT_BYTE_LIMIT, _GENERATIVE_PATHS, HOP_HEADERS,
 )
 from router_utils import (
     MINIMAX_LIMITER, _MINIMAX_SEM, RateLimitExhausted,
@@ -112,9 +112,9 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
 
     url = MINIMAX_UPSTREAM + request.path_qs
     key = await get_minimax_key()
-    headers = {k: v for k, v in request.headers.items() if k.lower() not in {
-        "authorization", "x-api-key"
-    }}
+    # Host del client (127.0.0.1:8787) inoltrato = 404 nginx da MiniMax: filtra HOP_HEADERS
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS
+               and k.lower() not in {"authorization", "x-api-key"}}
     headers["X-Api-Key"] = key
 
     # _log_original_model is in router_utils namespace, imported lazily to avoid circular
@@ -193,8 +193,8 @@ async def _forward_minimax_generative(request, body: bytes, session,
     """Inoltra a MiniMax generative endpoint con retry di backoff."""
     url = MINIMAX_GENERATIVE_HOST + path
     key = await get_minimax_key()
-    headers = {k: v for k, v in request.headers.items()
-               if k.lower() not in {"authorization", "x-api-key"}}
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS
+               and k.lower() not in {"authorization", "x-api-key"}}
     headers["X-Api-Key"] = key
     try:
         json.loads(body)

@@ -288,20 +288,33 @@ def _trim_context_after_response(req_body: bytes, fp: str) -> None:
 
 # ── Shrink ─────────────────────────────────────────────────────────────────────
 async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
-                                   session, chat_fp: str, relay):
-    """Pipeline shrink dinamico: comprime e ritenta MiniMax."""
+                                   session, chat_fp: str, relay,
+                                   allow_anthropic_rescue: bool = True):
+    """Pipeline shrink dinamico: comprime e ritenta MiniMax.
+
+    allow_anthropic_rescue=False (solo-minimax): mai cross-provider, 502 al client."""
     from forward_minimax import forward_minimax
     from summarizer import summarize_old_messages
     from router_constants import MINIMAX_UPSTREAM
     from router_auth import get_minimax_key
+    from aiohttp import web
+
+    async def _rescue():
+        if allow_anthropic_rescue:
+            return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
+        log(f"shrink: rescue Anthropic OFF (isolamento minimax) -> 502 fp={chat_fp}")
+        return web.json_response({"type": "error", "error": {
+            "type": "minimax_unavailable",
+            "message": "minimax solo: shrink fallito, nessun fallback cross-provider"}}, status=502)
+
     log(f"shrink: inizio body={len(body)}b fp={chat_fp}")
     try:
         orig_dict = json.loads(body) if isinstance(body, bytes) else body
     except Exception:
-        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
+        return await _rescue()
     messages = orig_dict.get("messages", [])
     if not messages:
-        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
+        return await _rescue()
     budget = SUMMARY_BUDGET
     summary_content = build_shrink_summary(messages, budget)
     shrunk = dict(orig_dict)
@@ -336,7 +349,7 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
                     await up.release()
                 except Exception as e:
                     log(f"shrink: LLM summary MiniMax EXC {e} fp={chat_fp}")
-        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
+        return await _rescue()
     try:
         up = await forward_minimax(request, shrunk_bytes, session)
         if up.status < 400:
@@ -349,12 +362,12 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
             pass
         if is_ctx:
             log(f"shrink: anche compresso -> 400 context-exceed fp={chat_fp}")
-            return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
-        log(f"shrink: MiniMax {up.status} -> fallback Haiku fp={chat_fp}")
-        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
+            return await _rescue()
+        log(f"shrink: MiniMax {up.status} -> rescue fp={chat_fp}")
+        return await _rescue()
     except Exception as e:
-        log(f"shrink: MiniMax EXC {e} -> fallback Haiku fp={chat_fp}")
-        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
+        log(f"shrink: MiniMax EXC {e} -> rescue fp={chat_fp}")
+        return await _rescue()
 
 
 # ── Vision ─────────────────────────────────────────────────────────────────────

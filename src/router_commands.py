@@ -23,7 +23,7 @@ _NL_MODE = [
     (_re.compile(r"mod\w*\s+mist|mixed|mist[ao]\b", _re.I), "mix-am"),
 ]
 _CMD_VERB = _re.compile(r"\b(usa|passa|metti|imposta|attiva|cambia|adesso\s+usa)\b", _re.I)
-_EXPLICIT = _re.compile(r"(?:^|>|\n)\s*!router\s+(\w+)", _re.I)
+_EXPLICIT = _re.compile(r"(?:^|>|\n)\s*!router\s+([\w-]+)", _re.I)
 
 
 def parse_router_command(text: str):

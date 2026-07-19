@@ -251,7 +251,7 @@ async def handle(request):
             if _tok:
                 _hdrs["Authorization"] = f"Bearer {_tok}"
                 _hdrs["anthropic-beta"] = "oauth-2025-04-20"
-            _url = ANTHROPIC_UPSTREAM + request.path_qs
+            _url = ANTHROPIC_UPSTREAM + request.path  # strip query string
             _up = await request.app["session"].request("GET", _url, headers=_hdrs)
             _body = await _up.read()
             _up.release()
@@ -393,8 +393,16 @@ async def handle(request):
                                             log_fn=log, passthrough=True)
                 return await relay(up)
             except Exception as e:
-                log(f"GLM non-messages EXC: {e} -> minimax passthrough")
-                return await relay(await _retry_forward(forward_minimax, request, body, session))
+                # Fallback coerente con l'isolamento della coppia di provider del modo
+                if mode == "mix-ag":
+                    log(f"GLM non-messages EXC: {e} -> anthropic passthrough (mix-ag)")
+                    return await relay(await _retry_forward(forward_anthropic, request, body, session))
+                if mode == "mix-gm":
+                    log(f"GLM non-messages EXC: {e} -> minimax passthrough (mix-gm)")
+                    return await relay(await _retry_forward(forward_minimax, request, body, session))
+                log(f"GLM non-messages EXC: {e} -> 502 (glm puro, no fallback cross-provider)")
+                return web.json_response({"type": "error", "error": {
+                    "type": "glm_unavailable", "message": f"glm: upstream error su {request.path}"}}, status=502)
         return await _handle_glm_mode(request, body, session, mode, chat_fp, relay)
 
     # MODALITA' MINIMAX
