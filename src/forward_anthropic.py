@@ -1,6 +1,7 @@
 # ~190 lines
 """Anthropic forwarding extracted from ai-router-proxy.py (~lines 1034-1703)."""
 import json
+import os
 import time
 from pathlib import Path
 
@@ -200,8 +201,7 @@ async def forward_anthropic_direct(request, body, session):
     if not globals().get("ANTHROPIC_OAUTH_TOKEN"):
         _load_oauth_token()
     if _reload_oauth_token():
-        import os as _os
-        ANTHROPIC_OAUTH_TOKEN = _os.environ.get("ANTHROPIC_OAUTH_TOKEN", "")
+        ANTHROPIC_OAUTH_TOKEN = os.environ.get("ANTHROPIC_OAUTH_TOKEN", "")
 
     url = ANTHROPIC_DIRECT_URL + request.path_qs
     headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS}
