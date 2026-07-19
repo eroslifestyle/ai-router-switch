@@ -305,7 +305,8 @@ async def handle(request):
                         or request.headers.get("X-Session-ID", "")
                         or request.headers.get("x-session-id", ""))
                 _fp = f"sid:{_sid[:64]}" if _sid else conversation_fingerprint(_data)
-                _txt = _router_reply_text(_cmd, _fp)
+                _fp_fallback = conversation_fingerprint(_data) if _sid else None
+                _txt = _router_reply_text(_cmd, _fp, _fp_fallback)
                 _msg = _synthetic_message(_txt, _data.get("model", "ai-router"))
                 log(f"in-chat command {_cmd} fp={_fp}")
                 if bool(_data.get("stream")):

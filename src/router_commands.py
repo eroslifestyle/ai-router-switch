@@ -50,19 +50,21 @@ def parse_router_command(text: str):
     return None
 
 
-def _router_reply_text(action: dict, fp: str) -> str:
+def _router_reply_text(action: dict, fp: str, fallback_fp: str = None) -> str:
     if action["action"] == "set":
         set_chat_mode(fp, action["mode"])
         _disp = _INTERNAL_TO_DISPLAY.get(action["mode"], action["mode"])
         return f"✅ Questa chat ora usa: **{_disp}** (dal prossimo messaggio)."
     if action["action"] == "status":
-        cm = get_chat_mode(fp)
+        cm = get_chat_mode(fp) or (get_chat_mode(fallback_fp) if fallback_fp else None)
         if cm:
             return f"📍 Modalità chat: **{_INTERNAL_TO_DISPLAY.get(cm, cm)}**"
         _gm = get_file_mode()
         return f"📍 Modalità chat: **default ({_INTERNAL_TO_DISPLAY.get(_gm, _gm)})**"
     if action["action"] == "reset":
         clear_chat_mode(fp)
+        if fallback_fp:
+            clear_chat_mode(fallback_fp)
         _gm = get_file_mode()
         return f"↺ Chat riportata al default: **{_INTERNAL_TO_DISPLAY.get(_gm, _gm)}**"
     return ("🧭 Comandi: `!router <anthropic|minimax|mixam|glm|mixgm|mixag>` · "
