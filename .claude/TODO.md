@@ -3,12 +3,22 @@
 ## Attivo
 - [ ] **Monitorare consumo Anthropic vs MiniMax** dopo revert bypass visione M3 (2026-07-19) — ora M3 prova per primo su tutte le immagini invece di deviarle subito ad Anthropic. Verificare che il rapporto Anthropic/MiniMax si riequilibri sui prossimi log.
 - [ ] **Registrare Web Search MCP Server z.ai lato client** (`api.z.ai/api/mcp/web_search_prime/mcp`, Bearer con chiave GLM) nelle impostazioni MCP di Claude Code/VSCode — senza questo passo, la modalità glm pura non ha capacità di ricerca web (lo stripping incondizionato rimuove i tool esterni anche se il nativo non è ancora configurato, per design). **Non farlo senza conferma esplicita utente**: è config MCP globale (`~/.claude.json`), impatta tutti i progetti.
+- [ ] **FASE B — split modulare**: step1 ✅, step2 ✅, step3 ✅ (commit 3e32dcb, -102 LOC). Prossimo: step4 estrarre `sse_utils.py`. Checkpoint: `CP_20260719_1655.md`.
 
 ## Completati (sessione 2026-07-19 pomeriggio — fix 400 background + isolamento tool centralizzato)
 - [x] Fix bug 400 ricorrente su THINK/VERIFY in background modalità GLM pura — `system` prompt era iniettato come messaggio `role:"system"` dentro `messages` (invalido per endpoint Anthropic-compatible z.ai, richiede `system` top-level); content a blocchi (tool/immagine) azzerava silenziosamente l'array messages (commit aabb2f7)
 - [x] Isolamento tool per-provider centralizzato su TUTTE le modalità (pure + mix-am/mix-ag/mix-gm) — nuovo `src/tool_isolation.py`, choke-point unico dentro `forward_anthropic/forward_anthropic_direct/forward_minimax/forward_glm`. Chiude leak reale: MCP MiniMax visibile a GLM in mix-ag, server-tool Anthropic visibili a MiniMax in mix-gm (stesso bug 2013 di mix-am, mai coperto qui). Rimosse le vecchie funzioni duplicate `_strip_foreign_branded_tools`/`strip_foreign_branded_tools_for_glm` (commit 0a9ae82)
 - [x] Fix collaterale: `sviluppo/tests/test_glm_modes.sh` non impostava `PYTHONPATH` con la root del repo (dove vive `fail_tracker.py`, non in `src/`) — istanza di test isolata non partiva mai, indipendentemente da altre modifiche
 - [x] Committati 9 file di piani ricerca "comunicazione bilaterale multi-modello" rimasti non tracciati (commit fec9b39)
+
+## Completati (sessione 2026-07-19 — FASE A fix bilaterali + FASE B pausa per mappatura)
+- [x] FASE A1 — trim-state atomico: tempfile.NamedTemporaryFile + os.replace + threading.Lock per-fp (commit 95b50b1, test `test_trim_race.sh` PASS=4/0)
+- [x] FASE A2 — VERIFY enforcing mix-gm: retry ×1 su incoerenza, prefisso [VERIFY-WARNING], nuova `_build_minimax_act_body_retry()` (commit f97a439, test `test_mixgm_verify_retry.sh` PASS=5/0)
+- [x] A3 — marcatori OBIETTIVO/VINCOLI/NON FARE in `_build_think_body` (commit 33c39d1)
+- [x] A4 — HHEM gate (:4002) su ACT e VERIFY in mix-gm, fail-open, nuovo `src/hhem_gate.py` (commit 33c39d1)
+- [x] A5 — audit boundedness fallback chain: ZERO ricorsione, max 4 hop (commit in-memory)
+- [x] Scoperta CRITICA: struttura modulare esistente parziale — `providers/base.py` (153 LOC, 7 funzioni) e `pipelines/primitives.py` (82 LOC, 5 funzioni) già esistono e il proxy li importa. Piano FASE B basato su assunzione monolite inattendibile → PAUSA per mappatura. Checkpoint: `CP_20260719_1320.md`
+- [x] Tentativo errato: creato `src/router_utils.py` con codice INVENTATO (non copiato dal sorgente) → ELIMINATO prima di commit
 
 ## Completati (sessione 2026-07-19 — debug modalità GLM pura)
 - [x] Fix 1/5 — connection-release prematura in `forward_glm` (return da dentro `async with`), tier key mai risolta a modello reale, `.read()`/`.release()` su `web.Response` nello STEP THINK (commit 6e51322)
