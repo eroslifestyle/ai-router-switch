@@ -476,8 +476,14 @@ async def handle(request):
                     is_ctx, _ = await _is_context_exceed(up)
                     if is_ctx:
                         return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
-                mixed_fail_reset(chat_fp)
-                return await relay(up)
+                if up.status not in FALLBACK_STATUSES:
+                    mixed_fail_reset(chat_fp)
+                    return await relay(up)
+                log(f"mix-am FAST-PATH MiniMax {up.status} -> fallthrough pipeline fp={chat_fp}")
+                try:
+                    await up.release()
+                except Exception:
+                    pass
             except Exception as e:
                 log(f"mix-am FAST-PATH MiniMax EXC: {e}")
         log(f"mix-am pipeline attivata fp={chat_fp} tools={bool(orig.get('tools'))}")
