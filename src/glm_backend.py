@@ -465,50 +465,78 @@ Rispondi SOLO con VERIFIED se l'output è ok, o con CORRECTIONS seguito dalle co
     return json.dumps(verify_body).encode()
 
 
-async def glm_think_act_verify(request, body: bytes, session, log_fn=print):
-    """Esegue il pattern THINK → ACT → VERIFY con GLM.
+_background_tasks = set()
 
-    1. GLM-5.2 THINK: produce piano
-    2. modello specifico ACT: esegue
-    3. GLM-5.2 VERIFY: verifica output
-    """
-    try:
-        orig = json.loads(body)
-    except Exception:
-        orig = {}
 
-    # STEP 1: THINK - GLM-5.2 analizza e produce piano
-    content_type, _ = has_multimodal_content(body)
+def _fire_and_forget(coro):
+    """Lancia una coroutine in background senza attenderla, tenendo un
+    riferimento nel set _background_tasks per evitare che asyncio la
+    garbage-collecti prima del completamento (gotcha noto di create_task)."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
 
-    # Per generazione media, skip THINK e vai diretto
-    if content_type in ("image_gen", "video_gen"):
-        if content_type == "image_gen":
-            return await forward_glm_image(request, body, session, log_fn)
-        return await forward_glm_video(request, body, session, log_fn)
 
-    # THINK
+async def _glm_think_verify_background(request, body, orig, content_type, act_raw, session, log_fn):
+    """THINK + VERIFY eseguiti DOPO aver già risposto al client (fire-and-forget).
+    Servono solo per logging/osservabilità — il loro esito non modifica in alcun
+    modo la risposta già inviata (vedi glm_think_act_verify: ACT risponde subito)."""
     think_body = build_glm_think_body(orig, content_type)
     log_fn(f"GLM THINK: analisi con {GLM_THINK_VERIFY_MODEL}")
-
+    think_plan = ""
     try:
         think_resp = await forward_glm(request, think_body, session, GLM_THINK_VERIFY_MODEL, log_fn)
         if think_resp.status >= 400:
-            log_fn(f"GLM THINK fail {think_resp.status} → skip to direct ACT")
-            think_plan = ""
+            log_fn(f"GLM THINK fail {think_resp.status}")
         else:
             think_raw = think_resp.body if isinstance(think_resp.body, (bytes, bytearray)) else b""
             try:
                 think_data = json.loads(think_raw)
                 think_plan = think_data.get("content", [{}])[0].get("text", "") if think_data.get("content") else ""
             except Exception:
-                think_plan = ""
+                pass
     except Exception as e:
-        log_fn(f"GLM THINK EXC: {e} → skip to direct ACT")
-        think_plan = ""
-
+        log_fn(f"GLM THINK EXC: {e}")
     log_fn(f"GLM THINK done: plan={len(think_plan)}c")
 
-    # STEP 2: ACT - modello specifico esegue
+    log_fn(f"GLM VERIFY: verifica con {GLM_THINK_VERIFY_MODEL}")
+    try:
+        verify_body = build_glm_verify_body(orig, think_plan, act_raw.decode(errors="ignore")[:5000])
+        verify_resp = await forward_glm(request, verify_body, session, GLM_THINK_VERIFY_MODEL, log_fn)
+        if verify_resp.status < 400:
+            verify_raw = verify_resp.body if isinstance(verify_resp.body, (bytes, bytearray)) else b""
+            try:
+                verify_data = json.loads(verify_raw)
+                verify_text = verify_data.get("content", [{}])[0].get("text", "") if verify_data.get("content") else ""
+                log_fn(f"GLM VERIFY: {verify_text[:100]}")
+            except Exception:
+                pass
+    except Exception as e:
+        log_fn(f"GLM VERIFY EXC: {e}")
+
+
+async def glm_think_act_verify(request, body: bytes, session, log_fn=print):
+    """Esegue GLM: ACT risponde SUBITO al client (fix 2026-07-19 — prima
+    THINK/ACT/VERIFY erano sequenziali e bloccanti, 10-20s+ prima del primo
+    byte, causavano retry-storm lato client per timeout percepito).
+    THINK e VERIFY girano in background dopo la risposta, solo per log.
+    """
+    try:
+        orig = json.loads(body)
+    except Exception:
+        orig = {}
+
+    content_type, _ = has_multimodal_content(body)
+
+    # Per generazione media, skip e vai diretto (invariato)
+    if content_type in ("image_gen", "video_gen"):
+        if content_type == "image_gen":
+            return await forward_glm_image(request, body, session, log_fn)
+        return await forward_glm_video(request, body, session, log_fn)
+
+    # ACT: esegue e risponde subito. Il tier/modello non dipende dal THINK
+    # (che non alimenta act_body), quindi non c'è motivo di aspettarlo.
     tier = await classify_tier(body, request, session, log_fn)
     eff_model, _ = apply_peak_cap(tier)
     real_model = resolve_glm_upstream_model(eff_model)
@@ -523,27 +551,12 @@ async def glm_think_act_verify(request, body: bytes, session, log_fn=print):
         return act_resp
 
     # forward_glm ritorna una web.Response con il body già in memoria (.body).
-    # Estrai il body per il VERIFY e per la risposta finale.
     act_raw = act_resp.body if isinstance(act_resp.body, (bytes, bytearray)) else b""
 
-    # STEP 3: VERIFY - GLM-5.2 verifica output (best-effort, non blocca la risposta)
-    log_fn(f"GLM VERIFY: verifica con {GLM_THINK_VERIFY_MODEL}")
-    try:
-        verify_body = build_glm_verify_body(orig, think_plan, act_raw.decode(errors="ignore")[:5000])
-        verify_resp = await forward_glm(request, verify_body, session, GLM_THINK_VERIFY_MODEL, log_fn)
+    # THINK + VERIFY in background: non bloccano la risposta già pronta.
+    _fire_and_forget(_glm_think_verify_background(
+        request, body, orig, content_type, act_raw, session, log_fn))
 
-        if verify_resp.status < 400:
-            verify_raw = verify_resp.body if isinstance(verify_resp.body, (bytes, bytearray)) else b""
-            try:
-                verify_data = json.loads(verify_raw)
-                verify_text = verify_data.get("content", [{}])[0].get("text", "") if verify_data.get("content") else ""
-                log_fn(f"GLM VERIFY: {verify_text[:100]}")
-            except Exception:
-                pass
-    except Exception as e:
-        log_fn(f"GLM VERIFY EXC: {e}")
-
-    # Ritorna l'output dell'ACT (già in memoria, non rieseguire)
     return act_resp
 
 
