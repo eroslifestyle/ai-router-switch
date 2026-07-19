@@ -441,10 +441,31 @@ def strip_foreign_branded_tools_for_glm(body: bytes) -> bytes:
     return json.dumps(data).encode()
 # ── THINK-ACT-VERIFY ───────────────────────────────────────────────────────────
 
+def _extract_text(content) -> str:
+    """Estrae testo semplice da un campo `content` Anthropic (stringa, o lista
+    di content-block dove tiene solo i blocchi di tipo 'text' — ignora
+    tool_use/tool_result/image, che il THINK/VERIFY non deve vedere)."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            block.get("text", "") for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    return ""
+
+
 def build_glm_think_body(orig: dict, content_type: str) -> bytes:
     """Costruisce il body per il THINK con GLM-5.2.
 
-    Chiede al modello di analizzare il task e produrre un piano di azione."""
+    Chiede al modello di analizzare il task e produrre un piano di azione.
+
+    FIX 2026-07-19 (400 ricorrente sul background THINK): `system` va inviato
+    come campo TOP-LEVEL, non come messaggio `role: system` dentro `messages`
+    — l'endpoint z.ai è Anthropic-compatible e rigetta quel ruolo con 400.
+    Un solo messaggio `user` evita anche il vincolo di alternanza dei ruoli;
+    se il content dell'ultimo messaggio è a blocchi (tool/immagine, non
+    stringa) l'estrazione testuale garantisce comunque un messaggio non vuoto."""
     system = """Sei un orchestrator AI. Analizza la richiesta e produci un piano di azione.
 Il piano deve specificare:
 1. Tipo di task (coding, reasoning, creative, vision, etc.)
@@ -455,26 +476,25 @@ Rispondi SOLO con il piano, nient'altro."""
 
     messages = orig.get("messages", [])
 
-    think_messages = [
-        {"role": "system", "content": system},
-    ]
+    history_lines = []
+    for msg in messages[-6:-1]:
+        text = _extract_text(msg.get("content", ""))
+        if text:
+            history_lines.append(f"[{msg.get('role', 'user')}] {text[:500]}")
 
-    # Aggiungi history recente
-    for msg in messages[-6:]:
-        role = msg.get("role", "user")
-        content_text = msg.get("content", "")
-        if isinstance(content_text, str) and len(content_text) < 5000:
-            think_messages.append({"role": role, "content": content_text[:3000]})
+    last_text = _extract_text(messages[-1].get("content", "")) if messages else ""
+    if not last_text:
+        last_text = f"(contenuto {content_type or 'non testuale'})"
 
-    # Aggiungi task attuale
-    if messages:
-        last = messages[-1].get("content", "")
-        if isinstance(last, str):
-            think_messages.append({"role": "user", "content": f"Analizza questo task: {last[:2000]}"})
+    user_text = ""
+    if history_lines:
+        user_text = "\n".join(history_lines) + "\n\n"
+    user_text += f"Analizza questo task: {last_text[:2000]}"
 
     think_body = {
         "model": GLM_THINK_VERIFY_MODEL,
-        "messages": think_messages,
+        "system": system,
+        "messages": [{"role": "user", "content": user_text[:5000]}],
         "max_tokens": 1000,
     }
 
@@ -484,19 +504,18 @@ Rispondi SOLO con il piano, nient'altro."""
 def build_glm_verify_body(orig: dict, plan: str, act_output: str) -> bytes:
     """Costruisce il body per il VERIFY con GLM-5.2.
 
-    Chiede al modello di verificare che l'output sia corretto."""
+    Chiede al modello di verificare che l'output sia corretto.
+    Stesso fix di build_glm_think_body: `system` top-level, non in messages."""
     system = """Sei un verifier AI. Verifica che l'output prodotto sia corretto e completo.
 Se ci sono errori o omissioni, indica cosa corregere.
 Rispondi SOLO con VERIFIED se l'output è ok, o con CORRECTIONS seguito dalle correzioni."""
 
-    verify_messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": "Piano:\n" + plan + "\n\nOutput:\n" + act_output[:3000]},
-    ]
-
     verify_body = {
         "model": GLM_THINK_VERIFY_MODEL,
-        "messages": verify_messages,
+        "system": system,
+        "messages": [
+            {"role": "user", "content": "Piano:\n" + plan + "\n\nOutput:\n" + act_output[:3000]},
+        ],
         "max_tokens": 500,
     }
 
