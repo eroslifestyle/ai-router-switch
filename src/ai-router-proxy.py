@@ -211,16 +211,21 @@ async def handle(request):
         # Questo libera spazio prima che upstream torni 400 context-exceeded.
         # post_check compatta_or_clear resta come safety net se la riscrittura non basta.
         if ctx_check["action"] in ("compact", "error"):
+            # Modello di riferimento per la soglia di rewrite = il collo di bottiglia
+            # REALE del path. Nelle modalità dove MiniMax esegue (minimax/mix-am/mix-gm)
+            # il body deve stare nei 200K di MiniMax anche se il client è Opus/Sonnet.
+            # Nelle modalità Anthropic/GLM pure vale il context reale (fino a 1M).
             _ctx_model_map = {
-                "anthropic": "claude-sonnet-4-7", "minimax": "MiniMax-M2.7",
+                "anthropic": "claude-opus-4-8", "minimax": "MiniMax-M2.7",
                 "glm": "glm-5.2", "mix-am": "MiniMax-M2.7",
-                "mix-ag": "claude-sonnet-4-7", "mix-gm": "MiniMax-M2.7",
+                "mix-ag": "claude-opus-4-8", "mix-gm": "MiniMax-M2.7",
             }
             ctx_model = _ctx_model_map.get(mode, "MiniMax-M2.7")
             rewrit, was_rewrit = rewrite_for_context(body, ctx_model, fp)
             if was_rewrit and len(rewrit) < len(body):
+                _orig_len = len(body)
                 body = rewrit
-                log(f"ctx: proactive rewrite {len(rewrit)}b < {len(body)}b fp={fp}")
+                log(f"ctx: proactive rewrite {len(rewrit)}b < {_orig_len}b fp={fp}")
             elif ctx_check["action"] == "error":
                 log(f"ctx: ERROR threshold {ctx_check['pct']:.1%} fp={fp}")
                 return web.json_response({
