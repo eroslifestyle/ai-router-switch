@@ -83,7 +83,8 @@ from router_constants import (
 )
 from router_utils import (
     log, log_exc, debug_capture, debug_errors, debug_last,
-    debug_stats, debug_trace, MINIMAX_LIMITER, _MINIMAX_SEM,
+    debug_stats, debug_trace, debug_catalog_endpoint, debug_catalog_entry,
+    MINIMAX_LIMITER, _MINIMAX_SEM,
     _request_orig_model,
 )
 from router_mode import (
@@ -280,10 +281,11 @@ async def handle(request):
     if (_RESILIENCE_AVAILABLE and RESILIENCE_INST is not None
             and mode not in ("minimax", "glm")
             and not RESILIENCE_INST.state_is_ok()):
-        if request.path not in {"/", "/health", "/readyz", "/livez", "/stats",
+        if (request.path not in {"/", "/health", "/readyz", "/livez", "/stats",
                                  "/metrics", "/status", "/__router_health",
                                  "/__resilience", "/debug/errors", "/debug/last",
-                                 "/debug/stats", "/debug/trace"}:
+                                 "/debug/stats", "/debug/trace"}
+                and not request.path.startswith("/debug/catalog")):
             log(f"DEGRADED: rifiuto {request.path}")
             return web.json_response(RESILIENCE_INST.degraded_response(), status=503)
 
@@ -619,6 +621,8 @@ def _make_app(session, forced_mode):
     app.router.add_get("/debug/last", debug_last)
     app.router.add_get("/debug/stats", debug_stats)
     app.router.add_get("/debug/trace", debug_trace)
+    app.router.add_get("/debug/catalog", debug_catalog_endpoint)
+    app.router.add_get("/debug/catalog/{signature}", debug_catalog_entry)
     app.router.add_post("/admin/mode/{mode}", admin_mode_switch)
     app.router.add_route("*", "/{tail:.*}", handle)
     return app

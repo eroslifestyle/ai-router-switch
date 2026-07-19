@@ -298,6 +298,24 @@ async def debug_trace(request) -> web.Response:
     })
 
 
+async def debug_catalog_endpoint(request) -> web.Response:
+    """Catalogo deduplicato bug/blocco/errore, vedi DEBUG-CATALOG-SPEC.md."""
+    import debug_catalog
+    category = request.query.get("mode") or request.query.get("category")
+    severity = request.query.get("severity")
+    items = debug_catalog.get_catalog(category=category, severity=severity)
+    return web.json_response({"total": len(items), "items": items})
+
+
+async def debug_catalog_entry(request) -> web.Response:
+    import debug_catalog
+    sig = request.match_info.get("signature", "")
+    entry = debug_catalog.get_catalog_entry(sig)
+    if entry is None:
+        return web.json_response({"error": f"signature '{sig}' non trovata"}, status=404)
+    return web.json_response(entry)
+
+
 # ── Rate limiter ───────────────────────────────────────────────────────────────
 def _classify_429(raw: bytes) -> str:
     """Classifica un body 429 MiniMax: 'token_plan' vs 'rpm_tpm'."""
