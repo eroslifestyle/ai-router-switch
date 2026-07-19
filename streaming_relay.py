@@ -84,7 +84,7 @@ class StreamingRelay:
                 upstream_status=upstream.status,
                 upstream_raw=_raw,
                 upstream_encoding=_enc,
-                orig=self.orig,
+                orig=self.orig, mode=self.mode,
                 note=f"extra_headers={list((extra_headers or {}).keys())} upstream_headers={_diag_headers} url={getattr(upstream, 'url', '')}",
             )
             # Invia l'errore direttamente: body già letto, costruisci web.Response

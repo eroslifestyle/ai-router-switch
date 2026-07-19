@@ -189,16 +189,24 @@ def debug_capture(*, kind: str, request=None, fp: str = "", client_model: str = 
                   upstream_model: str = "", status: int | None = None, stage: str = "",
                   upstream_status: int | None = None, upstream_raw: bytes = b"",
                   upstream_encoding: str = "", sent_bytes: int = 0, orig: dict | None = None,
-                  sent_analysis: dict | None = None, note: str = "") -> None:
-    """Registra un evento di errore in RAM + JSONL. Decomprime il body upstream."""
+                  sent_analysis: dict | None = None, note: str = "", mode: str = None,
+                  severity: str = "error") -> None:
+    """Registra un evento di errore in RAM + JSONL. Decomprime il body upstream.
+
+    FIX 2026-07-19: 'mode' era sempre get_file_mode() (il file globale), MAI il
+    mode realmente risolto per la richiesta -> attribuzione fuorviante quando il
+    file globale differiva dall'override per-chat. Ora usa get_mode(request, fp)
+    (stessa risoluzione canonica forced->per-chat->file), a meno che il chiamante
+    passi esplicitamente il mode gia' risolto (es. StreamingRelay.mode)."""
     try:
-        from router_mode import get_file_mode
+        from router_mode import get_mode
+        resolved_mode = mode or get_mode(request, fp)
         err_text = _decompress_upstream(upstream_raw, upstream_encoding)
         flags = _orig_flags(orig)
         record = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "kind": kind, "fp": fp,
-            "mode": get_file_mode(),
+            "mode": resolved_mode,
             "path": getattr(request, "path", "") if request else "",
             "client_model": client_model, "upstream_model": upstream_model,
             "status": status, "stage": stage,
@@ -208,6 +216,17 @@ def debug_capture(*, kind: str, request=None, fp: str = "", client_model: str = 
             "sent_analysis": sent_analysis, "flags": flags, "note": note,
         }
         DEBUG_EVENTS.append(record)
+        try:
+            import debug_catalog
+            debug_catalog.record_event(
+                severity=severity, category=resolved_mode, kind=kind,
+                chat_fp=fp, code=upstream_status or status,
+                snippet=err_text or note,
+                detail={"client_model": client_model, "upstream_model": upstream_model,
+                        "stage": stage, "path": record["path"]},
+            )
+        except Exception:
+            pass
         p = _rotated_jsonl_path()
         try:
             with open(p, "a") as f:
