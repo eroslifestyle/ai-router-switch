@@ -3,7 +3,7 @@
 ## Attivo
 - [ ] **Monitorare consumo Anthropic vs MiniMax** dopo revert bypass visione M3 (2026-07-19) — ora M3 prova per primo su tutte le immagini invece di deviarle subito ad Anthropic. Verificare che il rapporto Anthropic/MiniMax si riequilibri sui prossimi log.
 - [ ] **Registrare Web Search MCP Server z.ai lato client** (`api.z.ai/api/mcp/web_search_prime/mcp`, Bearer con chiave GLM) nelle impostazioni MCP di Claude Code/VSCode — senza questo passo, la modalità glm pura non ha capacità di ricerca web (lo stripping incondizionato rimuove i tool esterni anche se il nativo non è ancora configurato, per design). **Non farlo senza conferma esplicita utente**: è config MCP globale (`~/.claude.json`), impatta tutti i progetti.
-- [ ] **FASE B — split modulare**: step1 ✅, step2 ✅, step3 ✅ (commit 3e32dcb, -102 LOC). Prossimo: step4 estrarre `sse_utils.py`. Checkpoint: `CP_20260719_1655.md`.
+- [x] **FASE B — split modulare COMPLETATA**: step1-3 ✅ (3e32dcb), step4 sse_utils.py (ac10fc5), step5 minimax_body.py (66b85dc), step6 trim_smart.py (37d9558). Proxy: 4344→3992 LOC (**-352 total**). Moduli nuovi: sse_utils.py, minimax_body.py, trim_smart.py.
 
 ## Completati (sessione 2026-07-19 pomeriggio — fix 400 background + isolamento tool centralizzato)
 - [x] Fix bug 400 ricorrente su THINK/VERIFY in background modalità GLM pura — `system` prompt era iniettato come messaggio `role:"system"` dentro `messages` (invalido per endpoint Anthropic-compatible z.ai, richiede `system` top-level); content a blocchi (tool/immagine) azzerava silenziosamente l'array messages (commit aabb2f7)
