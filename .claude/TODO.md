@@ -2,8 +2,13 @@
 
 ## Attivo
 - [ ] **Monitorare consumo Anthropic vs MiniMax** dopo revert bypass visione M3 (2026-07-19) — ora M3 prova per primo su tutte le immagini invece di deviarle subito ad Anthropic. Verificare che il rapporto Anthropic/MiniMax si riequilibri sui prossimi log.
-- [ ] **Registrare Web Search MCP Server z.ai lato client** (`api.z.ai/api/mcp/web_search_prime/mcp`, Bearer con chiave GLM) nelle impostazioni MCP di Claude Code/VSCode — senza questo passo, la modalità glm pura non ha capacità di ricerca web (lo stripping incondizionato rimuove i tool esterni anche se il nativo non è ancora configurato, per design).
-- [ ] **Indagare `GLM THINK fail 400`** ricorrente in background (non bloccante, fire-and-forget dal fix f843cc3) — bassa priorità, non influenza le risposte all'utente.
+- [ ] **Registrare Web Search MCP Server z.ai lato client** (`api.z.ai/api/mcp/web_search_prime/mcp`, Bearer con chiave GLM) nelle impostazioni MCP di Claude Code/VSCode — senza questo passo, la modalità glm pura non ha capacità di ricerca web (lo stripping incondizionato rimuove i tool esterni anche se il nativo non è ancora configurato, per design). **Non farlo senza conferma esplicita utente**: è config MCP globale (`~/.claude.json`), impatta tutti i progetti.
+
+## Completati (sessione 2026-07-19 pomeriggio — fix 400 background + isolamento tool centralizzato)
+- [x] Fix bug 400 ricorrente su THINK/VERIFY in background modalità GLM pura — `system` prompt era iniettato come messaggio `role:"system"` dentro `messages` (invalido per endpoint Anthropic-compatible z.ai, richiede `system` top-level); content a blocchi (tool/immagine) azzerava silenziosamente l'array messages (commit aabb2f7)
+- [x] Isolamento tool per-provider centralizzato su TUTTE le modalità (pure + mix-am/mix-ag/mix-gm) — nuovo `src/tool_isolation.py`, choke-point unico dentro `forward_anthropic/forward_anthropic_direct/forward_minimax/forward_glm`. Chiude leak reale: MCP MiniMax visibile a GLM in mix-ag, server-tool Anthropic visibili a MiniMax in mix-gm (stesso bug 2013 di mix-am, mai coperto qui). Rimosse le vecchie funzioni duplicate `_strip_foreign_branded_tools`/`strip_foreign_branded_tools_for_glm` (commit 0a9ae82)
+- [x] Fix collaterale: `sviluppo/tests/test_glm_modes.sh` non impostava `PYTHONPATH` con la root del repo (dove vive `fail_tracker.py`, non in `src/`) — istanza di test isolata non partiva mai, indipendentemente da altre modifiche
+- [x] Committati 9 file di piani ricerca "comunicazione bilaterale multi-modello" rimasti non tracciati (commit fec9b39)
 
 ## Completati (sessione 2026-07-19 — debug modalità GLM pura)
 - [x] Fix 1/5 — connection-release prematura in `forward_glm` (return da dentro `async with`), tier key mai risolta a modello reale, `.read()`/`.release()` su `web.Response` nello STEP THINK (commit 6e51322)
