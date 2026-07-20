@@ -1,9 +1,53 @@
 """pipelines/primitives.py — Costruzione body per pipeline mix-am."""
 
+import copy
 import json
 
+
+def _linearize_tool_blocks(messages: list) -> list:
+    """Converte i blocchi tool_use/tool_result in testo semplice.
+
+    Bug 2026-07-20: build_think_body toglie `tools` ma lasciava i blocchi
+    tool_use/tool_result nella history. Anthropic richiede che se esistono
+    tool_use blocks esistano anche le tools definitions → altrimenti 400 o
+    output degradato → plan vuoto → fallback ACT con body sporco → il modello
+    downstream risponde 'messaggio vuoto o troncato'. Qui rendiamo la history
+    autoconsistente linearizzando i blocchi tool in testo leggibile."""
+    out = []
+    for m in messages:
+        c = m.get("content")
+        if not isinstance(c, list):
+            out.append(m)
+            continue
+        new_blocks = []
+        for blk in c:
+            if not isinstance(blk, dict):
+                new_blocks.append(blk)
+                continue
+            t = blk.get("type")
+            if t == "tool_use":
+                name = blk.get("name", "?")
+                inp = json.dumps(blk.get("input", {}), ensure_ascii=False)[:2000]
+                new_blocks.append({"type": "text",
+                                   "text": f"[tool_use {name}] {inp}"})
+            elif t == "tool_result":
+                content = blk.get("content", "")
+                if isinstance(content, list):
+                    content = json.dumps(content, ensure_ascii=False)
+                new_blocks.append({"type": "text",
+                                   "text": f"[tool_result] {str(content)[:2000]}"})
+            else:
+                new_blocks.append(blk)
+        nm = dict(m)
+        nm["content"] = new_blocks
+        out.append(nm)
+    return out
+
 # Costanti estratte dal proxy
-THINK_MAX_TOKENS = 200  # overridable via AIROUTER_THINK_MAX_TOKENS env
+# Fix 2026-07-20: 200 tagliava il piano a metà (stop_reason=max_tokens) → plan
+# monco/vuoto → fallback ACT senza guida. 512 basta per 2-3 frasi + margine.
+import os as _os
+THINK_MAX_TOKENS = int(_os.environ.get("AIROUTER_THINK_MAX_TOKENS", "512"))
 THINK_MODEL = "claude-haiku-4-5-20251001"  # overridable via AIROUTER_THINK_MODEL env
 VERIFY_MODEL = "claude-haiku-4-5-20251001"  # overridable via AIROUTER_VERIFY_MODEL env
 
@@ -32,7 +76,13 @@ def build_think_body(orig: dict) -> dict:
     body["model"] = _m if _m and not _m.startswith("MiniMax") else THINK_MODEL
     # Togli tools (il modello non deve emettere tool_use) e thinking (mangia budget).
     body.pop("tools", None)
+    body.pop("tool_choice", None)
     body.pop("thinking", None)
+    # Fix 2026-07-20: senza `tools`, i blocchi tool_use/tool_result nella history
+    # sono orfani → Anthropic 400 / output degradato → plan vuoto. Linearizza.
+    msgs = body.get("messages")
+    if isinstance(msgs, list):
+        body["messages"] = _linearize_tool_blocks(msgs)
     return body
 
 
