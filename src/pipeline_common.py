@@ -1,0 +1,131 @@
+"""pipeline_common.py — Costruzione UNIFICATA del body esecutore per TUTTE le modalità mix.
+
+Motivazione (2026-07-20): ogni pipeline (anthropic/minimax/glm) reimplementava a modo
+suo il passaggio THINK→ACT, con bug divergenti:
+- mix-am (primitives.build_act_body): distruggeva il system originale.
+- minimax (_build_minimax_act_body): distruggeva il system originale.
+- mix-ag / mix-gm: il piano THINK non arrivava MAI all'esecutore (usato solo nel VERIFY).
+
+Conseguenza: su skill multi-step (es. /wiki all a 6 passaggi) l'esecutore perdeva le
+istruzioni della skill → 2-3 tool call e poi concludeva a metà (premature termination,
+6.2% dei failure noti — SHIELDA/MAST arxiv 2508.07935).
+
+Questo modulo fornisce UN SOLO punto di costruzione del body esecutore, usato da tutte
+le pipeline, che GARANTISCE:
+1. system originale PRESERVATO (istruzioni skill, CLAUDE.md, regole) — mai sovrascritto.
+2. piano THINK sempre APPESO (non sostituisce nulla).
+3. COMPLETION GUARD globale: criteri di completamento legati al goal ORIGINALE, non al
+   sub-task — mitigazione validata contro premature completion.
+"""
+
+import json
+
+
+# Marker riconosciuti che indicano una skill multi-step in corso nel system/messages.
+# Se presenti, il completion guard diventa più stringente.
+_MULTISTEP_MARKERS = (
+    "passaggi obbligatori", "passaggio 1", "6 passaggi", "step obbligatori",
+    "wiki all", "checkpoint", "in sequenza", "obbligatori in sequenza",
+    "tutti i passaggi", "multi-step", "todo board",
+)
+
+# Guida di orchestrazione + completion guard. Appesa (mai sostitutiva) al system.
+_EXECUTOR_GUIDE_TEMPLATE = (
+    "\n\n--- ORCHESTRAZIONE (aggiunta dal router, NON dall'utente) ---\n"
+    "Un orchestratore ha prodotto questo PIANO-GUIDA per la richiesta corrente. "
+    "Usalo come guida, ma la fonte di verità resta la richiesta originale dell'utente "
+    "e le istruzioni nel system qui sopra (incluse eventuali skill multi-step).\n"
+    "\n"
+    "REGOLE DI COMPLETAMENTO (vincolanti):\n"
+    "1. Completa TUTTI i passaggi/obiettivi della richiesta ORIGINALE, non solo i primi.\n"
+    "2. NON concludere, NON salutare, NON dire 'sono pronto/cosa ti serve' finché "
+    "l'INTERO task non è completato e verificato.\n"
+    "3. Se la richiesta è una skill con passaggi numerati, esegui OGNI passaggio in "
+    "ordine; dopo ciascuno prosegui col successivo senza fermarti.\n"
+    "4. Verifica il completamento contro il GOAL globale, non contro il singolo tool "
+    "call appena eseguito.\n"
+    "5. Se un tool fallisce, gestisci l'errore e prosegui — non abbandonare il task.\n"
+    "{multistep_extra}"
+    "\nPIANO-GUIDA:\n{plan}"
+)
+
+_MULTISTEP_EXTRA = (
+    "6. ATTENZIONE: questa è una SKILL MULTI-STEP. È un errore grave fermarsi prima "
+    "di aver eseguito tutti i passaggi dichiarati. Tieni traccia di quali passaggi hai "
+    "completato e quali mancano.\n"
+)
+
+
+def _system_to_str(system_val) -> str:
+    """Normalizza il campo system (str | list di blocchi | None) in stringa."""
+    if isinstance(system_val, list):
+        parts = []
+        for item in system_val:
+            if isinstance(item, dict):
+                parts.append(item.get("text", "") or json.dumps(item, ensure_ascii=False))
+            else:
+                parts.append(str(item))
+        return "\n\n".join(parts)
+    if isinstance(system_val, str):
+        return system_val
+    return ""
+
+
+def _detect_multistep(orig: dict) -> bool:
+    """True se il body sembra contenere una skill multi-step (system o ultimo user msg)."""
+    haystack = _system_to_str(orig.get("system", "")).lower()
+    msgs = orig.get("messages") or []
+    if msgs:
+        last = msgs[-1]
+        c = last.get("content", "")
+        haystack += " " + (c if isinstance(c, str) else json.dumps(c, ensure_ascii=False)).lower()
+    return any(marker in haystack for marker in _MULTISTEP_MARKERS)
+
+
+def build_executor_body(orig: dict, plan: str, executor: str = "",
+                        *, extra_note: str = "") -> dict:
+    """Costruisce il body per l'ESECUTORE preservando system+messages+tools.
+
+    Args:
+        orig: body originale del client (con system, messages, tools).
+        plan: piano-guida prodotto dal THINK (stringa; può essere "" se assente).
+        executor: model id da forzare per l'esecutore (es. 'MiniMax-M2.7'). "" = invariato.
+        extra_note: nota aggiuntiva (es. correzione dal verifier) appesa dopo il piano.
+
+    Returns:
+        dict pronto per json.dumps → forward_*.
+
+    Garanzie:
+    - orig['system'] MAI perso: guida+completion-guard APPESE.
+    - orig['messages'] e orig['tools'] preservati integralmente.
+    """
+    body = dict(orig)  # conserva messages + tools
+
+    is_multistep = _detect_multistep(orig)
+    plan_text = (plan or "").strip() or "(nessun piano esplicito: segui la richiesta originale)"
+    guide = _EXECUTOR_GUIDE_TEMPLATE.format(
+        multistep_extra=(_MULTISTEP_EXTRA if is_multistep else ""),
+        plan=plan_text,
+    )
+    if extra_note:
+        guide += f"\n\n[NOTA]\n{extra_note}\n[/NOTA]"
+
+    orig_system = orig.get("system", "")
+    if isinstance(orig_system, list):
+        # Formato blocchi Anthropic: appendi un blocco text (non rompere il caching prefix)
+        body["system"] = list(orig_system) + [{"type": "text", "text": guide}]
+    elif isinstance(orig_system, str) and orig_system:
+        body["system"] = orig_system + guide
+    else:
+        body["system"] = "Sei l'esecutore. Esegui la richiesta dell'utente." + guide
+
+    if executor:
+        body["model"] = executor
+    body["stream"] = bool(orig.get("stream"))
+    return body
+
+
+def build_executor_body_bytes(orig: dict, plan: str, executor: str = "",
+                              *, extra_note: str = "") -> bytes:
+    """Come build_executor_body ma serializzato in bytes."""
+    return json.dumps(build_executor_body(orig, plan, executor, extra_note=extra_note)).encode()

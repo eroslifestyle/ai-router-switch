@@ -45,19 +45,16 @@ def _pick_minimax_executor(plan_json: dict) -> str:
 
 
 def _build_minimax_act_body(orig: dict, plan: str, tools_to_call: list, executor: str) -> bytes:
-    """L'executor inferiore esegue il piano prodotto da M3."""
-    sys_msg = (
-        f"Sei {executor}, l'esecutore. Hai ricevuto un PIANO dal meta-orchestratore M3. "
-        "Eseguilo usando i tool in tools_to_call, nell'ordine indicato. Se il piano e' una "
-        "domanda senza tool, rispondi direttamente.\n\n"
-        f"PIANO:\n{plan}\n\n"
-        f"TOOLS DA USARE (decisi da M3):\n{json.dumps(tools_to_call, ensure_ascii=False)}"
-    )
-    body = dict(orig)
-    body["model"] = executor
-    body["system"] = sys_msg
-    body["stream"] = bool(orig.get("stream"))
-    return json.dumps(body).encode()
+    """L'executor inferiore esegue il piano prodotto da M3.
+
+    Fix 2026-07-20: costruzione UNIFICATA via pipeline_common — preserva il system
+    originale (istruzioni skill, CLAUDE.md) invece di sovrascriverlo. Prima
+    body['system']=sys_msg distruggeva la disciplina del task → premature termination."""
+    from pipeline_common import build_executor_body_bytes
+    note = ""
+    if tools_to_call:
+        note = f"TOOLS suggeriti da M3: {json.dumps(tools_to_call, ensure_ascii=False)}"
+    return build_executor_body_bytes(orig, plan, executor, extra_note=note)
 
 
 def _build_minimax_act_body_retry(orig: dict, correction: str) -> bytes:

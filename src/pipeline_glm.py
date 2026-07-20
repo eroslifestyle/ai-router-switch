@@ -37,7 +37,15 @@ async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp
     tier = await _glm.classify_tier(body, request, session, log_fn=log)
     eff_model, capped = _glm.apply_peak_cap(tier)
     real_model = _glm.resolve_glm_upstream_model(eff_model)
-    act_body = _glm.set_body_model(body, real_model)
+    # Fix 2026-07-20: il piano THINK ora arriva all'ACT GLM (prima set_body_model(body)
+    # usava il body grezzo → piano buttato). build_executor_body preserva system+
+    # messages+tools e appende piano + completion guard.
+    from pipeline_common import build_executor_body
+    if think_plan:
+        act_dict = build_executor_body(orig, think_plan, executor=real_model)
+        act_body = json.dumps(act_dict).encode()
+    else:
+        act_body = _glm.set_body_model(body, real_model)
     log(f"mix-ag ACT: GLM {real_model} (tier={eff_model}) fp={chat_fp}")
     act_resp = await _glm.forward_glm(request, act_body, session,
                                        orig.get("model") or real_model, log_fn=log)
@@ -94,8 +102,16 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
         think_plan = ""
     log(f"mix-gm THINK: plan={len(think_plan)}c fp={chat_fp}")
 
+    # Fix 2026-07-20: il piano THINK ora arriva DAVVERO all'ACT (prima era buttato:
+    # forward_minimax(body) grezzo). build_executor_body preserva system+messages+tools
+    # e appende piano + completion guard → l'esecutore MiniMax completa i task multi-step.
+    from pipeline_common import build_executor_body_bytes
+    if think_plan:
+        act_body_gm = build_executor_body_bytes(orig, think_plan, executor="")
+    else:
+        act_body_gm = body
     log(f"mix-gm ACT: MiniMax fp={chat_fp}")
-    act_resp = await forward_minimax(request, body, session)
+    act_resp = await forward_minimax(request, act_body_gm, session)
     if act_resp.status >= 400:
         is_ctx, _ = await _is_context_exceed_400(act_resp)
         await act_resp.release()
