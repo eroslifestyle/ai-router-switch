@@ -21,7 +21,12 @@ def build_shrink_summary(messages: list, budget: int) -> str:
     (c) contesto recente — senza perdere tool results che contengono output reali."""
     n = len(messages)
     if n == 0:
-        return ""
+        # Fix 2026-07-20: anche con 0 messaggi un body compresso vuole testo
+        # esplicito, altrimenti il modello dice "messaggio vuoto o troncato".
+        return (
+            "NOTA: la cronologia precedente e' stata compressa per ragioni di spazio. "
+            "Prosegui normalmente."
+        )
 
     tail = messages[-SHRINK_KEEP_TAIL:]
     head_count = min(SHRINK_KEEP_HEAD, n - SHRINK_KEEP_TAIL)
