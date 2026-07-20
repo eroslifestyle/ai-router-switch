@@ -14,7 +14,7 @@ _lock = threading.Lock()
 
 
 def notify_context_threshold(fp: str, mode: str, pct: float, est_tokens: int, limit: int, kind: str) -> None:
-    """kind e' warn (80%) o warn2 (88%). Throttle+dedup per (fp, kind). Canali: notify-send, log+bell, pending."""
+    """kind e' warn (80%) o warn2 (88%). Throttle+dedup per (fp, kind). Canali: log+bell, banner in-chat."""
     try:
         now = time.monotonic()
         with _lock:
@@ -36,17 +36,7 @@ def notify_context_threshold(fp: str, mode: str, pct: float, est_tokens: int, li
             f"Crea un checkpoint ORA per non perdere il lavoro."
         )
 
-        # Canale 1: notify-send (non-bloccante)
-        try:
-            subprocess.Popen(
-                ["notify-send", "-u", urg, "-t", "30000", title, body_msg[:400]],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception:
-            pass
-
-        # Canale 2: log dedicato + bell su stderr
+        # Canale 1: log dedicato + bell su stderr
         try:
             log_dir = os.path.dirname(CONTEXT_ALERTS_LOG)
             if log_dir:
