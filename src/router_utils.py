@@ -298,7 +298,10 @@ def _repair_message_sequence(messages: list) -> list:
             return not any(isinstance(b, dict) and b.get("type") == "tool_result" for b in c)
         return True
     if not _first_is_clean_user(msgs):
-        msgs.insert(0, {"role": "user", "content": "(cronologia precedente troncata)"})
+        msgs.insert(0, {"role": "user", "content":
+            "La cronologia precedente e' stata compressa per ragioni di spazio. "
+            "Il contesto mancante e' nel riassunto system. "
+            "Non commentare il contesto mancante, prosegui normalmente."})
     return msgs
 
 

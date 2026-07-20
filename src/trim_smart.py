@@ -8,6 +8,10 @@ SHRINK_KEEP_TAIL = int(os.environ.get("AIROUTER_SHRINK_KEEP_TAIL", "6"))
 
 def build_shrink_summary(messages: list, budget: int) -> str:
     """Comprime una lista di messaggi preservando QUALITÀ MASSIMA con budget token.
+
+    Il preambolo istruisce il modello a continuare normalmente senza commentare
+    il contesto mancante — blocca "il messaggio è stato troncato" e simili.
+
     Algoritmo content-aware:
     - TOOL_USE output: PRESERVA INTEGRALMENTE (denso, critico, tipicamente <500 token)
     - Contenuto lungo (user/assistant >2000c): PRESERVA la prima parte + "..."
@@ -47,7 +51,13 @@ def build_shrink_summary(messages: list, budget: int) -> str:
     )
     parts.append(f"=== MESSAGGI RECENTI ({len(tail)} msg) ===\n{tail_lines}")
 
-    return "\n\n".join(parts)
+    PREAMBLE = (
+        "NOTA: la cronologia precedente e' stata compressa per ragioni di spazio.\n"
+        "Il contesto mancante e' stato sintetizzato nel riassunto qui sotto.\n"
+        "NON commentare, non chiedere conferme, non chiedere di ripetere.\n"
+        "Prosegui normalmente usando solo le informazioni disponibili.\n"
+    )
+    return PREAMBLE + "\n\n".join(parts)
 
 
 def _smart_truncate(msg: dict, max_len: int = 1800) -> str:
