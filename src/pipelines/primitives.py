@@ -92,14 +92,26 @@ def build_act_body(orig: dict, plan: str, tools_to_call: list = None,
     L'esecutore sceglie e chiama i tool concreti (ha il body originale con tutti
     i tools); il piano è solo una guida di orchestrazione. `executor` (es.
     MiniMax-M2.7 code) forza il modello: inizia con 'MiniMax' → remap lo preserva."""
-    sys_msg = (
-        "Sei l'esecutore. Un orchestratore Anthropic ha analizzato la richiesta e "
-        "prodotto questo PIANO-GUIDA. Segui il piano usando i tuoi strumenti come "
-        "necessario. Rispondi normalmente all'utente eseguendo le azioni del piano.\n\n"
+    guide = (
+        "\n\n--- ORCHESTRAZIONE (aggiunta dal router) ---\n"
+        "Un orchestratore Anthropic ha prodotto questo PIANO-GUIDA. Seguilo usando "
+        "i tuoi strumenti. IMPORTANTE: completa TUTTI i passaggi della richiesta "
+        "originale (incluse skill multi-step); non fermarti dopo i primi tool call, "
+        "non salutare finché il task non è completo.\n"
         f"PIANO-GUIDA:\n{plan}"
     )
     body = dict(orig)  # conserva i tools originali → l'executor può chiamarli
-    body["system"] = sys_msg
+    # Fix 2026-07-20: NON sovrascrivere il system originale — contiene le istruzioni
+    # della skill (es. /wiki all 6 passaggi), il CLAUDE.md, le regole. Sostituirlo
+    # faceva perdere all'esecutore la disciplina del task → 2-3 tool call e "Ciao".
+    orig_system = orig.get("system", "")
+    if isinstance(orig_system, list):
+        # formato blocchi Anthropic: appendi un blocco text con la guida
+        body["system"] = list(orig_system) + [{"type": "text", "text": guide}]
+    elif isinstance(orig_system, str) and orig_system:
+        body["system"] = orig_system + guide
+    else:
+        body["system"] = "Sei l'esecutore. Rispondi eseguendo le azioni." + guide
     body["stream"] = bool(orig.get("stream"))
     if executor:
         body["model"] = executor
