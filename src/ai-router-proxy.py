@@ -245,6 +245,33 @@ async def handle(request):
     except Exception as e:
         log(f"ctx: pre_check EXC {e} fp={fp} mode={mode}")
 
+    # ── Early shrink per modalità dove MiniMax è collo di bottiglia ────────
+    # Bug 2026-07-20: il client manda Opus/Sonnet (1M context), ma nelle modalità
+    # che fanno ACT su MiniMax (200K context), il body viene relay grezzo finché
+    # non torna 400. A quel punto il modello downstream ha già "visto" il body
+    # pieno → si lamenta "vuoto/troncato". Fix: shrink proattivo se body >
+    # limit_MiniMax, INDIPENDENTEMENTE dal ctx_check (che usa il limite client).
+    _MINIMAX_BACKEND_MODES = {"minimax", "mix-am", "mix-gm"}
+    if mode in _MINIMAX_BACKEND_MODES:
+        try:
+            from router_constants import MINIMAX_CONTEXT_BYTE_LIMIT
+            _ctx_bottleneck = {
+                "anthropic": "claude-opus-4-8", "minimax": "MiniMax-M2.7",
+                "glm": "glm-5.2", "mix-am": "MiniMax-M2.7",
+                "mix-ag": "claude-opus-4-8", "mix-gm": "MiniMax-M2.7",
+            }
+            _bottleneck_model = _ctx_bottleneck.get(mode, "MiniMax-M2.7")
+            from model_context_map import get_safe_input_limit
+            _bottleneck_safe = get_safe_input_limit(_bottleneck_model)
+            if len(body) > _bottleneck_safe:
+                rewrit2, was_rewrit2 = rewrite_for_context(body, _bottleneck_model, fp)
+                if was_rewrit2 and len(rewrit2) < len(body):
+                    _orig_len2 = len(body)
+                    body = rewrit2
+                    log(f"ctx: backend-bottleneck shrink {len(rewrit2)}b < {_orig_len2}b mode={mode} fp={fp}")
+        except Exception as e2:
+            log(f"ctx: bottleneck-shrink EXC {e2} mode={mode} fp={fp}")
+
     # TRIM INTERCEPT: carica body pre-trimmato se disponibile
     trim_file = TRIM_STATE_DIR / f"{fp}.json"
     if trim_file.exists():
