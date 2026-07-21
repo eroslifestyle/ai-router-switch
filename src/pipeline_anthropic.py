@@ -26,7 +26,6 @@ from providers.base import (
     strip_images_body, FALLBACK_STATUSES as _FBS,
     _is_context_too_large_for_minimax as _is_ctx_large,
     _is_context_exceed_400 as _is_ctx_400,
-    _body_has_images,
 )
 from forward_minimax import forward_minimax
 from forward_anthropic import _log_original_model
@@ -803,61 +802,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
     return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
 
 
-async def _serve_minimax_vision(request, orig: dict, session, chat_fp: str, relay):
-    """OCR/vision 2026-07-04: MiniMax-M3 legge gli image block (verificato: M3
-    li supporta via endpoint anthropic-compat, M2.x no → allucinano). Serve la
-    richiesta con M3, bypassando la pipeline che manderebbe l'immagine a un
-    executor M2.x cieco. Ritorna la response, oppure None per far fare al
-    caller il suo fallback (Anthropic).
-
-    Ordine gate: server-tool vince (immagine+web_search → None → Anthropic).
-    Context troppo grande → None (screenshot >750KB → no 400 nudo)."""
-    if _has_server_tools(orig):
-        return None
-    # FIX 2026-07-08 BUG-VISION-400: MiniMax-M3 allucina le immagini (test: dice "black"
-    # per un PNG blue) e restituisce 400 per immagini grandi/strane senza fare rescue.
-    # Anthropic processa le immagini correttamente. Bypass diretto → caller rescue.
-    if _body_has_images(orig):
-        log(f"minimax-vision: body ha immagini → bypass diretto Anthropic fp={chat_fp}")
-        return None
-    orig2 = dict(orig)
-    orig_model = (orig2.get("model") or "").strip()
-    orig2["model"] = "MiniMax-M3"  # remap preserva i model che iniziano con 'MiniMax'
-    body2 = json.dumps(orig2).encode()
-    if _is_context_too_large_for_minimax(body2):
-        return None
-    # model-rewrite manuale: senza questo la risposta leakerebbe 'MiniMax-M3'
-    # al posto del modello client nel jsonl (remap non scatta, model già MiniMax).
-    if orig_model and not orig_model.startswith("MiniMax"):
-        _log_original_model(orig_model, "MiniMax-M3", chat_fp)
-        _request_orig_model[chat_fp] = orig_model
-    try:
-        up = await forward_minimax(request, body2, session)
-    except Exception as e:
-        log(f"minimax-vision EXC: {e} → fallback caller fp={chat_fp}")
-        return None
-    if up.status in MINIMAX_FALLBACK_STATUSES:
-        log(f"minimax-vision {up.status} → fallback caller fp={chat_fp}")
-        try:
-            raw = await up.read()
-        except Exception:
-            raw = b""
-        try:
-            await up.release()
-        except Exception:
-            pass
-        debug_capture(
-            kind="minimax_vision_fallback",
-            request=request, fp=chat_fp,
-            client_model=orig.get("model", ""),
-            upstream_model="MiniMax-M3",
-            status=up.status, stage="minimax_vision",
-            upstream_status=up.status,
-            upstream_raw=raw,
-            upstream_encoding=up.headers.get("Content-Encoding", ""),
-            orig=orig,
-            note=f"status {up.status} → caller fallback",
-        )
-        return None
-    log(f"minimax-vision M3 OK {up.status} fp={chat_fp}")
-    return await relay(up, extra_headers={"x-ai-verified": "minimax-m3-vision"})
+# _serve_minimax_vision RIMOSSO (fix 2026-07-21):
+# - bypass diretto a M3 saltava l'intera catena THINK→ACT→VERIFY
+# - ora mix-am gestisce immagini tramite pipeline normale: THINK legge le immagini,
+#   ACT riceve solo testo+piano (images strippate da build_executor_body), VERIFY chiude
