@@ -1,5 +1,15 @@
 # ai-router-switch — TODO
 
+## Completati (sessione 2026-07-20/21 — lavori lunghi mix: catena 8 fix fino a TRIM INTERCEPT)
+- [x] `75aa186` — context_alert: rimosso canale notify-send (fp illeggibile); restano log+bell e banner in-chat
+- [x] `152b790` — shrink: PREAMBLE nel summary compresso — il modello non si lamenta più del contesto compresso
+- [x] `cff717e` — shrink: `build_shrink_summary([])` ritornava `""` → system vuoto → "msg vuoto"
+- [x] `a128b06` — ctx: shrink proattivo pre-400 quando backend=MiniMax (bottleneck 200K vs client 1M); NB amplificava temporaneamente il TRIM INTERCEPT
+- [x] `aa89bce` — mix: tool_use/tool_result orfani nel THINK body → `_linearize_tool_blocks` + THINK_MAX_TOKENS 200→512
+- [x] `5ae37ea` — mix: `build_act_body` distruggeva il system originale (istruzioni skill) → esecutore abbandonava dopo 2-3 tool call
+- [x] `535aff6` — mix: nuovo `src/pipeline_common.py` — `build_executor_body()` UNICO (preserva system, appende piano THINK + completion guard); scoperto che in mix-ag/mix-gm il piano THINK non arrivava MAI all'esecutore
+- [x] `71497ae` — ctx: **RIMOSSO TRIM INTERCEPT** (root cause strutturale): `handle()` sostituiva il body appena arrivato con uno salvato al turno precedente → modello cieco all'ultimo messaggio/tool_result; fp="default" → contaminazione cross-chat. Rimossi anche `_trim_context_after_response` (slice no-op) e `_save_trim_state`
+
 ## Completati (sessione 2026-07-19 ~23:00 — crash-loop totale risolto)
 - [x] **Fix crash-loop totale da 2 UnboundLocalError** (`80b6ab5`): il commit `66553f0` aveva introdotto (1) `from aiohttp import web` locale dentro `handle()` → `web` shadowata per tutto lo scope, riga 255 esplodeva su ogni path fuori dal ramo ctx-error; (2) `plan` mai inizializzata in `_pipeline_think_act` → UnboundLocalError riga 728 su THINK KO/timeout/exception (ogni richiesta mix-am in 500). Watchdog SIGKILL + start-limit systemd = zero auto-restart, tutte le chat bloccate. Recovery: `reset-failed` + start. Verificato: compile OK, health 200, smoke `/v1/messages` 200 in 3.5s, journal pulito.
 
@@ -7,6 +17,9 @@
 - [x] **Refactor sistema debug centralizzato** (`e451d20`): nuovo `src/router_debug.py` — classe `DebugLogger` singleton con `capture()` → RAM deque (maxlen=500, warm-up da JSONL) + 2 JSONL + BUG-CATALOG dedup + health file `.router_health.json` + snapshot last-request. Fix: `_orig_flags()` `cache_control_count` corretto (era `img_count`). Fix: ts locale senza Z fasullo. Nuovo endpoint `GET /debug/health`. Errori interni ora in `logs/debug-system-errors.log` (prima silenced). `forward_minimax.py` e `forward_anthropic.py` ora catturano eventi che prima erano invisibili. SPEC: `sviluppo/DEBUG-SYSTEM-REFACTOR-SPEC.md`. Servizio restartato: `active`.
 
 ## Attivo
+- [ ] **Osservare stabilità post-`71497ae`** (TRIM INTERCEPT rimosso) su chat reali lunghe in mix-am/mix-gm: journal + `logs/debug-errors.jsonl`. Expected: zero "messaggio vuoto/troncato", zero tool call ripetuti identici.
+- [ ] **Verificare /wiki all reale in mix-am**: tutti i 6 passaggi completati senza abbandono (completion guard `535aff6`).
+- [ ] **Audit fingerprint fp="default"**: quando manca il session header tutte le chat condividono fp in stati keyed-by-fp; chat-mode store ha già il fallback content-hash (`dd62647`) — verificare gli altri store.
 - [ ] **Osservare stabilità post-`80b6ab5`** (crash-loop UnboundLocalError): journal + `logs/debug-errors.jsonl` puliti su chat reali; se anomalie → `GET /debug/health` e `GET /debug/catalog`.
 - [ ] **Osservare scomparsa 404 MiniMax post-fix Host** (`a5c31af`, 2026-07-19 21:30): con `HOP_HEADERS` filtrati in `forward_minimax` i 404 nginx non dovrebbero più comparire. Se ricompaiono → il fix Host non era l'unica causa; usare `logs/debug-errors.jsonl` (note con `alb_receive_time`/url). **Verifica iniziale 2026-07-19 21:35**: 0 errori dopo il restart 21:20 (ultimo 404 alle 21:17, pre-restart); smoke mix-am + minimax post-restart 200 con risposta M2.7 reale, nessun nuovo entry nel log. Resta da osservare su chat reali lunghe. ⚠ ATTENZIONE lettura log: i `ts` in `debug-errors.jsonl` hanno suffisso `Z` ma sono ORA LOCALE (CEST), non UTC — non confrontarli con orari UTC.
 - [ ] **Verificare 400 anthropic post strip-query** (`?beta=true` rimosso dall'URL upstream in `forward_anthropic`/proxy, live da 21:04): 4 episodi `relay_error_400` alle 20:55-20:57 pre-restart, zero dopo (riconfermato 21:35). Il nuovo log `[forward_anthropic] 400 body:` cattura il body al prossimo episodio.
