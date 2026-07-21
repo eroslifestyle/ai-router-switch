@@ -26,6 +26,7 @@ from providers.base import (
     strip_images_body, FALLBACK_STATUSES as _FBS,
     _is_context_too_large_for_minimax as _is_ctx_large,
     _is_context_exceed_400 as _is_ctx_400,
+    _body_has_images,
 )
 from forward_minimax import forward_minimax
 from forward_anthropic import _log_original_model
@@ -806,3 +807,11 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
 # - bypass diretto a M3 saltava l'intera catena THINK→ACT→VERIFY
 # - ora mix-am gestisce immagini tramite pipeline normale: THINK legge le immagini,
 #   ACT riceve solo testo+piano (images strippate da build_executor_body), VERIFY chiude
+
+
+async def _serve_minimax_vision(request, orig: dict, session, chat_fp: str, relay):
+    """Stub: la logica vision è ora nel flusso THINK→ACT di mix-am/mix-gm.
+    Le immagini arrivano a THINK (Anthropic/GLM) che le analizza e produce un piano.
+    L'ACT (MiniMax) riceve solo testo+piano, mai immagini raw.
+    Ritorna sempre None (nessun bypass diretto a M3)."""
+    return None
