@@ -111,7 +111,6 @@ from pipeline_anthropic import (
     _is_context_too_large_for_minimax as _is_ctx_too_large,
     _is_context_exceed_400 as _is_ctx_exceed,
     _repair_message_sequence,
-    _trim_context_after_response,
     _shrink_and_retry_minimax,
     _serve_minimax_vision,
     _mixed_haiku_rescue, _anthropic_rescue,
@@ -272,21 +271,14 @@ async def handle(request):
         except Exception as e2:
             log(f"ctx: bottleneck-shrink EXC {e2} mode={mode} fp={fp}")
 
-    # TRIM INTERCEPT: carica body pre-trimmato se disponibile
-    trim_file = TRIM_STATE_DIR / f"{fp}.json"
-    if trim_file.exists():
-        lock = trim_locks.setdefault(fp, threading.Lock())
-        with lock:
-            try:
-                if trim_file.exists():
-                    trimmed = trim_file.read_bytes()
-                    if trimmed and len(trimmed) < len(body):
-                        json.loads(trimmed)
-                        body = trimmed
-                        log(f"trim: carico pre-trimmato {len(trimmed)}b < {len(body)}b fp={fp}")
-                    trim_file.unlink(missing_ok=True)
-            except Exception:
-                pass
+    # TRIM INTERCEPT RIMOSSO (fix 2026-07-21): sostituiva il body APPENA ARRIVATO
+    # con uno salvato in un turno PRECEDENTE (se più piccolo — quasi sempre vero in
+    # sessioni agentiche dove il body cresce). Il body stantio NON conteneva l'ultimo
+    # messaggio utente/tool_result → il modello non lo vedeva mai → "messaggio vuoto
+    # o troncato", tool call ripetuti identici, step skill persi, e con fp condiviso
+    # ("default") perfino contaminazione cross-chat. Un body di un turno precedente
+    # non deve MAI sostituire quello corrente: l'oversize è gestito in-request da
+    # rewrite/shrink/bottleneck che operano sul body del turno.
 
     forced = request.app.get("forced_mode")
 
@@ -398,7 +390,9 @@ async def handle(request):
         minimax_model=MINIMAX_MODEL,
         log_fn=log,
         log_router_usage_fn=log_router_usage,
-        trim_context_fn=_trim_context_after_response,
+        # fix 2026-07-21: no-op — il salvataggio cross-turno alimentava il TRIM
+        # INTERCEPT (rimosso): body stantii sostituivano le richieste nuove.
+        trim_context_fn=lambda body, fp: None,
     )
     relay = _relay.relay
 

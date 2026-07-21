@@ -270,40 +270,10 @@ def _web_search_blocked_response():
 # ── Message repair ──────────────────────────────────────────────────────────────
 
 # ── Trim ──────────────────────────────────────────────────────────────────────
-def _trim_context_after_response(req_body: bytes, fp: str) -> None:
-    """Taglia proattivamente il context DOPO ogni risposta."""
-    import os, tempfile
-    from router_constants import TRIM_STATE_DIR, TRIM_TARGET_BYTES, TRIM_MIN_MESSAGES
-    from router_utils import trim_locks
-    try:
-        stripped = strip_images_body(req_body)
-        data = json.loads(stripped)
-    except Exception:
-        return
-    msgs = data.get("messages", [])
-    n = len(msgs)
-    if n < TRIM_MIN_MESSAGES * 2:
-        return
-    if len(req_body) <= TRIM_TARGET_BYTES:
-        return
-    tail_cnt = max(4, min(8, n // 4))
-    trimmed = dict(data)
-    trimmed["messages"] = msgs[:-tail_cnt] + msgs[-tail_cnt:]
-    try:
-        trimmed_bytes = json.dumps(trimmed).encode()
-        lock = trim_locks.setdefault(fp, __import__('threading').Lock())
-        with lock:
-            tmp = tempfile.NamedTemporaryFile(dir=TRIM_STATE_DIR, delete=False, suffix=".tmp")
-            try:
-                tmp.write(trimmed_bytes)
-                tmp.close()
-                os.replace(tmp.name, str(TRIM_STATE_DIR / f"{fp}.json"))
-            except Exception:
-                __import__('pathlib').Path(tmp.name).unlink(missing_ok=True)
-                raise
-        log(f"trim: {len(req_body)}b->{len(trimmed_bytes)}b ({n}->{len(trimmed['messages'])} msg) fp={fp}")
-    except Exception as e:
-        log(f"trim: write fail {e} fp={fp}")
+# _trim_context_after_response RIMOSSA (fix 2026-07-21): salvava un body "trimmato"
+# in TRIM_STATE_DIR che il TRIM INTERCEPT (rimosso da handle()) usava per SOSTITUIRE
+# la richiesta del turno successivo → il modello perdeva l'ultimo messaggio/tool_result.
+# Inoltre lo slice msgs[:-k]+msgs[-k:] era un no-op (stesso pattern del bug 284322a).
 
 
 # ── Shrink ─────────────────────────────────────────────────────────────────────

@@ -1,14 +1,11 @@
 import json
 import logging
-import os
 from typing import Tuple
 
 from trim_smart import build_shrink_summary, SHRINK_KEEP_TAIL
 from router_utils import _repair_message_sequence
 from token_counter import estimate_tokens
 from model_context_map import get_safe_input_limit
-
-TRIM_STATE_DIR = "/tmp/ai-router-trim"
 
 log = logging.getLogger(__name__)
 
@@ -65,7 +62,6 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
 
     new_bytes = json.dumps(new).encode()
     if estimate_tokens(new_bytes.decode('utf-8', 'replace')) <= safe_limit:
-        _save_trim_state(new_bytes, fp)
         return (new_bytes, True)
 
     # ATTEMPT 2: piu' aggressivo, solo ultimi 2 messaggi senza summary
@@ -79,25 +75,17 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
 
     new2_bytes = json.dumps(new2).encode()
     if estimate_tokens(new2_bytes.decode('utf-8', 'replace')) <= safe_limit:
-        _save_trim_state(new2_bytes, fp)
         return (new2_bytes, True)
 
     # Fallback: ritorna il piu' piccolo per dare una chance alla rete di sicurezza a valle
     if len(new2_bytes) < len(body):
-        _save_trim_state(new2_bytes, fp)
         return (new2_bytes, True)
 
     return (body, False)
 
 
-def _save_trim_state(content: bytes, fp: str) -> None:
-    """Salva body scelto per debug/audit trail."""
-    if not fp:
-        return
-    try:
-        os.makedirs(TRIM_STATE_DIR, exist_ok=True)
-        path = os.path.join(TRIM_STATE_DIR, f"{fp}.json")
-        with open(path, 'wb') as f:
-            f.write(content)
-    except Exception:
-        pass
+# _save_trim_state RIMOSSA (fix 2026-07-21): scriveva il body riscritto (tail-6 +
+# summary) in TRIM_STATE_DIR; il TRIM INTERCEPT (rimosso) lo caricava al turno DOPO
+# al posto della richiesta vera → il modello riceveva 6 messaggi stantii senza
+# l'ultimo messaggio utente. Il rewrite è già applicato in-request: persistere lo
+# stato cross-turno era il bug, non una feature.
