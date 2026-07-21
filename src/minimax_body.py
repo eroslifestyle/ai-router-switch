@@ -10,6 +10,52 @@ MINIMAX_MODEL = os.environ.get("AIROUTER_MINIMAX_MODEL", "MiniMax-M3")
 MINIMAX_UNSUPPORTED_FIELDS = ("context_management", "mcp_servers", "thinking")
 MINIMAX_MIN_MAX_TOKENS = int(os.environ.get("AIROUTER_MINIMAX_MIN_MAX_TOKENS", "1024"))
 
+
+def _system_to_text(system_val) -> str:
+    """Converte il campo system (str | list di blocchi | None) in stringa."""
+    if isinstance(system_val, list):
+        parts = []
+        for item in system_val:
+            if isinstance(item, dict):
+                t = item.get("type", "")
+                if t == "text":
+                    parts.append(item.get("text", ""))
+                elif t == "thinking":
+                    inner = item.get("thinking", "")
+                    if isinstance(inner, dict):
+                        parts.append(inner.get("thinking", ""))
+                    else:
+                        parts.append(str(inner))
+        return "\n".join(parts)
+    if isinstance(system_val, str):
+        return system_val
+    return ""
+
+
+def _inject_system_as_message(data: dict) -> None:
+    """MiniMax non supporta il campo top-level `system` — lo converte in un messaggio role=system.
+
+    Bug: quando il body arriva da Claude Code, `system` è spesso una lista di blocchi
+    (formato Anthropic). Senza questa conversione, MiniMax riceve solo i messaggi utente
+    senza istruzioni di sistema né piano — quindi non capisce cosa fare e non scrive file.
+    """
+    system_val = data.get("system", "")
+    if not system_val:
+        return
+    system_text = _system_to_text(system_val)
+    if not system_text:
+        return
+    # Rimuovi il campo top-level system
+    data.pop("system", None)
+    # Iniettalo come primo messaggio role=system
+    msgs = data.get("messages", [])
+    if not isinstance(msgs, list):
+        msgs = []
+        data["messages"] = msgs
+    # Inietta PRIMA di qualsiasi altro messaggio (priorità)
+    msgs.insert(0, {"role": "system", "content": system_text})
+
+
 _SERVER_TOOL_BLOCK_TYPES = (
     "server_tool_use",
     "web_search_tool_result",
@@ -78,6 +124,10 @@ def remap_body_for_minimax(raw: bytes, request=None, *,
         for f in MINIMAX_UNSUPPORTED_FIELDS:
             data.pop(f, None)
         strip_server_tools_for_minimax(data)
+        # MiniMax non supporta il campo top-level `system` — lo convertiamo in
+        # un messaggio role=system nell'array messages. Senza questo, l'esecutore
+        # non riceve il piano né le istruzioni di sistema → non scrive file.
+        _inject_system_as_message(data)
         try:
             _mt = int(data.get("max_tokens", 0) or 0)
             if 0 < _mt < MINIMAX_MIN_MAX_TOKENS:

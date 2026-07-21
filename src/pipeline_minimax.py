@@ -8,6 +8,7 @@ from router_constants import (
 )
 from router_utils import log, _request_orig_model
 import debug_catalog
+from pipeline_anthropic import _text_from_message  # usato in _parse_think_json
 
 
 def _build_minimax_think_body(orig: dict) -> bytes:
