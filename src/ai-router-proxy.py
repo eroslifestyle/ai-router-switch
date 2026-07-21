@@ -112,7 +112,6 @@ from pipeline_anthropic import (
     _is_context_exceed_400 as _is_ctx_exceed,
     _repair_message_sequence,
     _shrink_and_retry_minimax,
-    _serve_minimax_vision,
     _mixed_haiku_rescue, _anthropic_rescue,
     _pipeline_think_act,
 )
