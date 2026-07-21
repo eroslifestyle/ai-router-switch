@@ -55,20 +55,30 @@ async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp
                                     kind="glm_act_fail", chat_fp=chat_fp, code=act_resp.status)
         return await _anthropic_rescue(request, orig, session, chat_fp, relay)
     act_raw = act_resp.body if isinstance(act_resp.body, (bytes, bytearray)) else b""
-    log(f"mix-ag VERIFY: Anthropic fp={chat_fp}")
+    # VERIFY a campione (fix 2026-07-21): non su ogni turno, MAI retry ACT.
+    from pipeline_common import should_verify
+    from router_constants import THINK_MODEL
+    do_verify, v_reason = should_verify(chat_fp, act_raw)
+    if not do_verify:
+        log(f"mix-ag VERIFY skip (gate) fp={chat_fp}")
+        return act_resp
+    log(f"mix-ag VERIFY ({v_reason}): Haiku fp={chat_fp}")
     try:
-        verify_msgs = [
-            {"role": "system", "content": "Sei un verifier AI."},
-            {"role": "user", "content": f"Piano:\n{think_plan}\n\nOutput:\n{act_raw.decode(errors='ignore')[:5000]}"},
-        ]
         verify_body = json.dumps({
-            "model": orig.get("model", "claude-sonnet-4-6"),
-            "messages": verify_msgs, "max_tokens": 500,
+            "model": THINK_MODEL,
+            "system": "Sei un verifier AI. Rispondi SOLO con: VERIFIED, oppure INCOERENTE: [motivo breve].",
+            "messages": [{"role": "user", "content":
+                f"Piano:\n{think_plan}\n\nOutput:\n{act_raw.decode(errors='ignore')[:5000]}"}],
+            "max_tokens": 200,
         }).encode()
-        v_status, v_json = await _call_full(forward_anthropic_direct, request, verify_body, session, timeout=30)
+        v_status, v_json = await _call_full(forward_anthropic_direct, request, verify_body, session, timeout=15)
         if v_status < 400 and v_json:
             verify_text = _text_from_message(v_json).strip()
             log(f"mix-ag VERIFY: {verify_text[:100]}")
+            if "INCOERENTE" in verify_text:
+                debug_catalog.record_event(severity="block", category="mix-ag",
+                                            kind="verify_incoherent", chat_fp=chat_fp,
+                                            snippet=verify_text[:80])
     except Exception as e:
         log(f"mix-ag VERIFY EXC: {e}")
         debug_catalog.record_event(severity="block", category="mix-ag",
@@ -80,7 +90,6 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
     """mix-gm: GLM-5.2 THINK -> MiniMax ACT -> GLM-5.2 VERIFY."""
     from forward_minimax import forward_minimax
     from pipeline_anthropic import _call_full, _is_context_exceed_400
-    from pipeline_minimax import _build_minimax_act_body_retry
     import glm_backend as _glm
     orig = json.loads(body) if isinstance(body, bytes) else body
     think_body = _glm.build_glm_think_body(orig, "")
@@ -149,11 +158,12 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
         except Exception:
             pass
 
-    # GLM VERIFY
-    log(f"mix-gm VERIFY: GLM-5.2 fp={chat_fp}")
-    verify_ok = False
-    retry_note = ""
-    for attempt in range(2):
+    # GLM VERIFY a campione (fix 2026-07-21): niente VERIFY su ogni turno e
+    # NESSUN retry automatico dell'ACT — solo warning prefissato al client.
+    from pipeline_common import should_verify
+    do_verify, v_reason = should_verify(chat_fp, act_raw)
+    if do_verify:
+        log(f"mix-gm VERIFY ({v_reason}): GLM-5.2 fp={chat_fp}")
         try:
             verify_body = _glm.build_glm_verify_body(orig, think_plan, act_raw.decode(errors="ignore")[:5000])
             verify_resp = await _glm.forward_glm(request, verify_body, session, "glm-5.2", log_fn=log)
@@ -162,33 +172,20 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
                 try:
                     verify_data = json.loads(verify_raw)
                     verify_text = verify_data.get("content", [{}])[0].get("text", "") if verify_data.get("content") else ""
-                    log(f"mix-gm VERIFY attempt={attempt+1}: {verify_text[:100]} fp={chat_fp}")
+                    log(f"mix-gm VERIFY: {verify_text[:100]} fp={chat_fp}")
                     if "INCOERENTE" in verify_text:
-                        retry_note = verify_text
-                        correction = f"\n[NOTA CORRETTIVA]\n{verify_text}\n[/NOTA CORRETTIVA]"
-                        act_body_retry = _build_minimax_act_body_retry(orig, correction)
-                        act_resp = await forward_minimax(request, act_body_retry, session)
-                        if act_resp.status >= 400:
-                            await act_resp.release()
-                            break
-                        act_raw = await act_resp.read()
-                        await act_resp.release()
-                        continue
-                    verify_ok = True
+                        act_raw = b"[VERIFY-WARNING] " + act_raw
+                        debug_catalog.record_event(severity="block", category="mix-gm",
+                                                    kind="verify_incoherent", chat_fp=chat_fp,
+                                                    snippet=verify_text[:80])
                 except Exception:
                     pass
         except Exception as e:
             log(f"mix-gm VERIFY EXC: {e}")
             debug_catalog.record_event(severity="block", category="mix-gm",
                                         kind="verify_exception", chat_fp=chat_fp, snippet=str(e))
-        break
-
-    if not verify_ok and retry_note:
-        act_raw = b"[VERIFY-WARNING] " + act_raw
-        log(f"mix-gm VERIFY-WARNING: {retry_note[:80]} fp={chat_fp}")
-        debug_catalog.record_event(severity="block", category="mix-gm",
-                                    kind="verify_incoherent", chat_fp=chat_fp,
-                                    snippet=retry_note[:80])
+    else:
+        log(f"mix-gm VERIFY skip (gate) fp={chat_fp}")
     from aiohttp import web
     return web.Response(body=act_raw, status=200, content_type="application/json")
 

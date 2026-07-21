@@ -68,7 +68,15 @@ def _anthropic_system(instruction: str) -> list:
 
 
 def _build_think_body(orig: dict) -> bytes:
-    """THINK gira sul MODELLO SELEZIONATO DALL'UTENTE."""
+    """THINK sintetico su THINK_MODEL (Haiku) — fix 2026-07-21.
+
+    Prima passava il body INTERO (anche 300+ msg / 800KB) al modello utente:
+    timeout a ogni turno ("THINK skip >= 2 timeout consec.") e piani inutili.
+    Ora: digest bounded da pipeline_common (summary msg vecchi + trascrizione
+    ultimi N + immagini solo dell'ultimo msg, ridimensionate) su Haiku →
+    risposta attesa < 3s, costo ~0. Le immagini restano SOLO nel THINK:
+    l'ACT le riceve strippate da build_executor_body.
+    """
     sys_msg = (
         "Sei un ORCHESTRATORE. Leggi la richiesta utente e scrivi un PIANO D'AZIONE "
         "BREVE (2-3 frasi) in italiano: cosa va fatto e in che ordine. "
@@ -78,14 +86,17 @@ def _build_think_body(orig: dict) -> bytes:
         "VINCOLI: <requisiti, limiti>\n"
         "NON FARE: <cose da evitare>"
     )
-    body = dict(orig)
-    body["system"] = _anthropic_system(sys_msg)
-    body["stream"] = False
-    body["max_tokens"] = THINK_MAX_TOKENS
-    _m = (orig.get("model") or "").strip()
-    body["model"] = _m if _m and not _m.startswith("MiniMax") else THINK_MODEL
-    body.pop("tools", None)
-    body.pop("thinking", None)
+    from pipeline_common import build_think_digest
+    _shrink_images_in_messages(orig)
+    digest, images = build_think_digest(orig)
+    content = [{"type": "text", "text": digest}] + images
+    body = {
+        "model": THINK_MODEL,
+        "system": _anthropic_system(sys_msg),
+        "messages": [{"role": "user", "content": content}],
+        "stream": False,
+        "max_tokens": THINK_MAX_TOKENS,
+    }
     return json.dumps(body).encode()
 
 

@@ -19,6 +19,8 @@ le pipeline, che GARANTISCE:
 """
 
 import json
+import os
+import threading
 
 
 # Marker riconosciuti che indicano una skill multi-step in corso nel system/messages.
@@ -161,3 +163,112 @@ def build_executor_body_bytes(orig: dict, plan: str, executor: str = "",
                               *, extra_note: str = "") -> bytes:
     """Come build_executor_body ma serializzato in bytes."""
     return json.dumps(build_executor_body(orig, plan, executor, extra_note=extra_note)).encode()
+
+
+# ── THINK sintetico + VERIFY gate (fix 2026-07-21, solo modalità mixed) ────────
+# Il THINK col body intero (300+ msg / 800KB) andava in timeout a ogni turno;
+# il VERIFY su ogni turno (con retry ACT) raddoppiava costi e latenza.
+# Qui: digest bounded per il THINK e gate a campione per il VERIFY,
+# condivisi da tutte le pipeline mixed (mai duplicare per-pipeline).
+
+THINK_TAIL_MSGS = int(os.environ.get("AIROUTER_THINK_TAIL_MSGS", "6"))
+THINK_SUMMARY_BUDGET = int(os.environ.get("AIROUTER_THINK_SUMMARY_BUDGET", "12000"))
+THINK_TAIL_MSG_MAX_CHARS = 2000
+THINK_MAX_IMAGES = 4
+VERIFY_SAMPLE_EVERY = int(os.environ.get("AIROUTER_VERIFY_SAMPLE_EVERY", "5"))
+VERIFY_SHORT_OUTPUT_CHARS = 50
+
+_verify_lock = threading.Lock()
+_verify_turn_count: dict = {}
+
+
+def _digest_block_text(blk) -> str:
+    """Testo compatto di un content block per la trascrizione THINK."""
+    if not isinstance(blk, dict):
+        return ""
+    t = blk.get("type", "")
+    if t == "text":
+        return blk.get("text", "")
+    if t == "tool_use":
+        return f"[tool_use: {blk.get('name', '?')}]"
+    if t == "tool_result":
+        inner = blk.get("content", "")
+        if isinstance(inner, list):
+            inner = " ".join(b.get("text", "") for b in inner if isinstance(b, dict))
+        return f"[tool_result] {str(inner)[:500]}"
+    if t == "image":
+        return "[immagine allegata]"
+    return ""
+
+
+def _digest_msg_text(msg: dict) -> str:
+    content = msg.get("content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(filter(None, (_digest_block_text(b) for b in content)))
+    return str(content)
+
+
+def build_think_digest(orig: dict) -> tuple:
+    """Digest bounded per il THINK: MAI il body intero.
+
+    Returns:
+        (testo, image_blocks): summary dei messaggi vecchi (build_shrink_summary)
+        + trascrizione troncata degli ultimi THINK_TAIL_MSGS + blocchi image
+        dell'ULTIMO messaggio (il THINK legge le immagini, l'ACT no).
+    """
+    msgs = orig.get("messages") or []
+    tail = msgs[-THINK_TAIL_MSGS:]
+    older = msgs[:-THINK_TAIL_MSGS] if len(msgs) > THINK_TAIL_MSGS else []
+    parts = []
+    if older:
+        try:
+            from trim_smart import build_shrink_summary
+            summary = build_shrink_summary(older, THINK_SUMMARY_BUDGET)
+            # Hard-cap: build_shrink_summary non rispetta il budget se molti msg
+            # sono tool/lunghi (inclusi integralmente). Tieni inizio+fine.
+            if len(summary) > THINK_SUMMARY_BUDGET:
+                half = THINK_SUMMARY_BUDGET // 2
+                summary = (summary[:half] + "\n... [cronologia intermedia omessa] ...\n"
+                           + summary[-half:])
+            parts.append(summary)
+        except Exception:
+            parts.append(f"(cronologia precedente: {len(older)} messaggi omessi)")
+    lines = [
+        f"[{m.get('role', '?')}] {_digest_msg_text(m)[:THINK_TAIL_MSG_MAX_CHARS]}"
+        for m in tail if isinstance(m, dict)
+    ]
+    parts.append("=== ULTIMI MESSAGGI ===\n" + "\n".join(lines))
+    images = []
+    if tail and isinstance(tail[-1], dict):
+        content = tail[-1].get("content")
+        if isinstance(content, list):
+            images = [b for b in content
+                      if isinstance(b, dict) and b.get("type") == "image"][:THINK_MAX_IMAGES]
+    return "\n\n".join(parts), images
+
+
+def should_verify(chat_fp: str, act_raw: bytes) -> tuple:
+    """Gate VERIFY a campione: True solo se output ACT sospetto o 1 turno su N.
+
+    MAI usato per retry automatico dell'ACT (solo warning al client).
+    Sospetto = risposta non parsabile / type=error / testo < 50c senza tool_use.
+    """
+    try:
+        j = json.loads(act_raw)
+    except Exception:
+        return True, "unparseable"
+    if j.get("type") == "error":
+        return True, "error-response"
+    blocks = [b for b in (j.get("content") or []) if isinstance(b, dict)]
+    text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+    has_tool_use = any(b.get("type") == "tool_use" for b in blocks)
+    if not has_tool_use and len(text.strip()) < VERIFY_SHORT_OUTPUT_CHARS:
+        return True, "short-output"
+    with _verify_lock:
+        n = _verify_turn_count.get(chat_fp, 0) + 1
+        _verify_turn_count[chat_fp] = n
+    if VERIFY_SAMPLE_EVERY > 0 and n % VERIFY_SAMPLE_EVERY == 0:
+        return True, "sample"
+    return False, ""

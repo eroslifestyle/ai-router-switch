@@ -61,7 +61,8 @@ MINIMAX_CONCURRENCY = int(os.environ.get("AIROUTER_MINIMAX_SEMAPHORE", "8"))
 MINIMAX_BACKOFF_STEPS = (5, 10, 20, 40, 60)
 MINIMAX_ALERTS_LOG = os.path.expanduser("~/.claude/logs/minimax-alerts.log")
 MINIMAX_RETRY_BUDGET_SHORT = float(os.environ.get("AIROUTER_MINIMAX_RETRY_SHORT_SEC", "8"))
-THINK_MAX_TOKENS = int(os.environ.get("AIROUTER_THINK_MAX_TOKENS", "200"))
+# Fix 2026-07-21: allineato a pipelines/primitives.py (512) — 200 troncava i piani.
+THINK_MAX_TOKENS = int(os.environ.get("AIROUTER_THINK_MAX_TOKENS", "512"))
 THINK_MODEL = os.environ.get("AIROUTER_THINK_MODEL", "claude-haiku-4-5-20251001")
 THINK_TIMEOUT_SEC = float(os.environ.get("AIROUTER_THINK_TIMEOUT_SEC", "12"))
 TRIM_TARGET_BYTES = MINIMAX_CONTEXT_BYTE_LIMIT // 2
