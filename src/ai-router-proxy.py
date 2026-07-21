@@ -780,6 +780,9 @@ async def _run_multiport():
     session = ClientSession(
         timeout=ClientTimeout(connect=30, sock_read=120, sock_connect=15),
         connector=connector,
+        # auto_decompress=False BY DESIGN: il relay passa i byte compressi (br/gzip)
+        # al client che decodifica. NON rimuovere: la lib Brotli locale è rotta
+        # (TypeError in aiohttp compression_utils) → True romperebbe ogni risposta br.
         auto_decompress=False,
     )
 

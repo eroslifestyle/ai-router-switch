@@ -117,6 +117,10 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
     headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS
                and k.lower() not in {"authorization", "x-api-key"}}
     headers["X-Api-Key"] = key
+    # Fix ClientPayloadError: brotli è rotto nel venv (TypeError compression_utils).
+    # MiniMax risponde br → aiohttp non riesce a decodificare → relay troncato.
+    # Soluzione: forzare Accept-Encoding: identity per ricevere plain body.
+    headers["Accept-Encoding"] = "identity"
 
     # _log_original_model is in router_utils namespace, imported lazily to avoid circular
     from router_utils import _request_orig_model as _rom_store
@@ -211,6 +215,7 @@ async def _forward_minimax_generative(request, body: bytes, session,
     headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS
                and k.lower() not in {"authorization", "x-api-key"}}
     headers["X-Api-Key"] = key
+    headers["Accept-Encoding"] = "identity"
     try:
         json.loads(body)
     except (json.JSONDecodeError, TypeError):

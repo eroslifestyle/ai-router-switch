@@ -9,7 +9,7 @@ import time
 import debug_catalog
 
 from router_constants import (
-    THINK_MAX_TOKENS, THINK_MODEL, THINK_TIMEOUT_SEC,
+    THINK_MAX_TOKENS, THINK_MODEL, THINK_MODEL_ANTHROPIC, THINK_TIMEOUT_SEC,
     MINIMAX_CONTEXT_BYTE_LIMIT, ANTHROPIC_HAIKU_CONTEXT_BYTE_LIMIT,
     SUMMARY_BUDGET, TRIM_TARGET_BYTES, TRIM_MIN_MESSAGES,
     CLAUDE_CODE_MARKER, FALLBACK_STATUSES, MINIMAX_FALLBACK_STATUSES,
@@ -32,20 +32,16 @@ from forward_minimax import forward_minimax
 from forward_anthropic import _log_original_model
 from pipelines.primitives import build_finalize_body, build_act_body, to_json_bytes
 
-# Fix retry-storm 2026-07-19: THINK non deve bloccare la risposta (precedente
-# GLM in glm_backend.py). Budget stretto locale a mix-am; ACT senza piano se
-# scade. Non tocca THINK_TIMEOUT_SEC globale (usato da mix-ag/mix-gm/glm).
-MIX_AM_THINK_FAST_SEC = float(os.environ.get("AIROUTER_MIX_AM_THINK_FAST_SEC", "4"))
-# Timeout totale per-tentativo verso MiniMax nel loop executor / ACT diretto:
-# un MiniMax disconnesso ecceziona dopo questo invece di ereditare sock_read=120s.
+# THINK su Sonnet (budget aumentato da 4s Haiku → 15s Sonnet).
+# ACT_MINIMAX_TIMEOUT_SEC resta 12s per evitare retry-storm lato client.
+MIX_AM_THINK_FAST_SEC = float(os.environ.get("AIROUTER_MIX_AM_THINK_FAST_SEC", "15"))
 MIX_AM_ACT_TIMEOUT_SEC = float(os.environ.get("AIROUTER_MIX_AM_ACT_TIMEOUT_SEC", "12"))
 
 # ── THINK backoff state per chat_fp ──────────────────────────────────────────
-# skip THINK dopo 2 timeout consecutivi per dare respiro al modello.
 _think_lock = __import__("threading").Lock()
 _think_count: dict[str, int] = {}
-_THINK_TIMEOUT_SEQUENCE = [4, 6, 8]   # secondi: 1°=4s, 2°=6s, 3°+=8s
-_THINK_SKIP_AFTER = 2                # salta THINK da questo timeout consecutivo in poi
+_THINK_TIMEOUT_SEQUENCE = [15, 20, 25]   # Sonnet ci sta in 15s sulla maggior parte
+_THINK_SKIP_AFTER = 2
 
 def _think_timeout_budget(chat_fp: str) -> float:
     with _think_lock:
@@ -68,14 +64,10 @@ def _anthropic_system(instruction: str) -> list:
 
 
 def _build_think_body(orig: dict) -> bytes:
-    """THINK sintetico su THINK_MODEL (Haiku) — fix 2026-07-21.
+    """THINK sintetico su MiniMax-M2.7 — redesign gerarchia 2026-07-22.
 
-    Prima passava il body INTERO (anche 300+ msg / 800KB) al modello utente:
-    timeout a ogni turno ("THINK skip >= 2 timeout consec.") e piani inutili.
-    Ora: digest bounded da pipeline_common (summary msg vecchi + trascrizione
-    ultimi N + immagini solo dell'ultimo msg, ridimensionate) su Haiku →
-    risposta attesa < 3s, costo ~0. Le immagini restano SOLO nel THINK:
-    l'ACT le riceve strippate da build_executor_body.
+    Catena normale: main Anthropic → THINK MiniMax-M2.7 (genera piano) → ACT MiniMax (esegue).
+    anthropic_leads=True → THINK passa a _build_think_body_haiku (catena Anthropic).
     """
     sys_msg = (
         "Sei un ORCHESTRATORE. Leggi la richiesta utente e scrivi un PIANO D'AZIONE "
@@ -316,7 +308,7 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
 
     async def _rescue():
         if allow_anthropic_rescue:
-            return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
+            return await _escalate_anthropic(request, orig, session, chat_fp, relay)
         log(f"shrink: rescue Anthropic OFF (isolamento minimax) -> 502 fp={chat_fp}")
         return web.json_response({"type": "error", "error": {
             "type": "minimax_unavailable",
@@ -387,8 +379,15 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
 
 
 # ── Mixed rescue ───────────────────────────────────────────────────────────────
-async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay):
-    """Fallback: user model -> Haiku -> 502."""
+async def _escalate_anthropic(request, orig: dict, session, chat_fp: str, relay,
+                              anthropic_leads: bool = False):
+    """Catena escalation Anthropic dopo fallimento MiniMax.
+
+    anthropic_leads=True: MiniMax down da 2+ turni → catena Anthropic completa.
+      Haiku (digest compatto) → VERIFY Sonnet (se gated) → 502 se tutto fallisce.
+    anthropic_leads=False (default): fallback dopo singolo fail MiniMax nel turno.
+      Prova modello utente → Haiku → 502.
+    """
     from forward_anthropic import forward_anthropic, forward_anthropic_direct
     from router_utils import log as _log, _analyze_body_structure
     from router_constants import THINK_MODEL, ANTHROPIC_HAIKU_CONTEXT_BYTE_LIMIT
@@ -544,7 +543,7 @@ async def _mixed_haiku_rescue(request, orig: dict, session, chat_fp: str, relay)
 
 
 async def _anthropic_rescue(request, orig: dict, session, chat_fp: str, relay):
-    return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
+    return await _escalate_anthropic(request, orig, session, chat_fp, relay)
 
 
 async def _try_shrink_body_haiku(orig: dict, target_bytes: int):
@@ -639,7 +638,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
     Scatta per TUTTE le /v1/messages (incluso agentico con tools)."""
     from forward_anthropic import forward_anthropic, forward_anthropic_direct
     from forward_minimax import forward_minimax
-    from fail_tracker import mixed_fail_inc, mixed_fail_reset, fail_tracker
+    from fail_tracker import mixed_fail_inc, mixed_fail_reset, fail_tracker, mixed_anthropic_leads
 
     chat_fp = _resolve_chat_fingerprint(request)
     mixed_fail_last_status = None
@@ -655,7 +654,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
 
     if _has_server_tools(orig):
         log(f"mix-am: server tools -> pipeline bypass fp={chat_fp}")
-        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
+        return await _escalate_anthropic(request, orig, session, chat_fp, relay)
 
     # Bypass vision rimosso (fix 2026-07-21): con immagini attraverso normale
     # pipeline THINK→ACT→VERIFY (Anthropic THINK legge immagini, M3 ACT riceve
@@ -733,8 +732,10 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
             except Exception:
                 pass
         except Exception as e:
-            log(f"mix-am ACT diretto (no plan) EXC: {e} -> rescue fp={chat_fp}")
-        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
+            log(f"mix-am ACT diretto (no plan) EXC: {type(e).__name__}: {e} -> rescue fp={chat_fp}")
+        anthropic_leads = mixed_anthropic_leads(chat_fp)
+        return await _escalate_anthropic(request, orig, session, chat_fp, relay,
+                                        anthropic_leads=anthropic_leads)
     tools_to_call = []
     log(f"mix-am THINK OK plan={len(plan)}c fp={chat_fp}")
 
@@ -765,7 +766,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
         except Exception as e:
             mixed_fail_last_status = None
             n = mixed_fail_inc(chat_fp)
-            log(f"mix-am ACT {exe} EXC ({n}/{fail_tracker.threshold}): {e}")
+            log(f"mix-am ACT {exe} EXC ({n}/{fail_tracker.threshold}): {type(e).__name__}: {e} | repr={repr(e)[:200]}")
             up = None
             continue
         mixed_fail_last_status = up.status
@@ -822,8 +823,15 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
              "message": "MiniMax rate limited (429). Retry-After rispettato dal client."}},
             status=429)
 
+    # Gerarchia: anthropic_leads=True (MiniMax fallito 2x) → escalation Anthropic
+    # Il mixed_fail_tracker si attiva dopo fail_threshold=2 chiamate consecutive.
+    anthropic_leads = mixed_anthropic_leads(chat_fp)
+    if anthropic_leads:
+        log(f"mix-am ACT: anthropic_leads=True (MiniMax 2x KO) -> catena Anthropic fp={chat_fp}")
+        return await _escalate_anthropic(request, orig, session, chat_fp, relay,
+                                         anthropic_leads=True)
     log(f"mix-am ACT: tutti executor falliti (non-429) -> rescue fp={chat_fp}")
-    return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
+    return await _escalate_anthropic(request, orig, session, chat_fp, relay)
 
 
 # _serve_minimax_vision RIMOSSO (fix 2026-07-21):
@@ -838,3 +846,9 @@ async def _serve_minimax_vision(request, orig: dict, session, chat_fp: str, rela
     L'ACT (MiniMax) riceve solo testo+piano, mai immagini raw.
     Ritorna sempre None (nessun bypass diretto a M3)."""
     return None
+
+
+# Alias back-compat: _mixed_haiku_rescue rinominata in _escalate_anthropic
+# (redesign gerarchia 2026-07-22). ai-router-proxy.py e altri moduli importano
+# ancora il vecchio nome.
+_mixed_haiku_rescue = _escalate_anthropic
