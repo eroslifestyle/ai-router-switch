@@ -82,6 +82,34 @@ def _detect_multistep(orig: dict) -> bool:
     return any(marker in haystack for marker in _MULTISTEP_MARKERS)
 
 
+def _strip_images_from_messages(messages: list) -> list:
+    """Rimuove blocchi image dai content blocks. Testo associato preservato.
+
+    L'esecutore (MiniMax) non riceve immagini per evitare limiti di context e bug
+    noti. Il piano THINK contiene già la descrizione/sintesi delle immagini, e
+    l'eventuale testo utente associato ai blocchi image rimane nei content.
+    Se un messaggio era SOLO immagini, viene inserito un placeholder testuale.
+    """
+    out = []
+    for m in messages or []:
+        if not isinstance(m, dict):
+            out.append(m)
+            continue
+        content = m.get("content")
+        if not isinstance(content, list):
+            out.append(m)
+            continue
+        new_blocks = [b for b in content if not (isinstance(b, dict) and b.get("type") == "image")]
+        if new_blocks:
+            out.append({**m, "content": new_blocks})
+        else:
+            # messaggio era solo immagini: inserisci placeholder per non rompere
+            # la tool_use sequence Anthropic (es. tool_result associato a user puro)
+            out.append({**m, "content": [{"type": "text",
+                            "text": "[contenuto multimediale: vedi piano THINK]"}]})
+    return out
+
+
 def build_executor_body(orig: dict, plan: str, executor: str = "",
                         *, extra_note: str = "") -> dict:
     """Costruisce il body per l'ESECUTORE preservando system+messages+tools.
@@ -97,7 +125,8 @@ def build_executor_body(orig: dict, plan: str, executor: str = "",
 
     Garanzie:
     - orig['system'] MAI perso: guida+completion-guard APPESE.
-    - orig['messages'] e orig['tools'] preservati integralmente.
+    - orig['messages'] STRIPPATO delle immagini (esecutore non le riceve).
+    - orig['tools'] preservati integralmente.
     """
     body = dict(orig)  # conserva messages + tools
 
@@ -118,6 +147,9 @@ def build_executor_body(orig: dict, plan: str, executor: str = "",
         body["system"] = orig_system + guide
     else:
         body["system"] = "Sei l'esecutore. Esegui la richiesta dell'utente." + guide
+
+    # Strip immagini: l'esecutore non le riceve, il THINK le ha già analizzate.
+    body["messages"] = _strip_images_from_messages(orig.get("messages") or [])
 
     if executor:
         body["model"] = executor

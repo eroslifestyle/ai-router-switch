@@ -193,6 +193,53 @@ def _path_allowed(path: str) -> bool:
 
 
 # ── handle() ─────────────────────────────────────────────────────────────────
+# ponytail: quando un body ha >=2 immagini + poche parole, M3/vision tende a
+# salutare invece di eseguire. Iniettiamo un preambolo di sistema che forza la
+# modalita' "analisi/esegui" — fix strutturale 2026-07-21 per chat con immagini.
+TASK_MODE_IMAGES_PREAMBLE_IT = (
+    "\n\n[Istruzione operativa]: l'utente ha allegato piu' immagini con una richiesta.\n"
+    "Comportamento richiesto: ANALIZZA le immagini e ESEGUI il task descritto nel testo utente.\n"
+    "NON salutare, NON chiedere 'cosa posso fare', NON elencare opzioni generiche.\n"
+    "Produci direttamente: (1) cosa vedi nelle immagini rilevante al task, (2) piano d'azione o output richiesto."
+)
+
+
+def _count_images_in_body(orig: dict) -> int:
+    """Conta blocchi image nei content blocks dell'ULTIMO messaggio user."""
+    try:
+        msgs = orig.get("messages") or []
+        if not msgs:
+            return 0
+        for m in reversed(msgs):
+            if m.get("role") != "user":
+                continue
+            content = m.get("content")
+            if isinstance(content, list):
+                return sum(1 for b in content if isinstance(b, dict) and b.get("type") == "image")
+            return 0
+        return 0
+    except Exception:
+        return 0
+
+
+def _inject_task_mode_for_images(orig: dict) -> dict:
+    """Se >=2 immagini nel body, aggiunge preambolo task-mode al system prompt.
+    Modifica in-place il dict orig (lo stesso che verra' passato alle pipeline)."""
+    try:
+        if _count_images_in_body(orig) < 2:
+            return orig
+        sys_val = orig.get("system")
+        if isinstance(sys_val, str):
+            orig["system"] = sys_val + TASK_MODE_IMAGES_PREAMBLE_IT
+        elif isinstance(sys_val, list):
+            sys_val.append({"type": "text", "text": TASK_MODE_IMAGES_PREAMBLE_IT})
+        else:
+            orig["system"] = TASK_MODE_IMAGES_PREAMBLE_IT
+        return orig
+    except Exception:
+        return orig
+
+
 async def handle(request):
     fp = _resolve_chat_fingerprint(request)
     mode = get_mode(request, fp)
@@ -470,6 +517,7 @@ async def handle(request):
         if NEW_PIPELINE:
             try:
                 orig = json.loads(body)
+                _inject_task_mode_for_images(orig)
             except Exception:
                 orig = {}
             log(f"minimax-orch pipeline attivata fp={_resolve_chat_fingerprint(request)} tools={bool(orig.get('tools'))}")
@@ -492,6 +540,7 @@ async def handle(request):
     if anthropic_leads and is_messages:
         try:
             orig = json.loads(body)
+            _inject_task_mode_for_images(orig)
         except Exception:
             orig = {}
         if orig.get("tools"):
@@ -547,6 +596,7 @@ async def handle(request):
     if mode == "mix-am" and NEW_PIPELINE and is_messages and not anthropic_leads:
         try:
             orig = json.loads(body)
+            _inject_task_mode_for_images(orig)
         except Exception:
             orig = {}
         orig_model = (orig.get("model") or "").strip()
@@ -605,6 +655,7 @@ async def handle(request):
     # T2: pipeline verify gerarchica
     try:
         orig = json.loads(body)
+        _inject_task_mode_for_images(orig)
     except Exception:
         orig = {}
     question = extract_last_user_text(orig)

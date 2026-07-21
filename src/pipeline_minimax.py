@@ -254,11 +254,12 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
 
 async def _try_shrink_body(orig: dict, target_bytes: int):
     """Prova a shrinkare il body per farlo stare in target_bytes."""
-    from pipeline_anthropic import _repair_message_sequence, build_shrink_summary, SHRINK_KEEP_TAIL
+    from pipeline_anthropic import _repair_message_sequence, build_shrink_summary, SHRINK_KEEP_TAIL, _shrink_images_in_messages
     try:
         msgs = orig.get("messages", []) or []
         if not msgs:
             return None
+        _shrink_images_in_messages(orig)
         budget = 560_000  # SUMMARY_BUDGET equivalent
         summary_content = build_shrink_summary(msgs, budget)
         tail_msgs = msgs[-SHRINK_KEEP_TAIL:] if msgs else []

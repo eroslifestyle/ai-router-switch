@@ -28,6 +28,8 @@ from providers.base import (
     _is_context_exceed_400 as _is_ctx_400,
     _body_has_images,
 )
+from forward_minimax import forward_minimax
+from forward_anthropic import _log_original_model
 from pipelines.primitives import build_finalize_body, build_act_body, to_json_bytes
 
 # Fix retry-storm 2026-07-19: THINK non deve bloccare la risposta (precedente
@@ -305,7 +307,8 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
     messages = orig_dict.get("messages", [])
     if not messages:
         return await _rescue()
-    budget = SUMMARY_BUDGET
+    _shrink_images_in_messages(orig_dict)  # ponytail: riduci immagini prima di summary
+    budget = MINIMAX_CONTEXT_BYTE_LIMIT // 2  # ponytail: summary <= 50% del limite
     summary_content = build_shrink_summary(messages, budget)
     shrunk = dict(orig_dict)
     tail_msgs = messages[-SHRINK_KEEP_TAIL:] if messages else []
@@ -358,53 +361,6 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
     except Exception as e:
         log(f"shrink: MiniMax EXC {e} -> rescue fp={chat_fp}")
         return await _rescue()
-
-
-# ── Vision ─────────────────────────────────────────────────────────────────────
-async def _serve_minimax_vision(request, orig: dict, session, chat_fp: str, relay):
-    from forward_minimax import forward_minimax
-    if _has_server_tools(orig):
-        return None
-    orig2 = dict(orig)
-    orig_model = (orig2.get("model") or "").strip()
-    orig2["model"] = "MiniMax-M3"
-    body2 = json.dumps(orig2).encode()
-    if _is_context_too_large_for_minimax(body2):
-        return None
-    if orig_model and not orig_model.startswith("MiniMax"):
-        # inline _log_original_model to avoid circular import
-        try:
-            from router_constants import SIDECAR
-            SIDECAR.parent.mkdir(parents=True, exist_ok=True)
-            entry = {"ts": int(time.time()), "chat": chat_fp, "orig": orig_model, "final": "MiniMax-M3"}
-            with open(SIDECAR, "a") as f:
-                f.write(json.dumps(entry) + "\n")
-        except Exception:
-            pass
-        _request_orig_model[chat_fp] = orig_model
-    try:
-        up = await forward_minimax(request, body2, session)
-    except Exception as e:
-        log(f"minimax-vision EXC: {e} -> fallback caller fp={chat_fp}")
-        return None
-    if up.status in MINIMAX_FALLBACK_STATUSES:
-        log(f"minimax-vision {up.status} -> fallback caller fp={chat_fp}")
-        try:
-            raw = await up.read()
-        except Exception:
-            raw = b""
-        try:
-            await up.release()
-        except Exception:
-            pass
-        debug_capture(kind="minimax_vision_fallback", request=request, fp=chat_fp,
-                      client_model=orig.get("model", ""), upstream_model="MiniMax-M3",
-                      status=up.status, stage="minimax_vision", upstream_status=up.status,
-                      upstream_raw=raw, upstream_encoding=up.headers.get("Content-Encoding", ""),
-                      orig=orig, note=f"status {up.status} -> caller fallback")
-        return None
-    log(f"minimax-vision M3 OK {up.status} fp={chat_fp}")
-    return await relay(up, extra_headers={"x-ai-verified": "minimax-m3-vision"})
 
 
 # ── Mixed rescue ───────────────────────────────────────────────────────────────
@@ -574,6 +530,7 @@ async def _try_shrink_body_haiku(orig: dict, target_bytes: int):
         msgs = orig.get("messages", []) or []
         if not msgs:
             return None
+        _shrink_images_in_messages(orig)
         budget = SUMMARY_BUDGET
         summary_content = build_shrink_summary(msgs, budget)
         tail_msgs = msgs[-SHRINK_KEEP_TAIL:] if msgs else []
@@ -608,6 +565,51 @@ async def _try_shrink_body_haiku(orig: dict, target_bytes: int):
         return None
 
 
+def _shrink_images_in_messages(orig: dict, max_side: int = 1024, jpeg_quality: int = 70):
+    """Ridimensiona immagini base64 nei content blocks per ridurre body. ponytail:
+    solo Anthropic image blocks (source.type=base64), lazy import PIL, fallback
+    silenzioso se non installato. max_side=1024 + JPEG q70 -> tipicamente 5-10x
+    riduzione su PNG foto-realistiche. Non applica a tool_result immagini
+    ricevute dal modello (il flusso non riutilizza immagini ricevute)."""
+    try:
+        from PIL import Image
+        import io, base64
+    except Exception:
+        return
+    try:
+        for msg in orig.get("messages", []) or []:
+            content = msg.get("content")
+            if not isinstance(content, list):
+                continue
+            for blk in content:
+                if not isinstance(blk, dict) or blk.get("type") != "image":
+                    continue
+                src = blk.get("source") or {}
+                if src.get("type") != "base64":
+                    continue
+                data_b64 = src.get("data")
+                if not data_b64 or len(data_b64) < 4000:  # ponytail: skip icone
+                    continue
+                try:
+                    raw = base64.b64decode(data_b64)
+                    img = Image.open(io.BytesIO(raw))
+                    img.load()
+                    if max(img.size) > max_side:
+                        img.thumbnail((max_side, max_side), Image.LANCZOS)
+                    if img.mode != "RGB":
+                        img = img.convert("RGB")
+                    buf = io.BytesIO()
+                    img.save(buf, format="JPEG", quality=jpeg_quality)
+                    new_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                    if len(new_b64) < len(data_b64):
+                        src["data"] = new_b64
+                        src["media_type"] = "image/jpeg"
+                except Exception:
+                    continue
+    except Exception:
+        return
+
+
 # ── Main mixed pipeline ─────────────────────────────────────────────────────────
 async def _pipeline_think_act(request, body, session, orig: dict, relay):
     """Redesign 2026-07-01 mixed: Anthropic THINK+self-review -> M3 ACT.
@@ -632,11 +634,9 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
         log(f"mix-am: server tools -> pipeline bypass fp={chat_fp}")
         return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
 
-    if _body_has_images(orig):
-        res = await _serve_minimax_vision(request, orig, session, chat_fp, relay)
-        if res is not None:
-            return res
-        return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
+    # Bypass vision rimosso (fix 2026-07-21): con immagini attraverso normale
+    # pipeline THINK→ACT→VERIFY (Anthropic THINK legge immagini, M3 ACT riceve
+    # piano testuale, no immagini a M3 che allucinava).
 
     # D45 BYPASS-THINK: task leggeri
     LIGHT_MSG_THRESHOLD = 200
@@ -801,3 +801,63 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
 
     log(f"mix-am ACT: tutti executor falliti (non-429) -> rescue fp={chat_fp}")
     return await _mixed_haiku_rescue(request, orig, session, chat_fp, relay)
+
+
+async def _serve_minimax_vision(request, orig: dict, session, chat_fp: str, relay):
+    """OCR/vision 2026-07-04: MiniMax-M3 legge gli image block (verificato: M3
+    li supporta via endpoint anthropic-compat, M2.x no → allucinano). Serve la
+    richiesta con M3, bypassando la pipeline che manderebbe l'immagine a un
+    executor M2.x cieco. Ritorna la response, oppure None per far fare al
+    caller il suo fallback (Anthropic).
+
+    Ordine gate: server-tool vince (immagine+web_search → None → Anthropic).
+    Context troppo grande → None (screenshot >750KB → no 400 nudo)."""
+    if _has_server_tools(orig):
+        return None
+    # FIX 2026-07-08 BUG-VISION-400: MiniMax-M3 allucina le immagini (test: dice "black"
+    # per un PNG blue) e restituisce 400 per immagini grandi/strane senza fare rescue.
+    # Anthropic processa le immagini correttamente. Bypass diretto → caller rescue.
+    if _body_has_images(orig):
+        log(f"minimax-vision: body ha immagini → bypass diretto Anthropic fp={chat_fp}")
+        return None
+    orig2 = dict(orig)
+    orig_model = (orig2.get("model") or "").strip()
+    orig2["model"] = "MiniMax-M3"  # remap preserva i model che iniziano con 'MiniMax'
+    body2 = json.dumps(orig2).encode()
+    if _is_context_too_large_for_minimax(body2):
+        return None
+    # model-rewrite manuale: senza questo la risposta leakerebbe 'MiniMax-M3'
+    # al posto del modello client nel jsonl (remap non scatta, model già MiniMax).
+    if orig_model and not orig_model.startswith("MiniMax"):
+        _log_original_model(orig_model, "MiniMax-M3", chat_fp)
+        _request_orig_model[chat_fp] = orig_model
+    try:
+        up = await forward_minimax(request, body2, session)
+    except Exception as e:
+        log(f"minimax-vision EXC: {e} → fallback caller fp={chat_fp}")
+        return None
+    if up.status in MINIMAX_FALLBACK_STATUSES:
+        log(f"minimax-vision {up.status} → fallback caller fp={chat_fp}")
+        try:
+            raw = await up.read()
+        except Exception:
+            raw = b""
+        try:
+            await up.release()
+        except Exception:
+            pass
+        debug_capture(
+            kind="minimax_vision_fallback",
+            request=request, fp=chat_fp,
+            client_model=orig.get("model", ""),
+            upstream_model="MiniMax-M3",
+            status=up.status, stage="minimax_vision",
+            upstream_status=up.status,
+            upstream_raw=raw,
+            upstream_encoding=up.headers.get("Content-Encoding", ""),
+            orig=orig,
+            note=f"status {up.status} → caller fallback",
+        )
+        return None
+    log(f"minimax-vision M3 OK {up.status} fp={chat_fp}")
+    return await relay(up, extra_headers={"x-ai-verified": "minimax-m3-vision"})
