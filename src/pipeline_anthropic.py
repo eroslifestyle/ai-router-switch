@@ -89,13 +89,25 @@ def _build_think_body(orig: dict) -> bytes:
     from pipeline_common import build_think_digest
     _shrink_images_in_messages(orig)
     digest, images = build_think_digest(orig)
+    max_tokens = THINK_MAX_TOKENS
+    if images:
+        # L'esecutore NON riceve le immagini: la descrizione nel piano è la sua
+        # unica fonte. Senza questa sezione l'esecutore rispondeva "nessuna
+        # immagine allegata" e la richiedeva all'utente.
+        sys_msg += (
+            "\n\nIMMAGINI ALLEGATE: l'esecutore a valle NON vedrà le immagini. "
+            "Aggiungi al piano una sezione:\n"
+            "IMMAGINI: <per ciascuna: descrizione dettagliata di ciò che mostra — "
+            "testo visibile, messaggi di errore verbatim, elementi UI, dati rilevanti>"
+        )
+        max_tokens = max(THINK_MAX_TOKENS, 1024)
     content = [{"type": "text", "text": digest}] + images
     body = {
         "model": THINK_MODEL,
         "system": _anthropic_system(sys_msg),
         "messages": [{"role": "user", "content": content}],
         "stream": False,
-        "max_tokens": THINK_MAX_TOKENS,
+        "max_tokens": max_tokens,
     }
     return json.dumps(body).encode()
 

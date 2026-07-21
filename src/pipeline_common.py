@@ -47,12 +47,16 @@ _EXECUTOR_GUIDE_TEMPLATE = (
     "4. Verifica il completamento contro il GOAL globale, non contro il singolo tool "
     "call appena eseguito.\n"
     "5. Se un tool fallisce, gestisci l'errore e prosegui — non abbandonare il task.\n"
+    "6. Se nei messaggi compare il marker [IMMAGINE ALLEGATA DALL'UTENTE ...]: "
+    "l'utente HA allegato immagini. Tu non le ricevi: la loro descrizione è nel "
+    "PIANO-GUIDA qui sotto. NON dire mai 'nessuna immagine allegata', NON chiedere "
+    "di riallegarle — lavora sulla descrizione.\n"
     "{multistep_extra}"
     "\nPIANO-GUIDA:\n{plan}"
 )
 
 _MULTISTEP_EXTRA = (
-    "6. ATTENZIONE: questa è una SKILL MULTI-STEP. È un errore grave fermarsi prima "
+    "7. ATTENZIONE: questa è una SKILL MULTI-STEP. È un errore grave fermarsi prima "
     "di aver eseguito tutti i passaggi dichiarati. Tieni traccia di quali passaggi hai "
     "completato e quali mancano.\n"
 )
@@ -101,14 +105,16 @@ def _strip_images_from_messages(messages: list) -> list:
         if not isinstance(content, list):
             out.append(m)
             continue
-        new_blocks = [b for b in content if not (isinstance(b, dict) and b.get("type") == "image")]
-        if new_blocks:
-            out.append({**m, "content": new_blocks})
-        else:
-            # messaggio era solo immagini: inserisci placeholder per non rompere
-            # la tool_use sequence Anthropic (es. tool_result associato a user puro)
-            out.append({**m, "content": [{"type": "text",
-                            "text": "[contenuto multimediale: vedi piano THINK]"}]})
+        # Ogni image diventa un marker testuale ESPLICITO: la rimozione silenziosa
+        # faceva negare all'esecutore l'esistenza dell'allegato ("nessuna immagine
+        # allegata") anche quando l'utente l'aveva inviata.
+        new_blocks = [
+            {"type": "text", "text": "[IMMAGINE ALLEGATA DALL'UTENTE — descrizione "
+                                     "nel PIANO-GUIDA del system]"}
+            if (isinstance(b, dict) and b.get("type") == "image") else b
+            for b in content
+        ]
+        out.append({**m, "content": new_blocks})
     return out
 
 
