@@ -247,6 +247,17 @@ async def handle(request):
         return _err_response("multipart not supported", status=415)
     body = await request.read()
 
+    # Audit fp 2026-07-21: senza session-id header le chat locali collassano su
+    # request.remote (store _think_count/fail_tracker/_verify_turn_count condivisi
+    # cross-chat). Cache del content-hash sul request: ogni _resolve_chat_fingerprint
+    # a valle (pipeline, remap MiniMax, GLM) risolve la stessa fp per-chat.
+    if not fp.startswith("sid:") and request.path.endswith("/v1/messages"):
+        try:
+            request["chat_fp"] = conversation_fingerprint(json.loads(body))
+            fp = request["chat_fp"]
+        except Exception:
+            pass
+
     # CTX PRE-CHECK (AQ-REF3): azione proattiva su compact/error
     ctx_check = {"action": "ok", "pct": 0.0}
     try:

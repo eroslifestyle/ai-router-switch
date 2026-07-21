@@ -58,13 +58,21 @@ def conversation_fingerprint(data: dict) -> str:
 
 
 def _resolve_chat_fingerprint(request) -> str:
-    """NAT-safe fingerprint. Priorita': X-Claude-Code-Session-Id > X-Session-ID > remote."""
+    """NAT-safe fingerprint. Priorita': X-Claude-Code-Session-Id > X-Session-ID >
+    content-hash cache (request['chat_fp'], settata in handle()) > remote.
+    Senza la cache, tutte le chat locali senza header collassano su request.remote."""
     sid = (request.headers.get("X-Claude-Code-Session-Id")
            or request.headers.get("x-claude-code-session-id")
            or request.headers.get("X-Session-ID")
            or request.headers.get("x-session-id"))
     if sid:
         return f"sid:{sid[:64]}"
+    try:
+        cached = request.get("chat_fp")
+        if cached:
+            return cached
+    except Exception:
+        pass
     return request.remote or "default"
 
 
