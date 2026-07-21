@@ -1,5 +1,9 @@
 # ai-router-switch — TODO
 
+## Completati (sessione 2026-07-21/22 — esecutore mix cieco a system e immagini)
+- [x] `bb84a41` — mix: **executor non riceveva system/piano** — 2 bug: (1) `remap_body_for_minimax` non convertiva il campo top-level `system` (spesso lista di blocchi Anthropic) in messaggio `role=system` → MiniMax riceveva solo i messaggi utente, senza istruzioni né piano THINK → non capiva il contesto e non scriveva file; fix `_inject_system_as_message()` in minimax_body.py. (2) `pipeline_minimax.py` usava `_text_from_message` senza importarla → NameError → fallback executor diretto → piano THINK buttato; fix import da pipeline_anthropic.
+- [x] `447d1e6` — mix: **esecutore cieco alle immagini** ("Nessuna immagine allegata" con allegato presente, screenshot 2026-07-22): (1) `_strip_images_from_messages` rimuoveva in silenzio i blocchi image nei messaggi misti → ora ogni image diventa marker testuale esplicito; (2) `_build_think_body` non chiedeva MAI la descrizione delle immagini (ma l'ACT non le riceve per design 38fd747: il piano era la sua unica fonte, vuota) → ora sezione IMMAGINI obbligatoria nel piano + max_tokens 1024 con immagini; (3) regola 6 nella guida esecutore: mai negare/richiedere l'allegato, lavorare sulla descrizione. Router restartato, active + health 200, test funzionali PASS.
+
 ## Completati (sessione 2026-07-20/21 — lavori lunghi mix: catena 8 fix fino a TRIM INTERCEPT)
 - [x] `75aa186` — context_alert: rimosso canale notify-send (fp illeggibile); restano log+bell e banner in-chat
 - [x] `152b790` — shrink: PREAMBLE nel summary compresso — il modello non si lamenta più del contesto compresso
