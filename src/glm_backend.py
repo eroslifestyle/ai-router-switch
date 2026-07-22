@@ -399,6 +399,34 @@ def resolve_glm_upstream_model(tier: str) -> str:
     return GLM_MODEL_FOR_TIER.get(tier, tier)
 
 
+# z.ai/GLM accetta max_tokens solo nel range [1, 32768]; Claude Code (Sonnet/Opus)
+# invia spesso valori più alti (es. 64000) → 400 [1210] "max_tokens parameter is
+# illegal 限制数值范围[1,32768]". Clamp al choke-point forward_glm.
+GLM_MAX_TOKENS_LIMIT = int(os.environ.get("AIROUTER_GLM_MAX_TOKENS_LIMIT", "32768"))
+
+
+def clamp_glm_max_tokens(body: bytes, log_fn=None) -> bytes:
+    """Clampa max_tokens nel body in uscita verso z.ai a GLM_MAX_TOKENS_LIMIT.
+    z.ai rifiuta con 400 [1210] i valori fuori range [1, 32768]. No-op se assente
+    o già valido."""
+    try:
+        d = json.loads(body)
+    except Exception:
+        return body
+    mt = d.get("max_tokens")
+    if not isinstance(mt, int):
+        return body
+    if mt > GLM_MAX_TOKENS_LIMIT:
+        d["max_tokens"] = GLM_MAX_TOKENS_LIMIT
+        if log_fn:
+            log_fn(f"GLM clamp max_tokens {mt} -> {GLM_MAX_TOKENS_LIMIT}")
+        return json.dumps(d).encode()
+    if mt < 1:
+        d["max_tokens"] = 1
+        return json.dumps(d).encode()
+    return body
+
+
 def set_body_model(body: bytes, model: str) -> bytes:
     """Riscrive il campo 'model' nel body JSON della richiesta in uscita verso
     z.ai. Necessario perché z.ai onora il campo 'model' della request per
@@ -758,6 +786,10 @@ async def forward_glm(request, body: bytes, session, model: str,
 
     # ISOLAMENTO TOOL (2026-07-19): choke-point unico, vedi tool_isolation.py.
     body = tool_isolation.filter_tools_for_backend(body, "glm")
+
+    # CLAMP max_tokens (2026-07-22): z.ai rifiuta > 32768 con 400 [1210]. Choke-point
+    # unico → copre pure glm + mix-ag + mix-gm indipendentemente dalla costruzione body.
+    body = clamp_glm_max_tokens(body, log_fn=log_fn)
 
     url = GLM_UPSTREAM + request.path_qs
 
