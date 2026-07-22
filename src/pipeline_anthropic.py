@@ -191,11 +191,25 @@ async def _retry_forward(forward_fn, request, body, session, attempts: int = 2):
     raise last_exc
 
 
-async def _call_full(forward_fn, request, body, session, timeout: float = 90):
+async def _call_full(forward_fn, request, body, session, timeout: float = 90,
+                     retry_transient: bool = True):
+    """Chiamata non-streaming (THINK/VERIFY). Con retry_transient=True (default),
+    le leg Anthropic ritentano i 429/5xx con backoff certificato SDK (riuso
+    pipeline_common.anthropic_call_with_retry) invece di rimbalzare subito il 429
+    come 'plan vuoto' → così le mix (mix-am THINK, mix-ag THINK/VERIFY) non fanno
+    girare la chat all'infinito lato client durante un rate-limit reale del piano.
+    Il retry avvolge SOLO il forward+status; la wait_for/read del body resta invariata."""
     nb, _ = _force_no_stream(body)
     up = None
     try:
-        up = await asyncio.wait_for(forward_fn(request, nb, session), timeout=timeout)
+        if retry_transient:
+            from pipeline_common import anthropic_call_with_retry
+            up, _exhausted = await asyncio.wait_for(
+                anthropic_call_with_retry(forward_fn, request, nb, session,
+                                          log_fn=log, tag="mix anthropic-leg"),
+                timeout=timeout)
+        else:
+            up = await asyncio.wait_for(forward_fn(request, nb, session), timeout=timeout)
     except asyncio.TimeoutError:
         log(f"_call_full TIMEOUT {timeout}s req {getattr(request, 'path', '?')}")
         return 0, None
@@ -431,16 +445,23 @@ async def _escalate_anthropic(request, orig: dict, session, chat_fp: str, relay,
             if not should_retry:
                 _log(f"mix-am ACT rescue: modello utente 429 Rate Limit -> relay subito fp={chat_fp}")
                 return await relay(up)
-            # FIX BUG-2: retry multiplo con backoff esponenziale (max 2 retry).
-            # 1° retry: 1.5s, 2° retry: 3.0s. Poi → Haiku.
-            retry_delays = [1.5, 3.0]
+            # Retry certificato SDK (2026-07-22): stessa logica del path anthropic
+            # puro (backoff esponenziale + jitter, onora retry-after) invece dei
+            # delay hardcoded [1.5, 3.0] che ignoravano retry-after. Esauriti i
+            # retry → Haiku. Riuso pipeline_common.
+            from pipeline_common import (parse_retry_after as _parse_ra,
+                                         backoff_sleep_sec as _backoff,
+                                         ANTHROPIC_MAX_RETRIES as _MAXR)
             last_exc = None
-            for i, delay in enumerate(retry_delays):
+            for i in range(_MAXR):
+                retry_after = _parse_ra(up.headers.get("retry-after", ""))
+                delay = _backoff(i, retry_after)
                 try:
                     await up.release()
                 except Exception:
                     pass
-                _log(f"mix-am ACT rescue: modello utente 429 retry {i+1}/{len(retry_delays)}, {delay}s fp={chat_fp}")
+                _log(f"mix-am ACT rescue: modello utente 429 retry {i+1}/{_MAXR} "
+                     f"retry-after={retry_after} sleep={delay:.2f}s fp={chat_fp}")
                 await asyncio.sleep(delay)
                 try:
                     up = await forward_anthropic_direct(request, body_bytes_rescue, session)
@@ -451,6 +472,9 @@ async def _escalate_anthropic(request, orig: dict, session, chat_fp: str, relay,
                         _log(f"mix-am ACT rescue: modello utente retry {i+1} {up.status} OK fp={chat_fp}")
                         return await relay(up)
                     if up.status == 429:
+                        if str(up.headers.get("x-should-retry", "")).lower() == "false":
+                            _log(f"mix-am ACT rescue: modello utente 429 x-should-retry=false -> Haiku fp={chat_fp}")
+                            break
                         _log(f"mix-am ACT rescue: modello utente retry {i+1} ancora 429 -> continua fp={chat_fp}")
                         last_exc = None
                         continue
@@ -488,7 +512,11 @@ async def _escalate_anthropic(request, orig: dict, session, chat_fp: str, relay,
                      "message": f"body troppo grande anche per shrink."}},
                     status=400)
             haiku_body_bytes = shrunk_h
-        up_h = await forward_anthropic(request, haiku_body_bytes, session)
+        # Retry certificato SDK anche sulla leg Haiku (bucket separato ma 429/5xx
+        # transienti possibili): backoff + retry-after invece di rimbalzo immediato.
+        from pipeline_common import anthropic_call_with_retry as _acr
+        up_h, _h_exhausted = await _acr(forward_anthropic, request, haiku_body_bytes,
+                                        session, log_fn=_log, tag="mix-am Haiku-rescue")
         haiku_status = up_h.status
         if up_h.status < 400:
             from fail_tracker import mixed_fail_reset
@@ -506,8 +534,10 @@ async def _escalate_anthropic(request, orig: dict, session, chat_fp: str, relay,
             except Exception:
                 pass
         elif up_h.status == 429:
-            _log(f"mix-am ACT rescue Haiku 429 Rate Limit -> relay subito fp={chat_fp}")
-            return await relay(up_h)
+            # 429 persistito dopo i retry certificati = rate-limit reale del piano.
+            # Relay onesto del 429 (con retry-after) al client, NON loop.
+            _log(f"mix-am ACT rescue Haiku 429 PERSISTENTE dopo retry -> relay onesto fp={chat_fp}")
+            return await relay(up_h, extra_headers={"x-ai-verified": "mix-am-ratelimit-exhausted"})
         elif up_h.status >= 500:
             _log(f"mix-am ACT rescue: Haiku {up_h.status}, relay upstream body fp={chat_fp}")
             return await relay(up_h)

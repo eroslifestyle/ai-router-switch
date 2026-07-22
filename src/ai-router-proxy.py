@@ -256,38 +256,14 @@ ANTHROPIC_RETRY_BASE_SEC = float(os.environ.get("AIROUTER_ANTHROPIC_RETRY_BASE_S
 ANTHROPIC_RETRY_MAX_SLEEP_SEC = float(os.environ.get("AIROUTER_ANTHROPIC_RETRY_MAX_SLEEP_SEC", "60"))
 
 
-def _parse_retry_after(value: str) -> float | None:
-    """retry-after può essere int, float, o data HTTP (RFC 7231). Ritorna secondi o None."""
-    if not value:
-        return None
-    value = value.strip()
-    try:
-        return max(0.0, float(value))
-    except (ValueError, TypeError):
-        pass
-    try:
-        from email.utils import parsedate_to_datetime
-        dt = parsedate_to_datetime(value)
-        if dt is not None:
-            import datetime as _dt
-            now = _dt.datetime.now(_dt.timezone.utc)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=_dt.timezone.utc)
-            return max(0.0, (dt - now).total_seconds())
-    except Exception:
-        pass
-    return None
-
-
-def _backoff_sleep_sec(attempt: int, retry_after: float | None) -> float:
-    """Delay del tentativo `attempt` (0-based). Onora retry-after se presente,
-    altrimenti exponential backoff con equal jitter. Cap a MAX_SLEEP."""
-    if retry_after is not None:
-        return min(retry_after, ANTHROPIC_RETRY_MAX_SLEEP_SEC)
-    # Exponential backoff con equal jitter: base*2^attempt, metà fissa metà random.
-    exp = ANTHROPIC_RETRY_BASE_SEC * (2 ** attempt)
-    exp = min(exp, ANTHROPIC_RETRY_MAX_SLEEP_SEC)
-    return exp / 2 + random.uniform(0, exp / 2)
+# Helper certificato SDK: la logica vive ora in pipeline_common (condivisa con le
+# leg Anthropic delle modalità MIX — riuso, non duplicazione). Questi thin-wrapper
+# restano per compatibilità con i call site anthropic puri.
+from pipeline_common import (
+    parse_retry_after as _parse_retry_after,
+    backoff_sleep_sec as _backoff_sleep_sec,
+    anthropic_call_with_retry as _anthropic_call_with_retry,
+)
 
 
 async def _anthropic_forward_with_retry(request, body, session, relay):
@@ -296,33 +272,19 @@ async def _anthropic_forward_with_retry(request, body, session, relay):
     Ritorna (up, exhausted): `up` è la ClientResponse finale (aperta, da relayare);
     `exhausted` True se il 429/5xx è persistito dopo tutti i retry. Il chiamante
     decide cosa fare del 429 persistente (relay grezzo o fallback), NON si rimbalza
-    in loop verso il client. Solleva su eccezione di rete dopo l'ultimo tentativo."""
-    RETRIABLE = {429, 500, 502, 503, 504, 529}
-    last_up = None
-    for attempt in range(ANTHROPIC_MAX_RETRIES + 1):
-        up = await _retry_forward(forward_anthropic, request, body, session)
-        if up.status not in RETRIABLE:
-            return up, False
-        # x-should-retry: se Anthropic lo mette a "false", NON ritentare (definitivo).
-        should_retry_hdr = str(up.headers.get("x-should-retry", "")).lower()
-        if should_retry_hdr == "false":
-            return up, True
-        if attempt >= ANTHROPIC_MAX_RETRIES:
-            last_up = up
-            break
-        retry_after = _parse_retry_after(up.headers.get("retry-after", ""))
-        delay = _backoff_sleep_sec(attempt, retry_after)
+    in loop verso il client. Solleva su eccezione di rete dopo l'ultimo tentativo.
+
+    Delega a pipeline_common.anthropic_call_with_retry (via _retry_forward per il
+    retry sulle sole eccezioni di rete, come prima), emettendo l'evento di debug
+    e il log 'anthropic 429' storici per non alterare i test/log del path puro."""
+    def _log_and_event(msg: str):
+        log(f"{msg} {request.path}")
         debug_catalog.record_event(
-            severity="block", category="anthropic", kind="rate_limit_429", code=up.status,
-            snippet=f"attempt={attempt+1}/{ANTHROPIC_MAX_RETRIES} retry-after={retry_after} sleep={delay:.2f}s")
-        log(f"anthropic 429/{up.status}: retry {attempt+1}/{ANTHROPIC_MAX_RETRIES} "
-            f"retry-after={retry_after} sleep={delay:.2f}s {request.path}")
-        try:
-            up.release()
-        except Exception:
-            pass
-        await asyncio.sleep(delay)
-    return last_up, True
+            severity="block", category="anthropic", kind="rate_limit_429",
+            snippet=msg)
+    return await _anthropic_call_with_retry(
+        forward_anthropic, request, body, session,
+        log_fn=_log_and_event, tag="anthropic")
 
 
 async def handle(request):
