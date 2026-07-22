@@ -1,5 +1,8 @@
 # ai-router-switch — TODO
 
+## Completati (sessione 2026-07-22 — regola wiki-ops esecutore per-modalità)
+- [x] **Regola utente: esecutore wiki = catena della modalità attiva (pure + miste)** — root cause: la regola globale "WIKI=MiniMax sempre" (2026-06-22) vinceva sulla tabella per-modalità della skill → m3-wiki chiamato anche in solo-anthropic. Nuova tabella: anthropic→Haiku, minimax→m3-wiki, glm→tier GLM; miste = ACT della catena (mix-am/mix-gm→m3-wiki, mix-ag→tier GLM, MAI m3-wiki). Nomi reali da `VALID_MODES` (`src/router_constants.py:88`), `mixed`/`inverse` = alias legacy. Aggiornati `~/.claude/CLAUDE.md`, `~/.claude/docs/regole-permanenti-full.md`, `~/.claude/skills/wiki/SKILL.md` + memoria progetto + vault. Dogfooding: /wiki all di questa sessione eseguito in anthropic pura con esecutore Haiku. Zero modifiche al codice del progetto.
+
 ## Completati (sessione 2026-07-22 — audit 6 modalità)
 - [x] **Audit 3 modalità pure (anthropic/minimax/glm): TUTTE OK** — smoke live per-chat (mai toccata la modalità globale): PING 200 + SSE OK su ciascuna; isolamento tool verificato con strip reale di `mcp__MiniMax__understand_image` in glm (`logs/BUG-CATALOG.jsonl` 23:25:21 kept=0/1); 429 su claude-sonnet-4-6 = limite per-modello upstream (x-should-retry, Haiku/Fable 200), router trasparente corretto. Deploy verificato: symlink → src, mtime < start 23:01:33 → processo esegue `d058e37`. Dettagli: vault `audit-modalita-pure-miste-20260722.md` + `CP_20260722_0634.md`.
 - [x] **Audit 3 miste (parziale)**: code-path mappati; non-stream: mix-am OK (`anthropic-think+minimax-m2.7-act`), mix-ag OK, mix-gm 200 ma body JSON corrotto dai prefissi `[VERIFY-WARNING]`/`[HHEM-WARNING]` (finding aperto)
