@@ -14,7 +14,41 @@ async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp
     """mix-ag: Anthropic THINK -> GLM ACT -> Anthropic VERIFY."""
     from forward_anthropic import forward_anthropic_direct
     from pipeline_anthropic import _call_full, _text_from_message, _build_think_body, _anthropic_rescue
+    import glm_backend as _glm
+    import aiohttp
     orig = json.loads(body) if isinstance(body, bytes) else body
+
+    # STREAMING PASSTHROUGH (fix 2026-07-22): il client chiede stream. Prima
+    # l'ACT GLM veniva bufferizzato (forward_glm ritorna il body in memoria) e
+    # senza timeout stretto → su GLM lento la richiesta restava appesa 77s+ e
+    # tornava 502. Ora: ACT GLM relayato diretto (forward_glm passthrough=True,
+    # GLM_STREAM_ACQUIRE_CAP + niente timeout totale), THINK/VERIFY Anthropic
+    # skippati sul path stream. Rescue: user model -> Haiku, invariato.
+    # (stesso pattern del glm puro `5f6c9f5`).
+    want_stream = bool(orig.get("stream")) if isinstance(orig, dict) else False
+    if want_stream and relay is not None:
+        tier = await _glm.classify_tier(body, request, session, log_fn=log)
+        eff_model, _capped = _glm.apply_peak_cap(tier)
+        real_model = _glm.resolve_glm_upstream_model(eff_model)
+        act_body = _glm.set_body_model(body, real_model)
+        log(f"mix-ag STREAM ACT: GLM {real_model} (tier={eff_model}) fp={chat_fp}")
+        act_resp = await _glm.forward_glm(request, act_body, session,
+                                          orig.get("model") or real_model, log_fn=log,
+                                          passthrough=True, upstream_model=real_model)
+        if isinstance(act_resp, aiohttp.web.Response):
+            return act_resp  # errore sintetico (key missing / 429 finale)
+        if act_resp.status < 400:
+            log(f"mix-ag STREAM passthrough GLM {act_resp.status} fp={chat_fp}")
+            return await relay(act_resp, extra_headers={"x-ai-verified": f"mix-ag-stream({real_model})"})
+        log(f"mix-ag STREAM ACT fail {act_resp.status} -> rescue (user model -> Haiku) fp={chat_fp}")
+        try:
+            await act_resp.release()
+        except Exception:
+            pass
+        debug_catalog.record_event(severity="error", category="mix-ag",
+                                    kind="glm_act_fail", chat_fp=chat_fp, code=act_resp.status)
+        return await _anthropic_rescue(request, orig, session, chat_fp, relay)
+
     think_body = _build_think_body(orig)
     try:
         t_status, t_json = await _call_full(forward_anthropic_direct, request, think_body, session, timeout=THINK_TIMEOUT_SEC)
@@ -90,8 +124,43 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
     """mix-gm: GLM-5.2 THINK -> MiniMax ACT -> GLM-5.2 VERIFY."""
     from forward_minimax import forward_minimax
     from pipeline_anthropic import _call_full, _is_context_exceed_400
+    from router_constants import FALLBACK_STATUSES as _FALLBACK
     import glm_backend as _glm
     orig = json.loads(body) if isinstance(body, bytes) else body
+
+    # STREAMING PASSTHROUGH (fix 2026-07-22): il client (Claude Code) chiede
+    # stream. Prima l'ACT MiniMax veniva bufferizzato per intero con
+    # `act_resp.read()` + ricostruzione web.Response non-stream → primo byte al
+    # client = fine generazione (13s+), e il client stream-atteso andava in
+    # timeout totale (HTTP 000). Ora: ACT MiniMax relayato diretto, THINK/VERIFY
+    # GLM skippati sul path stream (stesso pattern del glm puro `5f6c9f5` e del
+    # minimax puro `539456e`). THINK/VERIFY restano solo sul path non-stream.
+    want_stream = bool(orig.get("stream")) if isinstance(orig, dict) else False
+    if want_stream and relay is not None:
+        act_resp = await forward_minimax(request, body, session)
+        if act_resp.status not in _FALLBACK:
+            log(f"mix-gm STREAM passthrough MiniMax {act_resp.status} fp={chat_fp}")
+            return await relay(act_resp, extra_headers={"x-ai-verified": "mix-gm-stream"})
+        # ACT KO sul path stream: retry singolo, poi errore (MAI Anthropic).
+        log(f"mix-gm STREAM ACT {act_resp.status} -> retry fp={chat_fp}")
+        try:
+            await act_resp.release()
+        except Exception:
+            pass
+        act_resp = await forward_minimax(request, body, session)
+        if act_resp.status not in _FALLBACK:
+            return await relay(act_resp, extra_headers={"x-ai-verified": "mix-gm-stream-retry"})
+        try:
+            await act_resp.release()
+        except Exception:
+            pass
+        from aiohttp import web
+        debug_catalog.record_event(severity="error", category="mix-gm",
+                                    kind="minimax_act_fail", chat_fp=chat_fp,
+                                    code=act_resp.status, detail={"stream": True})
+        return web.json_response({"error": {"type": "minimax_unavailable",
+            "message": "mix-gm: MiniMax ACT unavailable (stream path)"}}, status=502)
+
     think_body = _glm.build_glm_think_body(orig, "")
     try:
         think_resp = await _glm.forward_glm(request, think_body, session, "glm-5.2", log_fn=log)
