@@ -501,7 +501,9 @@ async def _escalate_anthropic(request, orig: dict, session, chat_fp: str, relay,
     # Haiku fallback
     try:
         haiku_body_dict = dict(orig)
-        haiku_body_dict["model"] = THINK_MODEL
+        # Fix 2026-07-22: era THINK_MODEL (default Sonnet) ma il log/commento dice
+        # "Haiku". Il rescue finale a costo minore deve usare il modello Haiku reale.
+        haiku_body_dict["model"] = THINK_MODEL_ANTHROPIC
         haiku_body_bytes = json.dumps(haiku_body_dict).encode()
         if len(haiku_body_bytes) > ANTHROPIC_HAIKU_CONTEXT_BYTE_LIMIT:
             shrunk_h = await _try_shrink_body_haiku(haiku_body_dict, MINIMAX_CONTEXT_BYTE_LIMIT)
