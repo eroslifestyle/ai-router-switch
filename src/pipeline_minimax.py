@@ -6,9 +6,9 @@ from router_constants import (
     MINIMAX_MODEL, MINIMAX_ORCHESTRATOR_MODEL, MINIMAX_EXECUTORS,
     MINIMAX_CONTEXT_BYTE_LIMIT,
 )
-from router_utils import log, _request_orig_model
+from router_utils import log
 import debug_catalog
-from pipeline_anthropic import _text_from_message  # usato in _parse_think_json
+from pipeline_anthropic import _text_from_message  # usato dalle funzioni legacy THINK/VERIFY
 
 
 def _build_minimax_think_body(orig: dict) -> bytes:
@@ -114,17 +114,29 @@ def _parse_think_json(text: str) -> dict | None:
 
 
 async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, relay):
-    """mode=minimax redesign: M3 THINK/orchestra -> executor inferiore ACT."""
+    """mode=minimax: passthrough streaming diretto a MiniMax-M3.
+
+    Redesign 2026-07-22 (perf/latenza): rimossa l'orchestrazione THINK/ACT/VERIFY.
+    Root cause verificata dai log (giorni di "THINK: piano non valido -> executor
+    diretto" al 100% dei turni): il prompt THINK chiedeva JSON mentre il parser
+    _parse_think_json cercava tag [PLAN]...[/PLAN] — formati incompatibili, piano
+    SEMPRE scartato. La pipeline non ha MAI orchestrato in produzione: THINK+VERIFY
+    erano solo 3-8s di latenza morta prima di ogni risposta (baseline TTFB 3.8-8.4s),
+    con VERIFY non-gated + up.read() bufferizzante che impediva lo streaming.
+
+    Rimuovere l'orchestrazione morta NON cambia il comportamento osservabile
+    (l'output veniva già sempre da forward_minimax diretto), elimina solo la latenza.
+    Restano intatti i guard che servono davvero: context-too-large + shrink,
+    immagini (vision), web-search block. Lo stream MiniMax passa al client via relay()
+    senza bufferizzazione (primo byte non appena MiniMax risponde)."""
     # Lazy import to avoid circular dependencies
     from router_mode import _resolve_chat_fingerprint
-    from forward_minimax import forward_minimax, _fwd_minimax_short
+    from forward_minimax import forward_minimax
     from pipeline_anthropic import (
-        _call_full, _text_from_message, _is_context_too_large_for_minimax,
-        _is_context_exceed_400, _has_web_search_tool, _web_search_blocked_response,
-        _has_server_tools, _body_has_images, _serve_minimax_vision,
-        _shrink_and_retry_minimax,
+        _is_context_too_large_for_minimax,
+        _has_web_search_tool, _web_search_blocked_response,
+        _body_has_images, _serve_minimax_vision,
     )
-    from router_utils import _repair_message_sequence
 
     chat_fp = _resolve_chat_fingerprint(request)
 
@@ -134,14 +146,14 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
             try:
                 up_pre = await forward_minimax(request, shrunk, session)
                 if up_pre.status < 400:
-                    log(f"minimax-orch PRE shrunk OK {up_pre.status} fp={chat_fp}")
+                    log(f"minimax PRE shrunk OK {up_pre.status} fp={chat_fp}")
                     return await relay(up_pre, extra_headers={"x-ai-verified": "minimax-m3-shrunk"})
                 try:
                     await up_pre.release()
                 except Exception:
                     pass
             except Exception as e:
-                log(f"minimax-orch PRE shrunk EXC: {e}")
+                log(f"minimax PRE shrunk EXC: {e}")
         if shrunk is None:
             return web.json_response(
                 {"type": "error", "error": {"type": "context_exceeded",
@@ -151,106 +163,22 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
     if _has_web_search_tool(orig):
         return _web_search_blocked_response()
 
-    async def _executor_direct():
-        return await relay(
-            await forward_minimax(request, body, session),
-            extra_headers={"x-ai-verified": f"minimax-direct-fallback({MINIMAX_MODEL.lower()})"}
-        )
-
     if _body_has_images(orig):
         res = await _serve_minimax_vision(request, orig, session, chat_fp, relay)
         if res is not None:
             return res
-        return await _executor_direct()
 
-    think_body = _build_minimax_think_body(orig)
+    # Passthrough streaming diretto: primo byte appena MiniMax risponde, zero overhead.
     try:
-        t_status, t_json = await _call_full(_fwd_minimax_short, request, think_body, session)
+        up = await forward_minimax(request, body, session)
     except Exception as e:
-        log(f"minimax-orch THINK EXC: {e} -> executor diretto")
+        log(f"minimax passthrough EXC: {e} fp={chat_fp}")
         debug_catalog.record_event(severity="error", category="minimax",
-                                    kind="think_exception", chat_fp=chat_fp, snippet=str(e))
-        return await _executor_direct()
-
-    if not t_json or t_status in {500, 502, 503, 504, 529}:
-        log(f"minimax-orch THINK ko {t_status} -> executor diretto")
-        debug_catalog.record_event(severity="error", category="minimax",
-                                    kind="think_failed", chat_fp=chat_fp, code=t_status)
-        return await _executor_direct()
-
-    plan_json = _parse_think_json(_text_from_message(t_json))
-    if not plan_json or not plan_json.get("self_review_ok", False):
-        log(f"minimax-orch THINK: piano non valido -> executor diretto")
-        debug_catalog.record_event(severity="block", category="minimax",
-                                    kind="think_plan_invalid", chat_fp=chat_fp)
-        return await _executor_direct()
-
-    plan = plan_json.get("plan", "")
-    tools_to_call = plan_json.get("tools_to_call", []) or []
-    executor = _pick_minimax_executor(plan_json)
-    log(f"minimax-orch THINK OK plan={len(plan)}c tools={len(tools_to_call)} executor={executor} fp={chat_fp}")
-
-    act_body = _build_minimax_act_body(orig, plan, tools_to_call, executor)
-    try:
-        up = await forward_minimax(request, act_body, session)
-    except Exception as e:
-        log(f"minimax-orch ACT EXC: {e} -> executor diretto")
-        debug_catalog.record_event(severity="error", category="minimax",
-                                    kind="act_exception", chat_fp=chat_fp, snippet=str(e))
-        return await _executor_direct()
-
-    if up.status == 400:
-        is_ctx_pre = up.headers.get("x-ai-context-exceeded") == "true" if hasattr(up, "headers") else False
-        is_ctx_real, _ = await _is_context_exceed_400(up)
-        if is_ctx_pre or is_ctx_real:
-            log(f"minimax-orch ACT 400 context-exceed -> shrink/retry fp={chat_fp}")
-            try:
-                await up.release()
-            except Exception:
-                pass
-            return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay,
-                                                   allow_anthropic_rescue=False)
-        try:
-            await up.release()
-        except Exception:
-            pass
-
-    if up.status in {401, 403, 408, 409, 413, 429, 500, 502, 503, 504, 529}:
-        log(f"minimax-orch ACT {up.status} -> executor diretto")
-        debug_catalog.record_event(severity="error", category="minimax",
-                                    kind="act_fail", chat_fp=chat_fp, code=up.status)
-        try:
-            await up.release()
-        except Exception:
-            pass
-        return await _executor_direct()
-
-    log(f"minimax-orch ACT {executor} {up.status} {request.path} fp={chat_fp}")
-
-    # VERIFY: M3 verifica output ACT
-    log(f"minimax-orch VERIFY: M3 verifica fp={chat_fp}")
-    try:
-        act_raw = await up.read()
-        await up.release()
-        verify_messages = [
-            {"role": "system", "content": "Sei un verifier AI. Verifica che l'output sia corretto e completo."},
-            {"role": "user", "content": f"Piano:\n{plan}\n\nOutput:\n{act_raw.decode(errors='ignore')[:5000]}"},
-        ]
-        verify_body = dict(orig)
-        verify_body["model"] = MINIMAX_ORCHESTRATOR_MODEL
-        verify_body["messages"] = verify_messages
-        verify_body["max_tokens"] = 500
-        verify_body["stream"] = False
-        v_status, v_json = await _call_full(_fwd_minimax_short, request, json.dumps(verify_body).encode(), session)
-        if v_status < 400 and v_json:
-            verify_text = _text_from_message(v_json).strip()
-            log(f"minimax-orch VERIFY: {verify_text[:100]} fp={chat_fp}")
-    except Exception as e:
-        log(f"minimax-orch VERIFY EXC: {e} fp={chat_fp}")
-        debug_catalog.record_event(severity="block", category="minimax",
-                                    kind="verify_exception", chat_fp=chat_fp, snippet=str(e))
-
-    return web.Response(body=act_raw, status=200, content_type="application/json")
+                                    kind="forward_exception", chat_fp=chat_fp, snippet=str(e))
+        return web.json_response({"type": "error", "error": {"type": "router_error",
+                                  "message": str(e)}}, status=502)
+    log(f"minimax passthrough {up.status} {request.path} fp={chat_fp}")
+    return await relay(up, extra_headers={"x-ai-verified": f"minimax-direct({MINIMAX_MODEL.lower()})"})
 
 
 async def _try_shrink_body(orig: dict, target_bytes: int):
