@@ -79,7 +79,7 @@ def _build_think_body(orig: dict) -> bytes:
         "NON FARE: <cose da evitare>"
     )
     from pipeline_common import build_think_digest
-    _shrink_images_in_messages(orig)
+    # Immagini NON ridimensionate: inviate al THINK senza resize (fix 2026-07-22)
     digest, images = build_think_digest(orig)
     max_tokens = THINK_MAX_TOKENS
     if images:
@@ -337,7 +337,7 @@ async def _shrink_and_retry_minimax(request, orig: dict, body: bytes,
     messages = orig_dict.get("messages", [])
     if not messages:
         return await _rescue()
-    _shrink_images_in_messages(orig_dict)  # ponytail: riduci immagini prima di summary
+    # Immagini NON ridimensionate per shrink (fix 2026-07-22)
     budget = MINIMAX_CONTEXT_BYTE_LIMIT // 2  # ponytail: summary <= 50% del limite
     summary_content = build_shrink_summary(messages, budget)
     shrunk = dict(orig_dict)
@@ -583,7 +583,7 @@ async def _try_shrink_body_haiku(orig: dict, target_bytes: int):
         msgs = orig.get("messages", []) or []
         if not msgs:
             return None
-        _shrink_images_in_messages(orig)
+        # Immagini NON ridimensionate per shrink (fix 2026-07-22)
         budget = SUMMARY_BUDGET
         summary_content = build_shrink_summary(msgs, budget)
         tail_msgs = msgs[-SHRINK_KEEP_TAIL:] if msgs else []
