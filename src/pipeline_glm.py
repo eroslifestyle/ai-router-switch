@@ -141,31 +141,60 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
             from aiohttp import web
             return web.json_response({"error": {"type": "minimax_unavailable",
                 "message": "mix-gm: MiniMax ACT unavailable after retry"}}, status=502)
+    act_ct = act_resp.headers.get('Content-Type', 'application/json')
     act_raw = await act_resp.read()
     await act_resp.release()
 
-    # HHEM gate
-    if len(act_raw) > 300:
+    is_sse = act_ct.startswith('text/event-stream') or act_raw.lstrip()[:6] == b'event:' or act_raw.lstrip()[:5] == b'data:'
+
+    def _extract_act_text(raw, sse):
+        if sse:
+            parts = []
+            for line in raw.decode(errors='ignore').splitlines():
+                if line.startswith('data: '):
+                    try:
+                        obj = json.loads(line[6:])
+                        if obj.get('type') == 'content_block_delta' and obj.get('delta', {}).get('type') == 'text_delta':
+                            parts.append(obj['delta']['text'])
+                    except Exception:
+                        continue
+            return ''.join(parts)
+        else:
+            try:
+                data = json.loads(raw)
+                return ''.join(c.get('text', '') for c in data.get('content', []) if c.get('type') == 'text')
+            except Exception:
+                return ''
+
+    eval_text = _extract_act_text(act_raw, is_sse)
+    warn_parts = []
+
+    if len(eval_text) > 300:
         try:
             import hhem_gate as _hhem
-            score = await _hhem.hhem_score("mix-gm ACT", act_raw.decode(errors="ignore")[:1000])
+            score = await _hhem.hhem_score("mix-gm ACT", eval_text[:1000])
             if score is not None and score < _hhem.HHEM_THRESHOLD:
                 log(f"mix-gm ACT HHEM score={score:.3f} -> [HHEM-WARNING] fp={chat_fp}")
                 debug_catalog.record_event(severity="block", category="mix-gm",
                                             kind="hhem_warning", chat_fp=chat_fp,
                                             snippet=f"score={score:.3f} < {_hhem.HHEM_THRESHOLD}")
-                act_raw = b"[HHEM-WARNING] " + act_raw
+                warn_parts.append(f'hhem={score:.3f}')
         except Exception:
             pass
 
-    # GLM VERIFY a campione (fix 2026-07-21): niente VERIFY su ogni turno e
-    # NESSUN retry automatico dell'ACT — solo warning prefissato al client.
     from pipeline_common import should_verify
-    do_verify, v_reason = should_verify(chat_fp, act_raw)
+    if is_sse:
+        _gate_blocks = [{"type": "text", "text": eval_text}]
+        if b'"tool_use"' in act_raw:
+            _gate_blocks.append({"type": "tool_use"})
+        _gate_raw = json.dumps({"type": "message", "content": _gate_blocks}).encode()
+    else:
+        _gate_raw = act_raw
+    do_verify, v_reason = should_verify(chat_fp, _gate_raw)
     if do_verify:
         log(f"mix-gm VERIFY ({v_reason}): GLM-5.2 fp={chat_fp}")
         try:
-            verify_body = _glm.build_glm_verify_body(orig, think_plan, act_raw.decode(errors="ignore")[:5000])
+            verify_body = _glm.build_glm_verify_body(orig, think_plan, eval_text[:5000])
             verify_resp = await _glm.forward_glm(request, verify_body, session, "glm-5.2", log_fn=log)
             if verify_resp.status < 400:
                 verify_raw = verify_resp.body if isinstance(verify_resp.body, (bytes, bytearray)) else b""
@@ -174,7 +203,7 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
                     verify_text = verify_data.get("content", [{}])[0].get("text", "") if verify_data.get("content") else ""
                     log(f"mix-gm VERIFY: {verify_text[:100]} fp={chat_fp}")
                     if "INCOERENTE" in verify_text:
-                        act_raw = b"[VERIFY-WARNING] " + act_raw
+                        warn_parts.append('verify=incoherent')
                         debug_catalog.record_event(severity="block", category="mix-gm",
                                                     kind="verify_incoherent", chat_fp=chat_fp,
                                                     snippet=verify_text[:80])
@@ -187,7 +216,10 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
     else:
         log(f"mix-gm VERIFY skip (gate) fp={chat_fp}")
     from aiohttp import web
-    return web.Response(body=act_raw, status=200, content_type="application/json")
+    resp_headers = {'x-ai-verify': ','.join(warn_parts)} if warn_parts else {}
+    return web.Response(body=act_raw, status=200,
+                        content_type=('text/event-stream' if is_sse else 'application/json'),
+                        headers=resp_headers)
 
 
 async def _handle_glm_mode(request, body, session, mode, chat_fp, relay):
