@@ -1,5 +1,15 @@
 # ai-router-switch — TODO
 
+## Completati (sessione 2026-07-22 — audit 6 modalità)
+- [x] **Audit 3 modalità pure (anthropic/minimax/glm): TUTTE OK** — smoke live per-chat (mai toccata la modalità globale): PING 200 + SSE OK su ciascuna; isolamento tool verificato con strip reale di `mcp__MiniMax__understand_image` in glm (`logs/BUG-CATALOG.jsonl` 23:25:21 kept=0/1); 429 su claude-sonnet-4-6 = limite per-modello upstream (x-should-retry, Haiku/Fable 200), router trasparente corretto. Deploy verificato: symlink → src, mtime < start 23:01:33 → processo esegue `d058e37`. Dettagli: vault `audit-modalita-pure-miste-20260722.md` + `CP_20260722_0634.md`.
+- [x] **Audit 3 miste (parziale)**: code-path mappati; non-stream: mix-am OK (`anthropic-think+minimax-m2.7-act`), mix-ag OK, mix-gm 200 ma body JSON corrotto dai prefissi `[VERIFY-WARNING]`/`[HHEM-WARNING]` (finding aperto)
+
+## Attivo (audit 2026-07-22)
+- [ ] **Test SSE (stream:true) su mix-am/mix-ag/mix-gm** — stesso pattern per-chat; expected message_start su mix-am/mix-ag, su mix-gm probabile assenza SSE (ACT bufferizzato in pipeline_glm.py)
+- [ ] **Fix prefissi warning mix-gm** (`[VERIFY-WARNING]`/`[HHEM-WARNING]` nel body rompono il parsing JSON del client): spostare in header o campo JSON — decisione utente sull'approccio, implementazione delegata all'esecutore
+- [ ] **Soglia/skip HHEM su risposte corte** (warning su PING banale = rumore)
+- [ ] Valutare BYPASS-THINK per messaggi banali anche in minimax pura (~5s di THINK sprecati, mix-am ce l'ha)
+
 ## Completati (sessione 2026-07-21/22 — esecutore mix cieco a system e immagini)
 - [x] `bb84a41` — mix: **executor non riceveva system/piano** — 2 bug: (1) `remap_body_for_minimax` non convertiva il campo top-level `system` (spesso lista di blocchi Anthropic) in messaggio `role=system` → MiniMax riceveva solo i messaggi utente, senza istruzioni né piano THINK → non capiva il contesto e non scriveva file; fix `_inject_system_as_message()` in minimax_body.py. (2) `pipeline_minimax.py` usava `_text_from_message` senza importarla → NameError → fallback executor diretto → piano THINK buttato; fix import da pipeline_anthropic.
 - [x] `447d1e6` — mix: **esecutore cieco alle immagini** ("Nessuna immagine allegata" con allegato presente, screenshot 2026-07-22): (1) `_strip_images_from_messages` rimuoveva in silenzio i blocchi image nei messaggi misti → ora ogni image diventa marker testuale esplicito; (2) `_build_think_body` non chiedeva MAI la descrizione delle immagini (ma l'ACT non le riceve per design 38fd747: il piano era la sua unica fonte, vuota) → ora sezione IMMAGINI obbligatoria nel piano + max_tokens 1024 con immagini; (3) regola 6 nella guida esecutore: mai negare/richiedere l'allegato, lavorare sulla descrizione. Router restartato, active + health 200, test funzionali PASS.
