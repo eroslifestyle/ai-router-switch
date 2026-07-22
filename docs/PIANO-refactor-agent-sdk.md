@@ -168,3 +168,9 @@ Unifica i gate di verifica; tripwire → RunAgain/Escalate. Verifica: HHEM e LLM
 
 ## Decisione aperta
 Partire da **Fase 0** (fix immediati dei 5 bug, basso rischio) e poi valutare Fase 1+ dopo aver visto il catalog pulirsi? Oppure andare diretti alla riscrittura strutturale (Fase 1→4)?
+
+---
+
+## Bug preesistente scoperto durante Fase 1 (da fixare a parte)
+
+`tool_isolation.is_anthropic_server_tool()` (riga 37) ritorna `True` per QUALSIASI tool senza `input_schema`. Ma i tool MCP GLM `mcp__zai__...` non hanno `input_schema` → vengono classificati come "server-tool Anthropic" e strippati anche quando `backend="glm"`. Effetto: in modalità GLM il tool nativo web_search_prime viene rimosso. Fix: `is_anthropic_server_tool` deve escludere i nomi già riconosciuti come GLM/MiniMax-branded prima di applicare la regola "no input_schema". Non tocca la Fase 1 (transition_filters è additivo); da schedulare come fix indipendente in Fase 4/pulizia.
