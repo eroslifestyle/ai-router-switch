@@ -174,3 +174,32 @@ Partire da **Fase 0** (fix immediati dei 5 bug, basso rischio) e poi valutare Fa
 ## Bug preesistente scoperto durante Fase 1 (da fixare a parte)
 
 `tool_isolation.is_anthropic_server_tool()` (riga 37) ritorna `True` per QUALSIASI tool senza `input_schema`. Ma i tool MCP GLM `mcp__zai__...` non hanno `input_schema` → vengono classificati come "server-tool Anthropic" e strippati anche quando `backend="glm"`. Effetto: in modalità GLM il tool nativo web_search_prime viene rimosso. Fix: `is_anthropic_server_tool` deve escludere i nomi già riconosciuti come GLM/MiniMax-branded prima di applicare la regola "no input_schema". Non tocca la Fase 1 (transition_filters è additivo); da schedulare come fix indipendente in Fase 4/pulizia.
+
+---
+
+## STATO FINALE (2026-07-22) — implementato
+
+Branch `fase2-agent-loop`. Tutti i moduli additivi o dietro flag (default OFF): **router live invariato**.
+
+### Completato
+- **Fase 1** `transition_filters.py` — registry input_filter per-backend (testato 3 backend)
+- **Fase 2a** `mode_spec.py` — 3 modalità mix come dati (testato + assert regole)
+- **Fase 2b** `agent_loop.py` — run loop tipizzato StepType (testato 3 scenari)
+- **Fase 3** `verify_guardrail.py` — tripwire unificato (testato con HHEM reale, score 0.0088 su claim falso)
+- **Fase 4** cablaggio + pulizia:
+  - `agent_loop_glm.py` — adapter mix-ag/mix-gm dietro `AIROUTER_AGENT_LOOP=1`
+  - FIX #3 repair MiniMax dietro `AIROUTER_TRANSITION_FILTERS=1`
+  - Fix bug tool_isolation (zai in glm), rescue Haiku reale
+  - Rimosso dead code minimax (-102 righe) + import morti nel proxy
+  - Smoke test proxy: parte con flag ON (mix-ag) e OFF (anthropic), zero errori
+
+### Stash obsoleto risolto
+`uncommitted-refactor-pre-restart` analizzato (obsoleto/rotto/regressivo, nulla da recuperare), backup in `docs/sessions/stash-refactor-pre-restart.patch`, scartato con conferma utente.
+
+### Duplicazione temporanea documentata (INTENZIONALE)
+Le pipeline classiche `_anthropic_glm_think_act_verify` / `_glm_minimax_think_act_verify` restano come **fallback** (flag OFF). Sono sostituite da agent_loop_glm quando `AIROUTER_AGENT_LOOP=1`. **Rimozione delle classiche: SOLO dopo che il flag ON ha girato in produzione senza regressioni** (evita rottura mix-ag/mix-gm senza fallback).
+
+### Prossimo step (sessione dedicata)
+1. Attivare `AIROUTER_AGENT_LOOP=1` + `AIROUTER_TRANSITION_FILTERS=1` in produzione, monitorare
+2. Se stabile N giorni → rimuovere le 2 pipeline classiche GLM (zero duplicazioni definitivo)
+3. Cablare anche mix-am su agent_loop (oggi usa ancora `_pipeline_think_act`)
