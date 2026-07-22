@@ -307,6 +307,31 @@ class StreamingRelay:
                 )
             except Exception:
                 pass
+        # GUARD pseudo-toolcall (2026-07-22): se la request aveva `tools` ma la
+        # risposta (primi 16KB) contiene tool call TESTUALI e nessun tool_use
+        # strutturato, l'esecutore ha degradato (tools ignorati/persi upstream).
+        # Non blocca né modifica il flusso: logga + cataloga per diagnosi.
+        try:
+            _guard_txt = _acc_buf.decode("utf-8", errors="replace")
+            if b'"tools"' in self.body and '"tool_use"' not in _guard_txt:
+                _markers = ("minimax:tool_call", "[TOOL_CALL]", "[/TOOL_CALL]",
+                            "<tool_call>", "<invoke name=")
+                _hit = next((_m for _m in _markers if _m in _guard_txt), None)
+                if _hit:
+                    self.log_fn(f"PSEUDO-TOOLCALL testuale (marker={_hit}) mode={self.mode} "
+                                f"fp={chat_fp_for_rewrite} status={upstream.status} — executor ha ignorato i tools")
+                    dl.capture(
+                        kind="pseudo_toolcall_text", request=self.request,
+                        fp=chat_fp_for_rewrite, client_model=orig_model or "",
+                        status=upstream.status, stage="relay",
+                        upstream_status=upstream.status,
+                        upstream_raw=bytes(_acc_buf[:8192]),
+                        upstream_encoding=upstream.headers.get("Content-Encoding", ""),
+                        orig=self.orig, mode=self.mode,
+                        note=f"marker={_hit}",
+                    )
+        except Exception:
+            pass
         # FIX #4: log bytes totali inoltrati
         if is_sse or total_bytes > 0:
             self.log_fn(f"relay done: {chunk_count} chunks, {total_bytes} bytes (SSE={is_sse})")
