@@ -7,6 +7,10 @@
 ## Attivo (audit 2026-07-22)
 - [ ] Valutare BYPASS-THINK per messaggi banali anche in minimax pura (~5s di THINK sprecati, mix-am ce l'ha)
 - [ ] (minore) mix-gm con `stream:true` bufferizza comunque l'intero ACT prima di rispondere (latenza primo byte, SSE valido ma non progressivo) — valutare relay streaming con HHEM/VERIFY post-hoc
+- [ ] (opzionale, hardening) guardia response-side isolamento: se un modello imita dalla history un tool_use di un provider straniero (strip = solo request-side su array `tools`), il client lo eseguirebbe — valutare blocco/riscrittura dei tool_use stranieri in uscita
+
+## Completati (sessione 2026-07-22 — isolamento web search modalità solo, commit `a227ea3`)
+- [x] `a227ea3` — **Leak isolamento: WebSearch/WebFetch non brandizzati Anthropic** (segnalazione utente «è sempre glm a fare le web search»): hanno `input_schema` → `is_anthropic_server_tool` (che controlla solo l'assenza di schema) non li riconosceva → visibili a TUTTI i backend, GLM sceglieva `WebSearch` al posto di `mcp__zai__web_search_prime`. Fix: `_ANTHROPIC_CLIENT_TOOL_NAMES` match nome esatto lowercase in tool_isolation.py. Verificato live per-chat: anthropic→WebSearch, minimax→mcp__MiniMax__web_search, glm→mcp__zai__web_search_prime (kept=1/3 ovunque). Strip MCP già funzionante prima (2110+1560 eventi BUG-CATALOG). Altri servizi già isolati: MCP MiniMax matchano "minimax", zai matchano prefisso `mcp__zai__`, image/video-gen GLM solo da catene glm, vision in-band.
 
 ## Completati (sessione 2026-07-22 — SSE miste + fix mix-gm, commit `3b5a664`)
 - [x] **Test SSE su mix-am/mix-ag/mix-gm**: mix-am OK (message_start), mix-ag OK (ACT glm-4.7 streamma), mix-gm SSE presente MA prefissato `[HHEM-WARNING] event: message_start` → finding più grave del previsto (rompeva anche lo stream)
