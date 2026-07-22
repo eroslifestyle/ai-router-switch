@@ -691,33 +691,11 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
     # pipeline THINK→ACT→VERIFY (Anthropic THINK legge immagini, M3 ACT riceve
     # piano testuale, no immagini a M3 che allucinava).
 
-    # D45 BYPASS-THINK: task leggeri
-    LIGHT_MSG_THRESHOLD = 200
-    msgs = orig.get('messages') or []
-    user_msgs = [m for m in msgs if m.get('role') == 'user']
-    content_len = 0
-    if user_msgs:
-        last = user_msgs[-1].get('content', '')
-        content_len = len(last) if isinstance(last, str) else len(str(last))
-    is_light = (not orig.get('tools') and len(user_msgs) == 1 and content_len < LIGHT_MSG_THRESHOLD)
-    if is_light:
-        orig_model = (orig.get('model') or '').strip()
-        try:
-            if orig_model.lower().startswith('minimax'):
-                up = await forward_minimax(request, body, session)
-            else:
-                up = await forward_anthropic(request, body, session)
-            if up.status not in FALLBACK_STATUSES:
-                mixed_fail_reset(chat_fp)
-                log(f'mix-am BYPASS-THINK direct (light, {content_len}c) fp={chat_fp}')
-                return await relay(up)
-            log(f'mix-am BYPASS-THINK {up.status} -> fallthrough pipeline fp={chat_fp}')
-            try:
-                await up.release()
-            except Exception:
-                pass
-        except Exception as e:
-            log(f'mix-am BYPASS-THINK EXC: {e} -> fallthrough')
+    # BYPASS-THINK rimosso (fix 2026-07-23): ogni messaggio passa SEMPRE per
+    # l'orchestratore Anthropic (THINK→ACT→VERIFY), anche i task leggeri.
+    # Prima: task <200c senza tool andavano direttamente a MiniMax (bypassava
+    # orchestratore). Ora: anche i task leggeri vengono analizzati dall'orchestratore
+    # prima di delegare all'esecutore.
 
     think_body = _build_think_body(orig)
     # FIX BUG-3: backoff esponenziale sul timeout THINK + skip dopo 2 KO consecutivi.
