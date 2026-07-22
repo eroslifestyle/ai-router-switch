@@ -506,14 +506,6 @@ async def handle(request):
         if not request.path.endswith("/v1/messages"):
             up = await forward_anthropic(request, body, session)
             return await relay(up)
-        try:
-            _am = (json.loads(body).get("model") or "").strip().lower()
-        except Exception:
-            _am = ""
-        if _am.startswith("minimax"):
-            log(f"anthropic mode: model MiniMax '{_am}' -> forward_minimax")
-            return await relay(await forward_minimax(request, body, session),
-                               extra_headers={"x-ai-verified": "minimax-oob"})
         # Retry 429/5xx certificato SDK ufficiale (exponential backoff + retry-after).
         try:
             up, exhausted = await _anthropic_forward_with_retry(request, body, session, relay)
@@ -646,30 +638,15 @@ async def handle(request):
         return web.json_response(final_json, headers={"x-ai-verified": verified_flag})
 
     # NEW PIPELINE redesign: Anthropic THINK + M3 ACT
+    # mix-am: SEMPRE attraverso l'orchestratore Anthropic (THINK → ACT MiniMax → VERIFY)
+    # Il fast-path (MiniMax diretto) è disabilitato perché in mix-am l'orchestratore
+    # Anthropic deve leggere TUTTO (immagini, audio, video, messaggi) prima di delegare.
     if mode == "mix-am" and NEW_PIPELINE and is_messages and not anthropic_leads:
         try:
             orig = json.loads(body)
             _inject_task_mode_for_images(orig)
         except Exception:
             orig = {}
-        orig_model = (orig.get("model") or "").strip()
-        if orig_model.lower().startswith("minimax"):
-            try:
-                up = await forward_minimax(request, body, session)
-                if up.status == 400:
-                    is_ctx, _ = await _is_context_exceed(up)
-                    if is_ctx:
-                        return await _shrink_and_retry_minimax(request, orig, body, session, chat_fp, relay)
-                if up.status not in FALLBACK_STATUSES:
-                    mixed_fail_reset(chat_fp)
-                    return await relay(up)
-                log(f"mix-am FAST-PATH MiniMax {up.status} -> fallthrough pipeline fp={chat_fp}")
-                try:
-                    await up.release()
-                except Exception:
-                    pass
-            except Exception as e:
-                log(f"mix-am FAST-PATH MiniMax EXC: {e}")
         log(f"mix-am pipeline attivata fp={chat_fp} tools={bool(orig.get('tools'))}")
         return await _pipeline_think_act(request, body, session, orig, relay)
 

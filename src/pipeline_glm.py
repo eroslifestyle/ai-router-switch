@@ -99,10 +99,11 @@ async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp
     if not do_verify:
         log(f"mix-ag VERIFY skip (gate) fp={chat_fp}")
         return act_resp
-    log(f"mix-ag VERIFY ({v_reason}): Haiku fp={chat_fp}")
+    log(f"mix-ag VERIFY ({v_reason}): Anthropic fp={chat_fp}")
+    orig_model = (orig.get("model") or "").strip()
     try:
         verify_body = json.dumps({
-            "model": THINK_MODEL,
+            "model": orig_model or THINK_MODEL,
             "system": "Sei un verifier AI. Rispondi SOLO con: VERIFIED, oppure INCOERENTE: [motivo breve].",
             "messages": [{"role": "user", "content":
                 f"Piano:\n{think_plan}\n\nOutput:\n{act_raw.decode(errors='ignore')[:5000]}"}],
