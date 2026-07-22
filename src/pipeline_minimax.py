@@ -8,109 +8,13 @@ from router_constants import (
 )
 from router_utils import log
 import debug_catalog
-from pipeline_anthropic import _text_from_message  # usato dalle funzioni legacy THINK/VERIFY
 
-
-def _build_minimax_think_body(orig: dict) -> bytes:
-    """M3 orchestra e produce SOLO JSON con piano + executor scelto."""
-    executors = ", ".join(sorted(MINIMAX_EXECUTORS)) or MINIMAX_MODEL
-    sys_msg = (
-        "Sei M3, il META-ORCHESTRATORE. Il tuo compito è PIANIFICARE, non eseguire. "
-        "Ricevi una richiesta utente (con possibili tools), produci un PIANO ragionato, "
-        "scegli quali tool chiamare e QUALE modello esecutore inferiore deve eseguire. "
-        "Rispondi SOLO con JSON valido, nessun testo fuori.\n\n"
-        'Schema esatto:\n'
-        '{"plan": "<ragionamento in italiano, max 800 char>",'
-        ' "tools_to_call": [{"name": "<tool_name>", "input": <object>}, ...],'
-        f' "executor_model": "<uno tra: {executors}>",'
-        ' "self_review_ok": <bool>,'
-        ' "self_review_notes": ["<criticita risolta>", ...]}\n\n'
-        "Regole: scegli executor_model in base al task (coding pesante -> il piu' capace). "
-        "Fai auto-review del piano PRIMA di emettere JSON; se resta incoerente metti "
-        "self_review_ok=false e tools_to_call=[]. Tu NON esegui mai: solo pianifichi."
-    )
-    body = dict(orig)
-    body["model"] = MINIMAX_ORCHESTRATOR_MODEL
-    body["system"] = sys_msg
-    body["stream"] = False
-    body["max_tokens"] = max(int(orig.get("max_tokens", 2048)), 2048)
-    return json.dumps(body).encode()
-
-
-def _pick_minimax_executor(plan_json: dict) -> str:
-    """Executor scelto da M3, validato contro la whitelist dei modelli inferiori."""
-    em = (plan_json.get("executor_model") or "").strip()
-    if em in MINIMAX_EXECUTORS and em != MINIMAX_ORCHESTRATOR_MODEL:
-        return em
-    return MINIMAX_MODEL
-
-
-def _build_minimax_act_body(orig: dict, plan: str, tools_to_call: list, executor: str) -> bytes:
-    """L'executor inferiore esegue il piano prodotto da M3.
-
-    Fix 2026-07-20: costruzione UNIFICATA via pipeline_common — preserva il system
-    originale (istruzioni skill, CLAUDE.md) invece di sovrascriverlo. Prima
-    body['system']=sys_msg distruggeva la disciplina del task → premature termination."""
-    from pipeline_common import build_executor_body_bytes
-    note = ""
-    if tools_to_call:
-        note = f"TOOLS suggeriti da M3: {json.dumps(tools_to_call, ensure_ascii=False)}"
-    return build_executor_body_bytes(orig, plan, executor, extra_note=note)
-
-
-def _build_minimax_act_body_retry(orig: dict, correction: str) -> bytes:
-    """Re-esegue l'ACT con nota correttiva iniettata nel system message."""
-    body = dict(orig)
-    orig_sys = orig.get("system", "")
-    body["system"] = orig_sys + f"\n\n[NOTA CORRETTIVA dal verifier]\n{correction}\n[/NOTA CORRETTIVA]" \
-        if orig_sys else f"[NOTA CORRETTIVA dal verifier]\n{correction}\n[/NOTA CORRETTIVA]"
-    return json.dumps(body).encode()
-
-
-def _parse_think_json(text: str) -> dict | None:
-    """Parsa l'output della fase THINK con formato [PLAN]...[/PLAN]."""
-    if not text:
-        return None
-    import re
-
-    def extract_section(tag: str) -> str:
-        pattern = rf'\[{re.escape(tag)}\](.*?)\[/{re.escape(tag)}\]'
-        m = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-        return m.group(1).strip() if m else ""
-
-    plan = extract_section("PLAN")
-    tools_raw = extract_section("TOOLS")
-    review_raw = extract_section("SELF_REVIEW")
-
-    if not plan:
-        return None
-
-    tools = []
-    if tools_raw:
-        try:
-            tools = json.loads(tools_raw)
-        except Exception:
-            pass
-
-    self_review_ok = True
-    self_review_notes = []
-    if review_raw:
-        ok_match = re.search(r'OK:\s*(true|false)', review_raw, re.IGNORECASE)
-        if ok_match:
-            self_review_ok = ok_match.group(1).lower() == "true"
-        notes_match = re.search(r'NOTES:\s*(\[.*?\])', review_raw, re.DOTALL)
-        if notes_match:
-            try:
-                self_review_notes = json.loads(notes_match.group(1))
-            except Exception:
-                pass
-
-    return {
-        "plan": plan,
-        "tools_to_call": tools,
-        "self_review_ok": self_review_ok,
-        "self_review_notes": self_review_notes,
-    }
+# Dead code rimosso 2026-07-22 (audit): 5 funzioni THINK/ACT legacy MiniMax
+# (_build_minimax_think_body, _pick_minimax_executor, _build_minimax_act_body,
+# _build_minimax_act_body_retry, _parse_think_json) — mai chiamate da nessuno.
+# L'orchestrazione minimax pura è passthrough diretto dal redesign 2026-07-22
+# (il parser cercava [PLAN] ma il prompt chiedeva JSON → piano sempre scartato).
+# L'import _text_from_message serviva solo a queste funzioni.
 
 
 async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, relay):
