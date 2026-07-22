@@ -226,7 +226,7 @@ async def _handle_glm_mode(request, body, session, mode, chat_fp, relay):
     """Dispatch delle 3 modalita' GLM."""
     import glm_backend as _glm
     if mode == "glm":
-        return await _glm.glm_think_act_verify(request, body, session, log_fn=log)
+        return await _glm.glm_think_act_verify(request, body, session, log_fn=log, relay=relay)
     if mode == "mix-ag":
         return await _anthropic_glm_think_act_verify(request, body, session, chat_fp, relay)
     if mode == "mix-gm":

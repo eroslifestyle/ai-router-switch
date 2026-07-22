@@ -538,7 +538,7 @@ async def _glm_think_verify_background(request, body, orig, content_type, act_ra
         log_fn(f"GLM VERIFY EXC: {e}")
 
 
-async def glm_think_act_verify(request, body: bytes, session, log_fn=print):
+async def glm_think_act_verify(request, body: bytes, session, log_fn=print, relay=None):
     """Esegue GLM: ACT risponde SUBITO al client (fix 2026-07-19 — prima
     THINK/ACT/VERIFY erano sequenziali e bloccanti, 10-20s+ prima del primo
     byte, causavano retry-storm lato client per timeout percepito).
@@ -566,6 +566,31 @@ async def glm_think_act_verify(request, body: bytes, session, log_fn=print):
     # Isolamento tool: gestito dentro forward_glm (choke-point tool_isolation).
 
     log_fn(f"GLM ACT: esecuzione con {real_model} (tier={eff_model})")
+
+    # STREAMING PASSTHROUGH (fix 2026-07-22): se il client chiede stream,
+    # relay diretto dello stream upstream — prima il body veniva bufferizzato
+    # per intero (primo byte al client = fine generazione → il client andava
+    # in timeout e ritentava sui lavori lunghi). THINK/VERIFY background skip
+    # dichiarato: sul path stream non abbiamo il body in memoria.
+    want_stream = bool(orig.get("stream")) if isinstance(orig, dict) else False
+    if want_stream and relay is not None:
+        act_resp = await forward_glm(request, act_body, session,
+                                     orig.get("model") or real_model, log_fn,
+                                     passthrough=True)
+        if isinstance(act_resp, aiohttp.web.Response):
+            # errore sintetico (key missing / 429 finale): già web.Response
+            return act_resp
+        if act_resp.status >= 400:
+            log_fn(f"GLM ACT fail {act_resp.status} (stream path)")
+            raw_err = await act_resp.read()
+            status_err = act_resp.status
+            act_resp.release()
+            return aiohttp.web.Response(body=raw_err, status=status_err,
+                                        content_type="application/json")
+        log_fn("GLM THINK/VERIFY: skip su stream passthrough (body non bufferizzato)")
+        return await relay(act_resp,
+                           extra_headers={"x-ai-verified": f"glm({real_model})"})
+
     act_resp = await forward_glm(request, act_body, session,
                                   orig.get("model") or real_model, log_fn)
 
@@ -723,7 +748,13 @@ async def forward_glm(request, body: bytes, session, model: str,
             await GLM_LIMITER.acquire(model, est_tokens,
                                       budget_sec=GLM_RETRY_CAP_SEC)
 
-            timeout = ClientTimeout(total=120)
+            # Passthrough (stream relay): niente timeout totale — total=120
+            # taglierebbe lo stream a metà relay (stesso bug del fix 4a256ce
+            # su mix-am). sock_read copre gli stall tra chunk.
+            if passthrough:
+                timeout = ClientTimeout(total=None, sock_connect=15, sock_read=120)
+            else:
+                timeout = ClientTimeout(total=120)
             async with _GLM_SEM:
                 # FIX: NIENTE `async with session.request(...) as resp` — se la
                 # funzione ritorna `resp` da dentro un async with, __aexit__
