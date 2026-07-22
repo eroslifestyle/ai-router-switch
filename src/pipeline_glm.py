@@ -51,6 +51,9 @@ async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp
 
     think_body = _build_think_body(orig)
     try:
+        # Leg Anthropic THINK: _call_full ritenta i 429/5xx transienti col backoff
+        # certificato SDK (retry_transient default on, riuso pipeline_common) invece
+        # di trattare il 429 come plan vuoto -> no rimbalzo/loop lato client (2026-07-22).
         t_status, t_json = await _call_full(forward_anthropic_direct, request, think_body, session, timeout=THINK_TIMEOUT_SEC)
     except Exception as e:
         log(f"mix-ag THINK EXC: {e}")
@@ -105,6 +108,7 @@ async def _anthropic_glm_think_act_verify(request, body: bytes, session, chat_fp
                 f"Piano:\n{think_plan}\n\nOutput:\n{act_raw.decode(errors='ignore')[:5000]}"}],
             "max_tokens": 200,
         }).encode()
+        # Leg Anthropic VERIFY: stesso retry certificato via _call_full (2026-07-22).
         v_status, v_json = await _call_full(forward_anthropic_direct, request, verify_body, session, timeout=15)
         if v_status < 400 and v_json:
             verify_text = _text_from_message(v_json).strip()
