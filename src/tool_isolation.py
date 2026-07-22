@@ -18,13 +18,25 @@ import json
 import debug_catalog
 
 
+# Tool client Claude Code con input_schema ma eseguiti via infrastruttura
+# Anthropic (WebSearch/WebFetch): brandizzati Anthropic per nome esatto,
+# altrimenti restano visibili a MiniMax/GLM che li scelgono al posto dei
+# propri tool nativi (leak isolamento 2026-07-22, es. GLM usava WebSearch).
+_ANTHROPIC_CLIENT_TOOL_NAMES = {"websearch", "webfetch", "web_search", "web_fetch"}
+
+
 def is_anthropic_server_tool(t: dict) -> bool:
     """Server-tool Anthropic (web_search_20250305, computer_use, bash,
     code_execution, ...): eseguiti server-side su api.anthropic.com,
     riconoscibili perché privi di input_schema (i tool client-eseguiti/MCP
     ce l'hanno sempre). Nessun altro backend sa eseguirli — se ricevuti,
-    MiniMax/GLM rispondono 400 (bug 2013, 2026-07-04)."""
-    return isinstance(t, dict) and "input_schema" not in t
+    MiniMax/GLM rispondono 400 (bug 2013, 2026-07-04). In più i tool client
+    Anthropic-branded (WebSearch/WebFetch) sono riconosciuti per nome esatto."""
+    if not isinstance(t, dict):
+        return False
+    if "input_schema" not in t:
+        return True
+    return (t.get("name") or "").lower() in _ANTHROPIC_CLIENT_TOOL_NAMES
 
 
 def is_minimax_branded_tool(t: dict) -> bool:
