@@ -103,7 +103,11 @@ def build_act_body(orig: dict, plan: str, tools_to_call: list = None,
 
 
 def build_finalize_body(orig: dict, question: str, draft_v2: str) -> dict:
-    """Round 3: Anthropic finalizza — gateway di qualità, decide se la v2 e' pubblicabile."""
+    """Round 3: Anthropic finalizza — gateway di qualità, decide se la v2 e' pubblicabile.
+
+    Usa il modello utente (orig.model) se disponibile, altrimenti VERIFY_MODEL.
+    """
+    orig_model = (orig.get("model") or "").strip()
     sys_msg = (
         "Sei il finalizzatore. Ricevi DOMANDA e v2 prodotta da M3 dopo la tua critica. "
         "Se la v2 risponde correttamente, restituiscila identica. "
@@ -115,7 +119,7 @@ def build_finalize_body(orig: dict, question: str, draft_v2: str) -> dict:
         "Restituisci la risposta finale."
     )
     return {
-        "model": VERIFY_MODEL,
+        "model": orig_model or VERIFY_MODEL,
         "max_tokens": int(orig.get("max_tokens", 1024)),
         "system": _anthropic_system(sys_msg),
         "messages": [{"role": "user", "content": user_msg}],

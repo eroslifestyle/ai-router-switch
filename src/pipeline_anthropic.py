@@ -93,9 +93,10 @@ def _build_think_body(orig: dict) -> bytes:
             "testo visibile, messaggi di errore verbatim, elementi UI, dati rilevanti>"
         )
         max_tokens = max(THINK_MAX_TOKENS, 1024)
+    orig_model = (orig.get("model") or "").strip()
     content = [{"type": "text", "text": digest}] + images
     body = {
-        "model": THINK_MODEL,
+        "model": orig_model or THINK_MODEL,
         "system": _anthropic_system(sys_msg),
         "messages": [{"role": "user", "content": content}],
         "stream": False,
