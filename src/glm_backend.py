@@ -274,11 +274,20 @@ def has_multimodal_content(body: bytes) -> tuple[str, str]:
                     if isinstance(block, dict):
                         t = block.get("type", "")
                         if t == "image":
-                            # Check per video frame (base64 source = frame)
-                            source = block.get("source", {})
-                            if source.get("type") == "base64":
-                                return ("video", "")
+                            # FIX 2026-07-22: un blocco type:"image" è SEMPRE
+                            # un'immagine, sia source base64 sia url. Il ramo
+                            # precedente classificava base64 → "video" (tier
+                            # MULTIMODAL glm-5V-Turbo), ma il formato Anthropic
+                            # standard per QUALSIASI immagine incollata (screenshot,
+                            # foto) è {type:image, source:{type:base64}} → OGNI
+                            # immagine finiva su glm-5V-Turbo (429/connection-reset,
+                            # "errore api" della modalità glm). Un frame video non è
+                            # distinguibile da un'immagine via source.type e Claude
+                            # Code non invia frame video in-band: il video vero si
+                            # rileva solo via marker espliciti (video_generation, sotto).
                             return ("image", "")
+                        if t in ("video", "input_video"):
+                            return ("video", "")
 
         # Check per generazione immagine/video: SOLO via marker esplicito nel
         # body (type: image_generation/video_generation). FIX 2026-07-19:
