@@ -7,7 +7,7 @@
 
 ## Attivo (mix tool call testuali 2026-07-22)
 - [ ] **Al prossimo episodio**: `grep PSEUDO-TOOLCALL ~/.claude/logs/ai-router.log` + `logs/debug-errors.jsonl` kind=`pseudo_toolcall_text` (primi 8KB risposta) → root cause definitiva. Expected: capire se degrado upstream M2.7 o condizione di sessione non replicata.
-- [ ] Capire perché il THINK falliva 3/3 nella sessione keyok (ora `think_status_ko` lo dice: sospetto 429 quota Opus del piano)
+- [ ] Capire perché il THINK falliva 3/3 nella sessione keyok — **analisi retroattiva chiusa (2026-07-23)**: NON skip (contatore per-fp, fp nuovo, riga skip assente), NON timeout/EXC (log già esistenti pre-e040470, assenti) → resta status-KO (es. 429) o 200-testo-vuoto, i 2 path allora muti; ~1s pipeline→ACT favorisce 429 quota. NON blackout: cd119e4b THINK OK stessi minuti. Serve il prossimo evento `think_status_ko` per chiudere
 - [ ] (opzionale) escalation automatica: su `pseudo_toolcall_text` in risposta non-stream, trattare come fail → rescue chain (oggi solo diagnosi)
 
 ## Completati (sessione 2026-07-22 pomeriggio — retry 429 certificato esteso alle MIX)
