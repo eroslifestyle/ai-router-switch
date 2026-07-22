@@ -128,6 +128,10 @@ GLM_RATE_LIMITS = {
 }
 GLM_RATE_LIMITS_DEFAULT = (200, 10_000_000)
 GLM_RETRY_CAP_SEC = float(os.environ.get("AIROUTER_GLM_RETRY_CAP_SEC", "90"))
+# Budget acquire ridotto per richieste stream: durante l'attesa del limiter il
+# client non vede byte → oltre pochi secondi percepisce un freeze e ritenta.
+GLM_STREAM_ACQUIRE_CAP_SEC = float(
+    os.environ.get("AIROUTER_GLM_STREAM_ACQUIRE_CAP_SEC", "8"))
 GLM_BACKOFF_STEPS = (5, 10, 20, 40, 60)
 
 
@@ -560,7 +564,12 @@ async def glm_think_act_verify(request, body: bytes, session, log_fn=print, rela
     # ACT: esegue e risponde subito. Il tier/modello non dipende dal THINK
     # (che non alimenta act_body), quindi non c'è motivo di aspettarlo.
     tier = await classify_tier(body, request, session, log_fn)
-    eff_model, _ = apply_peak_cap(tier)
+    eff_model, capped = apply_peak_cap(tier)
+    if capped and is_glm_body_too_large(body, resolve_glm_upstream_model(eff_model)):
+        # Peak-cap hole: pure glm è no-fallback — declassare a un modello con
+        # ctx più piccolo del body = 400 garantito. Meglio pagare il tier alto.
+        log_fn(f"GLM peak-cap bypass: body oltre ctx di {eff_model}, resto su {tier}")
+        eff_model = tier
     real_model = resolve_glm_upstream_model(eff_model)
     act_body = set_body_model(body, real_model)
     # Isolamento tool: gestito dentro forward_glm (choke-point tool_isolation).
@@ -576,7 +585,7 @@ async def glm_think_act_verify(request, body: bytes, session, log_fn=print, rela
     if want_stream and relay is not None:
         act_resp = await forward_glm(request, act_body, session,
                                      orig.get("model") or real_model, log_fn,
-                                     passthrough=True)
+                                     passthrough=True, upstream_model=real_model)
         if isinstance(act_resp, aiohttp.web.Response):
             # errore sintetico (key missing / 429 finale): già web.Response
             return act_resp
@@ -592,7 +601,8 @@ async def glm_think_act_verify(request, body: bytes, session, log_fn=print, rela
                            extra_headers={"x-ai-verified": f"glm({real_model})"})
 
     act_resp = await forward_glm(request, act_body, session,
-                                  orig.get("model") or real_model, log_fn)
+                                  orig.get("model") or real_model, log_fn,
+                                  upstream_model=real_model)
 
     if act_resp.status >= 400:
         log_fn(f"GLM ACT fail {act_resp.status}")
@@ -722,7 +732,8 @@ _GLM_SEM = asyncio.Semaphore(int(os.environ.get("AIROUTER_GLM_SEMAPHORE", "8")))
 
 
 async def forward_glm(request, body: bytes, session, model: str,
-                      log_fn=print, passthrough: bool = False):
+                      log_fn=print, passthrough: bool = False,
+                      upstream_model: str = ""):
     """Invia request al backend GLM con retry loop 2 tentativi (R3-#6).
 
     Args:
@@ -745,8 +756,11 @@ async def forward_glm(request, body: bytes, session, model: str,
         resp = None
         try:
             est_tokens = _estimate_tokens(body)
-            await GLM_LIMITER.acquire(model, est_tokens,
-                                      budget_sec=GLM_RETRY_CAP_SEC)
+            lim_model = upstream_model or model
+            budget = (GLM_STREAM_ACQUIRE_CAP_SEC if passthrough
+                      else GLM_RETRY_CAP_SEC)
+            entry = await GLM_LIMITER.acquire(lim_model, est_tokens,
+                                              budget_sec=budget)
 
             # Passthrough (stream relay): niente timeout totale — total=120
             # taglierebbe lo stream a metà relay (stesso bug del fix 4a256ce
@@ -775,7 +789,9 @@ async def forward_glm(request, body: bytes, session, model: str,
                     ssl=True,
                 )
 
-            GLM_LIMITER.record(None, est_tokens, resp.status < 400)
+            GLM_LIMITER.record(entry, est_tokens, resp.status < 400)
+            if resp.status < 400:
+                GLM_LIMITER.on_success()
 
             if resp.status == 429:
                 step = GLM_LIMITER.on_429()
@@ -831,6 +847,18 @@ async def forward_glm(request, body: bytes, session, model: str,
                 headers=headers,
             )
 
+        except RateLimitExhausted as e:
+            # Fail-fast: mai attese silenziose lato client — 429 subito,
+            # il client Anthropic ritenta da solo (x-should-retry).
+            log_fn(f"GLM rate-limit fail-fast: {e}")
+            debug_catalog.record_event(severity="block", category="glm",
+                                        kind="glm_ratelimit_exhausted", code=429,
+                                        snippet=f"model={model} {e}")
+            return aiohttp.web.Response(
+                status=429,
+                text='{"type":"error","error":{"type":"rate_limit_error","message":"glm limiter budget exhausted"}}',
+                content_type="application/json",
+                headers={"Retry-After": "10", "x-should-retry": "true"})
         except asyncio.TimeoutError:
             log_fn(f"GLM timeout attempt {attempt + 1}")
             debug_catalog.record_event(severity="error", category="glm",
