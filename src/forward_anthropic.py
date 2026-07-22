@@ -17,6 +17,43 @@ from router_utils import (
 from router_auth import _load_oauth_token, _reload_oauth_token
 from router_debug import dl
 
+# Deep-debug (analyze struttura body + dump _DEBUG_LAST_SENT su disco) è overhead
+# SINCRONO nel path caldo, eseguito ad ogni richiesta e scalante col body (deep-copy
+# di ogni content block + json.dump indent=2 su disco). Serve solo per diagnosi:
+# gated dietro flag, default OFF. Attiva con AIROUTER_DEEP_DEBUG=1 quando serve.
+_DEEP_DEBUG = os.environ.get("AIROUTER_DEEP_DEBUG", "0") == "1"
+
+
+def _emit_deep_debug(fn: str, request, safe_body: bytes) -> None:
+    """Analisi strutturale + dump ultimo body inviato. No-op se _DEEP_DEBUG off."""
+    try:
+        analysis = _analyze_body_structure(safe_body)
+        SENT_ANALYSIS.append({
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "fn": fn, "path": request.path,
+            "sent_bytes": analysis["size_bytes"],
+            "analysis": analysis,
+        })
+        try:
+            body_dict = json.loads(safe_body)
+            for m in body_dict.get("messages", []):
+                c = m.get("content", [])
+                if isinstance(c, list):
+                    for b in c:
+                        if isinstance(b, dict) and b.get("type") == "image":
+                            d = b.get("data", "")
+                            if len(d) > 200:
+                                b["data"] = d[:200] + f"... [TRUNCATED {len(d) - 200} chars]"
+            with open(_DEBUG_LAST_SENT, "w") as f:
+                json.dump({"sent_body": body_dict, "analysis": analysis}, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+        if analysis["orphan_tool_results"] or analysis["role_system_in_messages"] > 0:
+            log(f"[DEEP-DEBUG-WARN] {fn}: orphans={len(analysis['orphan_tool_results'])} "
+                f"role_system_msgs={analysis['role_system_in_messages']}")
+    except Exception:
+        pass
+
 
 def strip_unsupported_fields(raw: bytes, fields: tuple) -> bytes:
     """Rimuove campi non supportati dal body JSON. No-op se non è JSON."""
@@ -128,35 +165,9 @@ async def forward_anthropic(request, body, session):
         except Exception:
             pass
 
-    # Deep debug
-    _fn = "forward_anthropic"
-    try:
-        analysis = _analyze_body_structure(safe_body)
-        SENT_ANALYSIS.append({
-            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "fn": _fn, "path": request.path,
-            "sent_bytes": analysis["size_bytes"],
-            "analysis": analysis,
-        })
-        try:
-            body_dict = json.loads(safe_body)
-            for m in body_dict.get("messages", []):
-                c = m.get("content", [])
-                if isinstance(c, list):
-                    for b in c:
-                        if isinstance(b, dict) and b.get("type") == "image":
-                            d = b.get("data", "")
-                            if len(d) > 200:
-                                b["data"] = d[:200] + f"... [TRUNCATED {len(d) - 200} chars]"
-            with open(_DEBUG_LAST_SENT, "w") as f:
-                json.dump({"sent_body": body_dict, "analysis": analysis}, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-        if analysis["orphan_tool_results"] or analysis["role_system_in_messages"] > 0:
-            log(f"[DEEP-DEBUG-WARN] {_fn}: orphans={len(analysis['orphan_tool_results'])} "
-                f"role_system_msgs={analysis['role_system_in_messages']}")
-    except Exception:
-        pass
+    # Deep debug (gated: default OFF, vedi _emit_deep_debug)
+    if _DEEP_DEBUG:
+        _emit_deep_debug("forward_anthropic", request, safe_body)
 
     # Context window retry: 400 context -> strip images and retry
     try:
@@ -237,34 +248,9 @@ async def forward_anthropic_direct(request, body, session):
         except Exception:
             pass
 
-    _fn = "forward_anthropic_direct"
-    try:
-        analysis = _analyze_body_structure(safe_body)
-        SENT_ANALYSIS.append({
-            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "fn": _fn, "path": request.path,
-            "sent_bytes": analysis["size_bytes"],
-            "analysis": analysis,
-        })
-        try:
-            body_dict = json.loads(safe_body)
-            for m in body_dict.get("messages", []):
-                c = m.get("content", [])
-                if isinstance(c, list):
-                    for b in c:
-                        if isinstance(b, dict) and b.get("type") == "image":
-                            d = b.get("data", "")
-                            if len(d) > 200:
-                                b["data"] = d[:200] + f"... [TRUNCATED {len(d) - 200} chars]"
-            with open(_DEBUG_LAST_SENT, "w") as f:
-                json.dump({"sent_body": body_dict, "analysis": analysis}, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-        if analysis["orphan_tool_results"] or analysis["role_system_in_messages"] > 0:
-            log(f"[DEEP-DEBUG-WARN] {_fn}: orphans={len(analysis['orphan_tool_results'])} "
-                f"role_system_msgs={analysis['role_system_in_messages']}")
-    except Exception:
-        pass
+    # Deep debug (gated: default OFF, vedi _emit_deep_debug)
+    if _DEEP_DEBUG:
+        _emit_deep_debug("forward_anthropic_direct", request, safe_body)
 
     return await session.request(
         request.method, url, data=safe_body, headers=headers, allow_redirects=False
