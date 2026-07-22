@@ -789,6 +789,8 @@ async def _run_multiport():
     if _RESILIENCE_AVAILABLE and RESILIENCE_INST is not None:
         RESILIENCE_INST.start_periodic_self_test(session=session)
         RESILIENCE_INST.start_heartbeat()
+        if hasattr(RESILIENCE_INST, "attach_loop"):
+            RESILIENCE_INST.attach_loop(asyncio.get_running_loop())
 
     loop = asyncio.get_running_loop()
     stop = asyncio.Event()
