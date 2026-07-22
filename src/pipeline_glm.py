@@ -297,13 +297,31 @@ async def _glm_minimax_think_act_verify(request, body: bytes, session, chat_fp: 
 
 
 async def _handle_glm_mode(request, body, session, mode, chat_fp, relay):
-    """Dispatch delle 3 modalita' GLM."""
+    """Dispatch delle 3 modalita' GLM.
+
+    mix-ag/mix-gm: se AIROUTER_AGENT_LOOP=1 usa il run loop tipizzato unificato
+    (agent_loop_glm), altrimenti (default) le pipeline classiche. Duplicazione
+    temporanea documentata: le classiche restano come fallback finche' il flag
+    ON non e' validato in produzione."""
     import glm_backend as _glm
     if mode == "glm":
         return await _glm.glm_think_act_verify(request, body, session, log_fn=log, relay=relay)
+
+    try:
+        from agent_loop_glm import agent_loop_enabled
+        _use_agent_loop = agent_loop_enabled()
+    except Exception:
+        _use_agent_loop = False
+
     if mode == "mix-ag":
+        if _use_agent_loop:
+            from agent_loop_glm import run_mix_ag_via_agent_loop
+            return await run_mix_ag_via_agent_loop(request, body, session, chat_fp, relay)
         return await _anthropic_glm_think_act_verify(request, body, session, chat_fp, relay)
     if mode == "mix-gm":
+        if _use_agent_loop:
+            from agent_loop_glm import run_mix_gm_via_agent_loop
+            return await run_mix_gm_via_agent_loop(request, body, session, chat_fp, relay)
         return await _glm_minimax_think_act_verify(request, body, session, chat_fp, relay)
     from aiohttp import web
     return web.json_response({"error": f"GLM mode '{mode}' non gestita"}, status=500)
