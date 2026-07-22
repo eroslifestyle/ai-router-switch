@@ -1,11 +1,21 @@
 # ai-router-switch — TODO
 
+## Completati (sessione 2026-07-22 mattina — glm puro bloccato: streaming + hardening limiter)
+- [x] `5f6c9f5` — **Root cause blocco glm puro sui lavori lunghi**: pure glm bufferizzava l'intera risposta SSE (`await resp.read()` senza passthrough) → TTFB = durata generazione → timeout client + retry-storm; `total=120` uccideva generazioni lunghe. Fix: stream → `forward_glm(passthrough=True)` + `relay()`, timeout non-totale. Blocco residuo post-fix = richieste morte client-side dai 3 SIGKILL del mattino (al reinvio: 200, 8251 token out).
+- [x] `dd4358b` — **Hardening limiter/peak GLM** (4 difetti): `RateLimitExhausted` → 429 immediato con Retry-After+x-should-retry (prima ~180s muti → 502); budget acquire stream 90s→8s (`GLM_STREAM_ACQUIRE_CAP_SEC`); `on_success()`/`record(entry)` mai chiamati (backoff mai resettato, cooldown 60s perpetuo); peak-cap bypass se il body eccede il ctx del modello declassato (`is_glm_body_too_large` era dead code, pure glm no-fallback); limiter keyed su `upstream_model` reale. Verifica live: TTFB 2.76s / TOT 26.2s / 2506 eventi SSE.
+- [x] **Canale log scoperto**: le righe `GLM ACT:` vanno su `~/.claude/logs/ai-router.log` (funzione log custom), NON su journalctl (sempre stato muto per i log GLM). Aggiunto `-u` al wrapper deploy-side `ai-router-proxy-wrapper.sh`.
+
 ## Completati (sessione 2026-07-22 — regola wiki-ops esecutore per-modalità)
 - [x] **Regola utente: esecutore wiki = catena della modalità attiva (pure + miste)** — root cause: la regola globale "WIKI=MiniMax sempre" (2026-06-22) vinceva sulla tabella per-modalità della skill → m3-wiki chiamato anche in solo-anthropic. Nuova tabella: anthropic→Haiku, minimax→m3-wiki, glm→tier GLM; miste = ACT della catena (mix-am/mix-gm→m3-wiki, mix-ag→tier GLM, MAI m3-wiki). Nomi reali da `VALID_MODES` (`src/router_constants.py:88`), `mixed`/`inverse` = alias legacy. Aggiornati `~/.claude/CLAUDE.md`, `~/.claude/docs/regole-permanenti-full.md`, `~/.claude/skills/wiki/SKILL.md` + memoria progetto + vault. Dogfooding: /wiki all di questa sessione eseguito in anthropic pura con esecutore Haiku. Zero modifiche al codice del progetto.
 
 ## Completati (sessione 2026-07-22 — audit 6 modalità)
 - [x] **Audit 3 modalità pure (anthropic/minimax/glm): TUTTE OK** — smoke live per-chat (mai toccata la modalità globale): PING 200 + SSE OK su ciascuna; isolamento tool verificato con strip reale di `mcp__MiniMax__understand_image` in glm (`logs/BUG-CATALOG.jsonl` 23:25:21 kept=0/1); 429 su claude-sonnet-4-6 = limite per-modello upstream (x-should-retry, Haiku/Fable 200), router trasparente corretto. Deploy verificato: symlink → src, mtime < start 23:01:33 → processo esegue `d058e37`. Dettagli: vault `audit-modalita-pure-miste-20260722.md` + `CP_20260722_0634.md`.
 - [x] **Audit 3 miste (parziale)**: code-path mappati; non-stream: mix-am OK (`anthropic-think+minimax-m2.7-act`), mix-ag OK, mix-gm 200 ma body JSON corrotto dai prefissi `[VERIFY-WARNING]`/`[HHEM-WARNING]` (finding aperto)
+
+## Attivo (glm 2026-07-22)
+- [ ] Osservare dalla fascia peak (08:00 CEST) la riga `GLM peak-cap bypass` in `~/.claude/logs/ai-router.log` sulla chat glm reale — expected: nessun 400 context-exceeded in peak
+- [ ] Identificare l'iniziatore dei restart esterni del router (06:44/06:56/07:28) — chiedere all'utente quali altre chat/finestre lavorano sul router
+- [ ] Proposta non approvata: `TimeoutStopSec=3` → drain morbido (oggi ogni stop = SIGKILL con SSE aperti)
 
 ## Attivo (audit 2026-07-22)
 - [ ] Valutare BYPASS-THINK per messaggi banali anche in minimax pura (~5s di THINK sprecati, mix-am ce l'ha)
