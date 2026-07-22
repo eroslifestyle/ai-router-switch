@@ -31,12 +31,20 @@ def is_anthropic_server_tool(t: dict) -> bool:
     riconoscibili perché privi di input_schema (i tool client-eseguiti/MCP
     ce l'hanno sempre). Nessun altro backend sa eseguirli — se ricevuti,
     MiniMax/GLM rispondono 400 (bug 2013, 2026-07-04). In più i tool client
-    Anthropic-branded (WebSearch/WebFetch) sono riconosciuti per nome esatto."""
+    Anthropic-branded (WebSearch/WebFetch) sono riconosciuti per nome esatto.
+
+    Fix 2026-07-22: i tool MCP branded di altri provider (mcp__zai__/mcp__MiniMax__/
+    webSearchPrime) possono essere privi di input_schema; senza questa esclusione
+    venivano classificati come server-tool Anthropic e strippati anche in mode
+    glm/minimax (bug: tool nativo GLM rimosso in modalità GLM)."""
     if not isinstance(t, dict):
+        return False
+    name = (t.get("name") or "").lower()
+    if "minimax" in name or "websearchprime" in name or name.startswith("mcp__zai__"):
         return False
     if "input_schema" not in t:
         return True
-    return (t.get("name") or "").lower() in _ANTHROPIC_CLIENT_TOOL_NAMES
+    return name in _ANTHROPIC_CLIENT_TOOL_NAMES
 
 
 def is_minimax_branded_tool(t: dict) -> bool:
