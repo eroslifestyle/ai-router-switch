@@ -5,10 +5,13 @@
 - [x] **Audit 3 miste (parziale)**: code-path mappati; non-stream: mix-am OK (`anthropic-think+minimax-m2.7-act`), mix-ag OK, mix-gm 200 ma body JSON corrotto dai prefissi `[VERIFY-WARNING]`/`[HHEM-WARNING]` (finding aperto)
 
 ## Attivo (audit 2026-07-22)
-- [ ] **Test SSE (stream:true) su mix-am/mix-ag/mix-gm** — stesso pattern per-chat; expected message_start su mix-am/mix-ag, su mix-gm probabile assenza SSE (ACT bufferizzato in pipeline_glm.py)
-- [ ] **Fix prefissi warning mix-gm** (`[VERIFY-WARNING]`/`[HHEM-WARNING]` nel body rompono il parsing JSON del client): spostare in header o campo JSON — decisione utente sull'approccio, implementazione delegata all'esecutore
-- [ ] **Soglia/skip HHEM su risposte corte** (warning su PING banale = rumore)
 - [ ] Valutare BYPASS-THINK per messaggi banali anche in minimax pura (~5s di THINK sprecati, mix-am ce l'ha)
+- [ ] (minore) mix-gm con `stream:true` bufferizza comunque l'intero ACT prima di rispondere (latenza primo byte, SSE valido ma non progressivo) — valutare relay streaming con HHEM/VERIFY post-hoc
+
+## Completati (sessione 2026-07-22 — SSE miste + fix mix-gm, commit `3b5a664`)
+- [x] **Test SSE su mix-am/mix-ag/mix-gm**: mix-am OK (message_start), mix-ag OK (ACT glm-4.7 streamma), mix-gm SSE presente MA prefissato `[HHEM-WARNING] event: message_start` → finding più grave del previsto (rompeva anche lo stream)
+- [x] `3b5a664` — **Fix prefissi warning mix-gm** (decisione utente: header dedicato + estrazione testo SSE): warning in header `x-ai-verify` (`hhem=<score>`, `verify=incoherent`), body mai alterato; HHEM/VERIFY valutano il testo estratto (text_delta SSE / blocchi text JSON); content_type `text/event-stream` quando l'ACT è SSE; `should_verify` riceve body sintetico per SSE (evita VERIFY "unparseable" a ogni turno — deviazione m2.7 intercettata al diff-review). Verificato live post-restart: JSON e SSE puliti, gate VERIFY corretto (short-output→VERIFIED, SSE→skip)
+- [x] **Skip HHEM su risposte corte**: gate ora `len(testo estratto)>300` → niente warning su PING
 
 ## Completati (sessione 2026-07-21/22 — esecutore mix cieco a system e immagini)
 - [x] `bb84a41` — mix: **executor non riceveva system/piano** — 2 bug: (1) `remap_body_for_minimax` non convertiva il campo top-level `system` (spesso lista di blocchi Anthropic) in messaggio `role=system` → MiniMax riceveva solo i messaggi utente, senza istruzioni né piano THINK → non capiva il contesto e non scriveva file; fix `_inject_system_as_message()` in minimax_body.py. (2) `pipeline_minimax.py` usava `_text_from_message` senza importarla → NameError → fallback executor diretto → piano THINK buttato; fix import da pipeline_anthropic.
