@@ -714,6 +714,13 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
             if t_json and t_status not in FALLBACK_STATUSES:
                 _think_timeout_reset(chat_fp)
                 plan = _text_from_message(t_json).strip()
+                if not plan:
+                    log(f"mix-am THINK {t_status} OK ma testo VUOTO -> ACT senza piano fp={chat_fp}")
+            else:
+                log(f"mix-am THINK KO status={t_status} json={bool(t_json)} -> ACT senza piano fp={chat_fp}")
+                debug_catalog.record_event(severity="block", category="mix-am",
+                                            kind="think_status_ko", chat_fp=chat_fp,
+                                            snippet=f"status={t_status}")
         except asyncio.TimeoutError:
             _think_timeout_record(chat_fp)
             think_budget = _think_timeout_budget(chat_fp)
@@ -734,6 +741,7 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
         try:
             up = await forward_minimax(request, body, session, act_timeout_sec=MIX_AM_ACT_TIMEOUT_SEC)
             if up.status not in FALLBACK_STATUSES:
+                log(f"mix-am ACT diretto (no plan) {up.status} OK {request.path} fp={chat_fp}")
                 return await relay(up)
             log(f"mix-am ACT diretto (no plan) {up.status} -> rescue fp={chat_fp}")
             try:
