@@ -17,6 +17,7 @@ Gestisce streaming SSE. Backend diretto (nessun proxy intermedio).
 import asyncio
 import json
 import os
+import random
 import signal
 import threading
 import time
@@ -237,6 +238,91 @@ def _inject_task_mode_for_images(orig: dict) -> dict:
         return orig
     except Exception:
         return orig
+
+
+# ── Anthropic 429 retry — certificato da doc ufficiale Anthropic ────────────────
+# Spec: platform.claude.com/docs/en/api/errors
+#   "The official SDKs automatically retry transient failures (rate limits, 5xx)
+#    with exponential backoff, twice by default, honoring the retry-after header
+#    when present."
+# Spec: platform.claude.com/docs/en/api/rate-limits
+#   retry-after = "number of seconds to wait until you can retry. Earlier retries
+#    will fail." → onorare il valore reale, non un cap arbitrario.
+# max_retries=2 = default SDK ufficiale. Backoff esponenziale con jitter (equal
+# jitter, come i backoff SDK). Se il 429 persiste dopo i retry, il 429 originale
+# torna al chiamante (che decide il fallback) — NON si rilancia in loop.
+ANTHROPIC_MAX_RETRIES = int(os.environ.get("AIROUTER_ANTHROPIC_MAX_RETRIES", "2"))
+ANTHROPIC_RETRY_BASE_SEC = float(os.environ.get("AIROUTER_ANTHROPIC_RETRY_BASE_SEC", "0.5"))
+ANTHROPIC_RETRY_MAX_SLEEP_SEC = float(os.environ.get("AIROUTER_ANTHROPIC_RETRY_MAX_SLEEP_SEC", "60"))
+
+
+def _parse_retry_after(value: str) -> float | None:
+    """retry-after può essere int, float, o data HTTP (RFC 7231). Ritorna secondi o None."""
+    if not value:
+        return None
+    value = value.strip()
+    try:
+        return max(0.0, float(value))
+    except (ValueError, TypeError):
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+        dt = parsedate_to_datetime(value)
+        if dt is not None:
+            import datetime as _dt
+            now = _dt.datetime.now(_dt.timezone.utc)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=_dt.timezone.utc)
+            return max(0.0, (dt - now).total_seconds())
+    except Exception:
+        pass
+    return None
+
+
+def _backoff_sleep_sec(attempt: int, retry_after: float | None) -> float:
+    """Delay del tentativo `attempt` (0-based). Onora retry-after se presente,
+    altrimenti exponential backoff con equal jitter. Cap a MAX_SLEEP."""
+    if retry_after is not None:
+        return min(retry_after, ANTHROPIC_RETRY_MAX_SLEEP_SEC)
+    # Exponential backoff con equal jitter: base*2^attempt, metà fissa metà random.
+    exp = ANTHROPIC_RETRY_BASE_SEC * (2 ** attempt)
+    exp = min(exp, ANTHROPIC_RETRY_MAX_SLEEP_SEC)
+    return exp / 2 + random.uniform(0, exp / 2)
+
+
+async def _anthropic_forward_with_retry(request, body, session, relay):
+    """Forward ad Anthropic con retry certificato SDK sui 429/5xx transienti.
+
+    Ritorna (up, exhausted): `up` è la ClientResponse finale (aperta, da relayare);
+    `exhausted` True se il 429/5xx è persistito dopo tutti i retry. Il chiamante
+    decide cosa fare del 429 persistente (relay grezzo o fallback), NON si rimbalza
+    in loop verso il client. Solleva su eccezione di rete dopo l'ultimo tentativo."""
+    RETRIABLE = {429, 500, 502, 503, 504, 529}
+    last_up = None
+    for attempt in range(ANTHROPIC_MAX_RETRIES + 1):
+        up = await _retry_forward(forward_anthropic, request, body, session)
+        if up.status not in RETRIABLE:
+            return up, False
+        # x-should-retry: se Anthropic lo mette a "false", NON ritentare (definitivo).
+        should_retry_hdr = str(up.headers.get("x-should-retry", "")).lower()
+        if should_retry_hdr == "false":
+            return up, True
+        if attempt >= ANTHROPIC_MAX_RETRIES:
+            last_up = up
+            break
+        retry_after = _parse_retry_after(up.headers.get("retry-after", ""))
+        delay = _backoff_sleep_sec(attempt, retry_after)
+        debug_catalog.record_event(
+            severity="block", category="anthropic", kind="rate_limit_429", code=up.status,
+            snippet=f"attempt={attempt+1}/{ANTHROPIC_MAX_RETRIES} retry-after={retry_after} sleep={delay:.2f}s")
+        log(f"anthropic 429/{up.status}: retry {attempt+1}/{ANTHROPIC_MAX_RETRIES} "
+            f"retry-after={retry_after} sleep={delay:.2f}s {request.path}")
+        try:
+            up.release()
+        except Exception:
+            pass
+        await asyncio.sleep(delay)
+    return last_up, True
 
 
 async def handle(request):
@@ -466,29 +552,24 @@ async def handle(request):
             log(f"anthropic mode: model MiniMax '{_am}' -> forward_minimax")
             return await relay(await forward_minimax(request, body, session),
                                extra_headers={"x-ai-verified": "minimax-oob"})
+        # Retry 429/5xx certificato SDK ufficiale (exponential backoff + retry-after).
         try:
-            up = await _retry_forward(forward_anthropic, request, body, session)
+            up, exhausted = await _anthropic_forward_with_retry(request, body, session, relay)
         except Exception as e:
             log(f"ERR anthropic (pure) {request.path}: {e}")
             debug_catalog.record_event(severity="error", category="anthropic",
                                         kind="forward_exception", snippet=str(e))
             return web.json_response({"type": "error", "error": {"type": "router_error", "message": str(e)}}, status=502)
-        should_retry = str(up.headers.get("x-should-retry", "")).lower() == "true"
-        if up.status == 429 and should_retry:
-            ra = up.headers.get("retry-after")
-            delay = min(float(ra), 3.0) if ra and ra.isdigit() else 1.5
-            debug_catalog.record_event(severity="block", category="anthropic",
-                                        kind="burst_limiter_429", code=429,
-                                        snippet=f"retry-after={delay}s")
-            up.release()
-            await asyncio.sleep(delay)
-            try:
-                up = await _retry_forward(forward_anthropic, request, body, session)
-            except Exception as e:
-                log(f"ERR anthropic (pure) retry {request.path}: {e}")
-                debug_catalog.record_event(severity="error", category="anthropic",
-                                            kind="forward_retry_exception", snippet=str(e))
-                return web.json_response({"type": "error", "error": {"type": "router_error", "message": str(e)}}, status=502)
+        if exhausted and up is not None and up.status == 429:
+            # 429 persistito dopo i retry certificati = rate-limit REALE del piano
+            # (non burst). Relay del 429 con retry-after al client + header diagnostico:
+            # il 429 è la risposta corretta e onesta, NON un errore del router. Claude
+            # Code lato client applica il suo backoff onorando retry-after.
+            log(f"anthropic (pure) -> 429 PERSISTENTE dopo {ANTHROPIC_MAX_RETRIES} retry {request.path}")
+            debug_catalog.record_event(severity="error", category="anthropic",
+                                        kind="rate_limit_429_exhausted", code=429,
+                                        snippet=f"retry-after={up.headers.get('retry-after','?')}")
+            return await relay(up, extra_headers={"x-ai-verified": "anthropic-ratelimit-exhausted"})
         log(f"anthropic (pure) -> {up.status} {request.path}")
         return await relay(up, extra_headers={"x-ai-verified": "anthropic-pure"})
 
