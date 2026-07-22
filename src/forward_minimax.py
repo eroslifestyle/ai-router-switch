@@ -2,6 +2,7 @@
 """MiniMax forwarding extracted from ai-router-proxy.py (~lines 1331-1624)."""
 import asyncio
 import json
+import os
 import time
 
 from aiohttp import ClientTimeout
@@ -130,6 +131,19 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
                                        log_model_fn=None,
                                        log_fn=_log)
     new_body = tool_isolation.filter_tools_for_backend(new_body, "minimax")
+
+    # FIX #3 (audit 2026-07-22): remap_body_for_minimax NON ripara la sequenza
+    # messaggi (tool_result orfani -> 400 su MiniMax). Dietro flag default-OFF
+    # applica _repair_message_sequence sul path ACT normale (finora mancante).
+    if os.environ.get("AIROUTER_TRANSITION_FILTERS", "0") == "1":
+        try:
+            from router_utils import _repair_message_sequence
+            _d = json.loads(new_body)
+            if isinstance(_d.get("messages"), list):
+                _d["messages"] = _repair_message_sequence(_d["messages"])
+                new_body = json.dumps(_d).encode()
+        except Exception as _e:
+            _log(f"transition_filters repair skip: {_e}")
 
     try:
         model = json.loads(new_body).get("model", "") or MINIMAX_MODEL
