@@ -26,3 +26,6 @@ src//graphify-out/
 # router-mode GUI runtime state
 router-mode/widget_state.json
 router-mode/__pycache__/
+
+# worktree agenti Claude (mai tracciare)
+.claude/worktrees/
