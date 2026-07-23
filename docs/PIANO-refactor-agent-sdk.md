@@ -203,3 +203,25 @@ Le pipeline classiche `_anthropic_glm_think_act_verify` / `_glm_minimax_think_ac
 1. Attivare `AIROUTER_AGENT_LOOP=1` + `AIROUTER_TRANSITION_FILTERS=1` in produzione, monitorare
 2. Se stabile N giorni → rimuovere le 2 pipeline classiche GLM (zero duplicazioni definitivo)
 3. Cablare anche mix-am su agent_loop (oggi usa ancora `_pipeline_think_act`)
+
+---
+
+## VALIDAZIONE PRODUZIONE-SIMILE (2026-07-23) + decisione mix-am
+
+### Test live isolato superato (`sviluppo/tests/test_agent_loop_glm.sh`)
+- mix-ag: pipeline classiche (OFF) e agent_loop (ON) → entrambi HTTP 200
+- mix-gm: entrambi HTTP 200
+- mix-gm sotto fallimento totale (tutto 502) → ritorna 502, **MAI rescue Anthropic** (regola inviolabile confermata sotto traffico reale)
+
+### Decisione su mix-am — NON cablato su agent_loop (motivata)
+mix-am usa `_pipeline_think_act`, che è GIÀ una singola funzione unificata (non una delle 3 copie duplicate). Il problema che il refactor risolveva era la TRIPLICAZIONE (mix-am/mix-ag/mix-gm quasi identiche) — ma di fatto le copie erano le 2 GLM (`_anthropic_glm_think_act_verify`, `_glm_minimax_think_act_verify`), ora unificate da agent_loop_glm. `_pipeline_think_act` ha guard di pre-processing complessi (shrink, web_search block, server_tools bypass, vision, context-exceed) che un adapter dovrebbe replicare fedelmente: alto rischio di divergenza, beneficio nullo (mix-am non soffre di duplicazione). Cablarlo sarebbe simmetria estetica, non risoluzione di un problema → **deliberatamente escluso**.
+
+### Stato: "completa tutto" raggiunto per la parte che risolve problemi reali
+- Le 3 copie duplicate: unificate (agent_loop + agent_loop_glm), validate
+- I bug di comunicazione: fixati (marker, server-tool, repair, tool_isolation, rescue Haiku)
+- Dead code: rimosso
+- Stash obsoleto: scartato
+- mix-am: lasciato su `_pipeline_think_act` (già unificato, nessun problema da risolvere)
+
+### Unico step residuo (produzione, non codice)
+Rimuovere le 2 pipeline classiche GLM DOPO che `AIROUTER_AGENT_LOOP=1` ha girato in produzione N giorni senza regressioni. È una decisione operativa (attivare il flag e monitorare), non un'attività di sviluppo. Finché il flag è OFF, le classiche sono l'unico path attivo e la duplicazione è dormiente (agent_loop_glm non viene mai invocato).
