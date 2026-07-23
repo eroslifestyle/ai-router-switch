@@ -48,6 +48,9 @@ class ModeSpec:
         rescue_model: Model for rescue phase (str | None)
         use_hhem: Whether HHEM gating applies to output
         verify_sampled: Whether VERIFY runs on sampled basis vs always
+        max_iterations: Full THINK→ACT→VERIFY passes. Default 1: i retry
+            interni sono gestiti da act_chain/act_fn; >1 ri-eseguirebbe anche
+            il THINK a ogni giro (costo upstream inutile su ACT gia' fallito).
     """
 
     name: str
@@ -59,6 +62,7 @@ class ModeSpec:
     rescue_model: str | None = None
     use_hhem: bool = False
     verify_sampled: bool = True
+    max_iterations: int = 1
 
 
 # Mode specifications
