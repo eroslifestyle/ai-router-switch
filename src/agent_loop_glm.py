@@ -130,10 +130,19 @@ async def run_mix_ag_via_agent_loop(request, body, session, chat_fp, relay):
         should_verify_fn=should_verify,
     )
     result = await al.run_agent_loop(ctx)
-    # agent_loop ritorna StepResult(payload=act_resp o rescue_resp): va relayato.
+    # agent_loop ritorna StepResult(payload=act_resp o rescue_resp).
     if result.payload is not None and hasattr(result.payload, "status"):
-        return await relay(result.payload,
-                           extra_headers={"x-ai-verified": f"mix-ag-agent_loop({state.get('real_model') or '?'})"})
+        payload = result.payload
+        verified = f"mix-ag-agent_loop({state.get('real_model') or '?'})"
+        # forward_glm non-passthrough e _anthropic_rescue ritornano web.Response/
+        # StreamResponse SENZA .content: relay() itera upstream.content.iter_any()
+        # -> AttributeError dopo prepare() (header 200 al client, body mai inviato).
+        # Vanno restituite dirette; relay() solo per superfici ClientResponse-like.
+        if not hasattr(payload, "content"):
+            if not getattr(payload, "prepared", False):
+                payload.headers["x-ai-verified"] = verified
+            return payload
+        return await relay(payload, extra_headers={"x-ai-verified": verified})
     # Nessun payload utile -> rescue esplicito.
     return await _anthropic_rescue(request, orig, session, chat_fp, relay)
 
