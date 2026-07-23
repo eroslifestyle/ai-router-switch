@@ -62,7 +62,8 @@ def test_pipeline_primitives():
     # model preservato (orig è Anthropic)
     assert think["model"] in ("sonnet-4-7", "claude-haiku-4-5-20251001"), think["model"]
     assert "ORCHESTRATORE" in think["system"]
-    assert think["max_tokens"] == 200
+    from pipelines.primitives import THINK_MAX_TOKENS
+    assert think["max_tokens"] == THINK_MAX_TOKENS, think["max_tokens"]
     assert "tools" not in think  # rimossi da think
     # MiniMax -> fallback Haiku
     orig_mm = {"model": "MiniMax-M2.7", "messages": [{"role": "user", "content": "x"}]}
