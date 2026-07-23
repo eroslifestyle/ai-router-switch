@@ -1,5 +1,12 @@
 # ai-router-switch — TODO
 
+## Completati (sessione 2026-07-23 pomeriggio — merge totale + cleanup worktree)
+- [x] Merge totale sessioni bloccate "api error": `feat/glm-modes` e `fix/audit-4modes-p0-p1` già dentro main (nessun commit da mergiare)
+- [x] WIP worktree `agent-adb871316334ad8d7` NON mergiato (superseded + 3 bug: up.read pre-relay, role:system→400, VERIFY bloccante); archiviato su branch omonimo commit `a713bc9`
+- [x] `97f0cb8` — recuperato fix test: `test_pipeline.py` asseriva `max_tokens==200`, ora legge `THINK_MAX_TOKENS` (512). Test tutti PASS
+- [x] `dca6093` — igiene git: rimosso gitlink orfano worktree + `.claude/worktrees/` in `.gitignore`
+- [x] Nessun file runtime toccato, nessun restart router. Modalità: anthropic pura
+
 ## Completati (sessione 2026-07-23 — refactor router stile OpenAI Agents SDK)
 - [x] Analisi `openai/openai-agents-python` (run loop, handoff, agent-as-tool, guardrail) + audit evidence-based del router (3 subagenti)
 - [x] 5 moduli nuovi (additivi/dietro flag, router live mai toccato): `transition_filters.py`, `mode_spec.py`, `agent_loop.py`, `verify_guardrail.py`, `agent_loop_glm.py`
