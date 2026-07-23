@@ -1,5 +1,19 @@
 # ai-router-switch — TODO
 
+## Completati (sessione 2026-07-23 — refactor router stile OpenAI Agents SDK)
+- [x] Analisi `openai/openai-agents-python` (run loop, handoff, agent-as-tool, guardrail) + audit evidence-based del router (3 subagenti)
+- [x] 5 moduli nuovi (additivi/dietro flag, router live mai toccato): `transition_filters.py`, `mode_spec.py`, `agent_loop.py`, `verify_guardrail.py`, `agent_loop_glm.py`
+- [x] Cablaggio mix-ag/mix-gm su agent_loop dietro `AIROUTER_AGENT_LOOP=1` (`pipeline_glm.py:_handle_glm_mode`); FIX repair MiniMax dietro `AIROUTER_TRANSITION_FILTERS=1`
+- [x] Fix bug audit: `tool_isolation` (zai in mode glm) + rescue Haiku (usava THINK_MODEL=Sonnet); rimosso dead code minimax (-102 righe)
+- [x] Stash obsoleto `uncommitted-refactor-pre-restart` scartato (backup `docs/sessions/stash-refactor-pre-restart.patch`)
+- [x] Test live isolato `sviluppo/tests/test_agent_loop_glm.sh`: mix-ag/mix-gm OFF/ON entrambi 200; mix-gm fail-total → 502 mai Anthropic
+- [x] Merge main (8cbff34→950d33f), push, pulizia worktree/branch. VERIFY: HHEM reale claim falso → score 0.0088
+
+## Attivo (refactor agent-sdk 2026-07-23)
+- [ ] **Prossimo passo**: attivare `AIROUTER_AGENT_LOOP=1` (+ `AIROUTER_TRANSITION_FILTERS=1`) in produzione + monitorare mix-ag/mix-gm con traffico reale (peak-cap GLM, streaming vero non coperti dai test isolati)
+- [ ] Se stabile N giorni → rimuovere le 2 pipeline classiche GLM (`_anthropic_glm_think_act_verify`, `_glm_minimax_think_act_verify`) → zero duplicazioni definitivo
+- [ ] mix-am resta su `_pipeline_think_act` (già unico, NON cablare: rischio senza beneficio — decisione motivata in `docs/PIANO-refactor-agent-sdk.md`)
+
 ## Completati (sessione 2026-07-22 notte — tool call TESTUALI nelle mix: investigazione + guard)
 - [x] **Investigazione [TOOL_CALL] testuali** (screenshot chat keyok ~23:18, mix-am globale): meccanismo PROVATO con test firma upstream (senza array `tools`: M2.7 emette `<minimax:tool_call>` XML, GLM fence bash); pipeline deployata NON riproduce (10+ replay: body reale 350KB/85msg/40tools, post-rewrite_for_context, piano avvelenato, immagine 4MB, temperature=1 ×5, e2e isolato 187xx 3 mix stream+non-stream → SEMPRE tool_use strutturato). Sessione incriminata `sid:0dd3cdbb`: THINK fallito SILENZIOSAMENTE 3/3 (nessun log status) → ACT diretto body grezzo.
 - [x] `e040470` — **Osservabilità + guard**: (1) log THINK KO status + evento `think_status_ko` (pipeline_anthropic.py); (2) log ACT-diretto no-plan OK; (3) guard `pseudo_toolcall_text` in streaming_relay.py `finally` — request con tools + risposta senza `"tool_use"` + marker testuale (`[TOOL_CALL]`, `minimax:tool_call`, `<tool_call>`, `<invoke name=`) → log `PSEUDO-TOOLCALL` + dl.capture primi 8KB. Non blocca il flusso. Fix scritti: micro-edit main (esenzione ≤15 righe) + guard delegato a Haiku (catena anthropic), verify riga-per-riga + py_compile + e2e isolato + smoke live post-restart (THINK OK→ACT 200→tool_use). Push OK.
