@@ -10,7 +10,8 @@
 - [x] Merge main (8cbff34→950d33f), push, pulizia worktree/branch. VERIFY: HHEM reale claim falso → score 0.0088
 
 ## Attivo (refactor agent-sdk 2026-07-23)
-- [ ] **Prossimo passo**: attivare `AIROUTER_AGENT_LOOP=1` (+ `AIROUTER_TRANSITION_FILTERS=1`) in produzione + monitorare mix-ag/mix-gm con traffico reale (peak-cap GLM, streaming vero non coperti dai test isolati)
+- [x] **Flag ATTIVI in produzione** (2026-07-23 02:26): drop-in `~/.config/systemd/user/ai-router.service.d/agent-loop-flags.conf` (`AIROUTER_AGENT_LOOP=1` + `AIROUTER_TRANSITION_FILTERS=1`) + daemon-reload + restart con checklist (active → flag verificati in `/proc/<pid>/environ` → health 200 → self-test journal OK → `/v1/models` 200, mode anthropic preservata). Rollback: rimuovere il drop-in + daemon-reload + restart.
+- [ ] **Prossimo passo**: monitorare mix-ag/mix-gm con traffico reale N giorni (peak-cap GLM fascia 14-18 Asia/Shanghai, streaming vero — non coperti dai test isolati): `~/.claude/logs/ai-router.log` + `logs/debug-errors.jsonl` + `GET /debug/catalog`
 - [ ] Se stabile N giorni → rimuovere le 2 pipeline classiche GLM (`_anthropic_glm_think_act_verify`, `_glm_minimax_think_act_verify`) → zero duplicazioni definitivo
 - [ ] mix-am resta su `_pipeline_think_act` (già unico, NON cablare: rischio senza beneficio — decisione motivata in `docs/PIANO-refactor-agent-sdk.md`)
 
