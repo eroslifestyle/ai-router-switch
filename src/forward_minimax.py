@@ -95,22 +95,20 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
     if retry_budget_sec is None:
         retry_budget_sec = MINIMAX_RETRY_CAP_SEC
 
+    # FIX BUG-COMPRESSIONE (2026-07-23): disabilitato double-rewrite.
+    # La compressione è già gestita dal layer superiore (ai-router-proxy.py linee 328-374)
+    # che comprime il body principale PRIMA di chiamare forward_minimax.
+    # Questo secondo rewrite ri-comprimeva l'act_body distruggendo il contesto
+    # preservato da orig_full in _pipeline_think_act.
+    # Il controllo a valle (linee 110-113) gestisce ancora i casi estremi (ritorna 400).
     _orig_body = body
-    try:
-        if len(body) > 400_000:
-            model = MINIMAX_MODEL
-            rewritten, was_rewritten = rewrite_for_context(body, model, "")
-            if was_rewritten:
-                body = rewritten
-                _log(f"[ctx-fix] rewrite {len(_orig_body)}b->{len(body)}b")
-    except Exception as e:
-        _log(f"[ctx-fix] rewrite failed: {e}")
 
-    try:
-        if len(body) > MINIMAX_CONTEXT_BYTE_LIMIT:
-            return _synthetic_context_exceed(body)
-    except Exception:
-        pass
+    # FIX BUG-COMPRESSIONE (2026-07-23): rimosso controllo anticipato context limit.
+    # Questo controllo (len(body) > MINIMAX_CONTEXT_BYTE_LIMIT) è troppo aggressivo
+    # per act_body costruiti con molti messaggi (200K token ≈ 600-800KB).
+    # Il layer superiore (ai-router-proxy + pipeline) gestisce già la compressione
+    # PROATTIVA. Se MiniMax ritorna 400 context-exceeded, il caller gestisce
+    # con shrink_and_retry. Non anticipare il rifiuto qui.
 
     url = MINIMAX_UPSTREAM + request.path_qs
     key = await get_minimax_key()
