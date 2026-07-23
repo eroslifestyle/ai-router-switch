@@ -667,9 +667,15 @@ def _shrink_images_in_messages(orig: dict, max_side: int = 1024, jpeg_quality: i
 
 
 # ── Main mixed pipeline ─────────────────────────────────────────────────────────
-async def _pipeline_think_act(request, body, session, orig: dict, relay):
+async def _pipeline_think_act(request, body, session, orig: dict, relay,
+                              orig_full: dict = None):
     """Redesign 2026-07-01 mixed: Anthropic THINK+self-review -> M3 ACT.
-    Scatta per TUTTE le /v1/messages (incluso agentico con tools)."""
+    Scatta per TUTTE le /v1/messages (incluso agentico con tools).
+
+    Args:
+        orig: body possibly compressed (per shrink check, web_search check, etc.)
+        orig_full: body ORIGINALE con messaggi COMPLETI (per build_executor_body).
+                   Se None, usa orig come fallback."""
     from forward_anthropic import forward_anthropic, forward_anthropic_direct
     from forward_minimax import forward_minimax
     from fail_tracker import mixed_fail_inc, mixed_fail_reset, fail_tracker, mixed_anthropic_leads
@@ -771,8 +777,12 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
 
     up = None
     used_exe = ""
+    # FIX BUG-COMPRESSIONE: usa orig_full (messaggi ORIGINALI completi) se disponibile.
+    # Se orig è stato compresso da rewrite_for_context, orig_full contiene la cronologia
+    # completa. build_executor_body preserva system e tools, ma usa questi messages.
+    _orig_for_executor = orig_full if orig_full is not None else orig
     for exe in executors:
-        act_body = _build_act_body_p(orig, plan, tools_to_call, executor=exe)
+        act_body = _build_act_body_p(_orig_for_executor, plan, tools_to_call, executor=exe)
         if orig_model and not orig_model.startswith("MiniMax"):
             try:
                 from router_constants import SIDECAR

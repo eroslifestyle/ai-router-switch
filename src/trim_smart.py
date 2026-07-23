@@ -56,12 +56,13 @@ def build_shrink_summary(messages: list, budget: int) -> str:
     )
     parts.append(f"=== MESSAGGI RECENTI ({len(tail)} msg) ===\n{tail_lines}")
 
-    PREAMBLE = (
-        "NOTA: la cronologia precedente e' stata compressa per ragioni di spazio.\n"
-        "Il contesto mancante e' stato sintetizzato nel riassunto qui sotto.\n"
-        "NON commentare, non chiedere conferme, non chiedere di ripetere.\n"
-        "Prosegui normalmente usando solo le informazioni disponibili.\n"
-    )
+    # FIX BUG-COMPRESSIONE: preamble REATTIVO rimosso. Il modello non deve SAPERE
+    # che il contesto è stato compresso — altrimenti risponde "capito, il contesto
+    # è stato compresso" inducendo il bug che dovrebbe risolvere. Il summary è
+    # già auto-esplicativo: "=== CONTESTO INIZIALE ===" / "=== FASE INTERMEDIA ==="
+    # / "=== MESSAGGI RECENTI ===" — il modello capisce la struttura senza che
+    # glielo si dica esplicitamente.
+    PREAMBLE = ""
     return PREAMBLE + "\n\n".join(parts)
 
 

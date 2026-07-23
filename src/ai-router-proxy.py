@@ -291,6 +291,10 @@ async def handle(request):
     if "multipart/form-data" in ct:
         return _err_response("multipart not supported", status=415)
     body = await request.read()
+    # FIX BUG-COMPRESSIONE: preserva il body ORIGINALE prima di ogni riscrittura.
+    # rewrite_for_context (linee 334-374) può riscrivere `body` con tail+summary,
+    # ma le pipeline (THINK/ACT) devono poter accedere ai messaggi COMPLETI.
+    _original_body = body
 
     # Audit fp 2026-07-21: senza session-id header le chat locali collassano su
     # request.remote (store _think_count/fail_tracker/_verify_turn_count condivisi
@@ -639,13 +643,22 @@ async def handle(request):
     # Il fast-path (MiniMax diretto) è disabilitato perché in mix-am l'orchestratore
     # Anthropic deve leggere TUTTO (immagini, audio, video, messaggi) prima di delegare.
     if mode == "mix-am" and NEW_PIPELINE and is_messages and not anthropic_leads:
+        # FIX BUG-COMPRESSIONE: orig DEVE essere costruito dal body ORIGINALE,
+        # non dal body compresso (body può essere stato riscritto da rewrite_for_context
+        # nelle linee 334-374). build_executor_body usa orig.get("messages") → se orig
+        # è compresso, l'ACT perde il contesto storico.
+        try:
+            _orig_for_executor = json.loads(_original_body)
+            _inject_task_mode_for_images(_orig_for_executor)
+        except Exception:
+            _orig_for_executor = {}
         try:
             orig = json.loads(body)
             _inject_task_mode_for_images(orig)
         except Exception:
             orig = {}
-        log(f"mix-am pipeline attivata fp={chat_fp} tools={bool(orig.get('tools'))}")
-        return await _pipeline_think_act(request, body, session, orig, relay)
+        log(f"mix-am pipeline attivata fp={chat_fp} tools={bool(_orig_for_executor.get('tools'))}")
+        return await _pipeline_think_act(request, body, session, orig, relay, orig_full=_orig_for_executor)
 
     # T0/T1 -> M3 diretto
     if not is_t2:
