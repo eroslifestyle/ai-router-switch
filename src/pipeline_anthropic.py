@@ -94,6 +94,7 @@ def _build_think_body(orig: dict) -> bytes:
         )
         max_tokens = max(THINK_MAX_TOKENS, 1024)
     orig_model = (orig.get("model") or "").strip()
+    log(f"[MODEL_TRACE] _build_think_body: orig_model='{orig_model}' THINK_MODEL={THINK_MODEL}")
     content = [{"type": "text", "text": digest}] + images
     body = {
         "model": orig_model or THINK_MODEL,
@@ -676,6 +677,8 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay):
     chat_fp = _resolve_chat_fingerprint(request)
     mixed_fail_last_status = None
     wants_stream = bool(orig.get("stream"))
+    entry_model = (orig.get("model") or "").strip()
+    log(f"[MODEL_TRACE] _pipeline_think_act ENTRY: model='{entry_model}' mode=mix-am fp={chat_fp}")
 
     if _is_context_too_large_for_minimax(body):
         log(f"mix-am PRE: body {len(body)}b > limit -> shrink/retry fp={chat_fp}")
