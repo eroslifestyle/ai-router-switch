@@ -138,7 +138,7 @@ async def run_mix_ag_via_agent_loop(request, body, session, chat_fp, relay):
         _call_full, _text_from_message, _build_think_body, _anthropic_rescue,
     )
     from pipeline_common import build_executor_body
-    from router_constants import THINK_TIMEOUT_SEC, FALLBACK_STATUSES, THINK_MODEL
+    from router_constants import THINK_TIMEOUT_SEC, FALLBACK_STATUSES
     import glm_backend as _glm
 
     state = {"plan": "", "real_model": None}
@@ -186,7 +186,7 @@ async def run_mix_ag_via_agent_loop(request, body, session, chat_fp, relay):
         orig_model = (orig.get("model") or "").strip()
         try:
             verify_body = json.dumps({
-                "model": orig_model or THINK_MODEL,
+                "model": orig_model,
                 "system": "Sei un verifier AI. Rispondi SOLO con: VERIFIED, "
                           "oppure INCOERENTE: [motivo breve].",
                 "messages": [{"role": "user", "content":

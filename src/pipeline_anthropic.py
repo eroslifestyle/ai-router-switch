@@ -9,7 +9,7 @@ import time
 import debug_catalog
 
 from router_constants import (
-    THINK_MAX_TOKENS, THINK_MODEL, THINK_MODEL_ANTHROPIC, THINK_TIMEOUT_SEC,
+    THINK_MAX_TOKENS, THINK_TIMEOUT_SEC,
     MINIMAX_CONTEXT_BYTE_LIMIT, ANTHROPIC_HAIKU_CONTEXT_BYTE_LIMIT,
     SUMMARY_BUDGET, TRIM_TARGET_BYTES, TRIM_MIN_MESSAGES,
     CLAUDE_CODE_MARKER, FALLBACK_STATUSES, MINIMAX_FALLBACK_STATUSES,
@@ -94,10 +94,10 @@ def _build_think_body(orig: dict) -> bytes:
         )
         max_tokens = max(THINK_MAX_TOKENS, 1024)
     orig_model = (orig.get("model") or "").strip()
-    log(f"[MODEL_TRACE] _build_think_body: orig_model='{orig_model}' THINK_MODEL={THINK_MODEL}")
+    log(f"[MODEL_TRACE] _build_think_body: orig_model='{orig_model}'")
     content = [{"type": "text", "text": digest}] + images
     body = {
-        "model": orig_model or THINK_MODEL,
+        "model": orig_model,
         "system": _anthropic_system(sys_msg),
         "messages": [{"role": "user", "content": content}],
         "stream": False,
@@ -406,7 +406,7 @@ async def _escalate_anthropic(request, orig: dict, session, chat_fp: str, relay,
     """
     from forward_anthropic import forward_anthropic, forward_anthropic_direct
     from router_utils import log as _log, _analyze_body_structure
-    from router_constants import THINK_MODEL, ANTHROPIC_HAIKU_CONTEXT_BYTE_LIMIT
+    from router_constants import ANTHROPIC_HAIKU_CONTEXT_BYTE_LIMIT
     tr = getattr(request, "transport", None)
     if tr is None or tr.is_closing():
         # Relay al client già iniziato e rotto (o client sparito): ogni rescue
@@ -502,9 +502,9 @@ async def _escalate_anthropic(request, orig: dict, session, chat_fp: str, relay,
     # Haiku fallback
     try:
         haiku_body_dict = dict(orig)
-        # Fix 2026-07-22: era THINK_MODEL (default Sonnet) ma il log/commento dice
-        # "Haiku". Il rescue finale a costo minore deve usare il modello Haiku reale.
-        haiku_body_dict["model"] = THINK_MODEL_ANTHROPIC
+        # Rescue finale: usa il modello che il client ha scelto (config globale).
+        # Il router NON impone un modello proprio (gerarchia = solo config globale).
+        haiku_body_dict["model"] = (orig.get("model") or "").strip() or haiku_body_dict.get("model")
         haiku_body_bytes = json.dumps(haiku_body_dict).encode()
         if len(haiku_body_bytes) > ANTHROPIC_HAIKU_CONTEXT_BYTE_LIMIT:
             shrunk_h = await _try_shrink_body_haiku(haiku_body_dict, MINIMAX_CONTEXT_BYTE_LIMIT)

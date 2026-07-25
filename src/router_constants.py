@@ -17,7 +17,7 @@ MINIMAX_EXECUTORS = set(
 )
 MIXED_EXECUTOR_MODEL = os.environ.get("AIROUTER_MIXED_EXECUTOR", "MiniMax-M2.7")
 NEW_PIPELINE = os.environ.get("AIROUTER_NEW_PIPELINE", "1") == "1"
-VERIFY_MODEL = os.environ.get("AIROUTER_VERIFY_MODEL", "claude-opus-4-8")
+# VERIFY_MODEL rimosso: il router non sceglie il modello Anthropic (gerarchia = config globale).
 ANTHROPIC_DIRECT_URL = os.environ.get("AIROUTER_ANTHROPIC_DIRECT", "https://api.anthropic.com")
 MINIMAX_GENERATIVE_HOST = os.environ.get(
     "AIROUTER_MINIMAX_GENERATIVE_HOST", "https://api.minimaxi.chat"
@@ -63,12 +63,10 @@ MINIMAX_ALERTS_LOG = os.path.expanduser("~/.claude/logs/minimax-alerts.log")
 MINIMAX_RETRY_BUDGET_SHORT = float(os.environ.get("AIROUTER_MINIMAX_RETRY_SHORT_SEC", "8"))
 # Fix 2026-07-21: allineato a pipelines/primitives.py (512) — 200 troncava i piani.
 THINK_MAX_TOKENS = int(os.environ.get("AIROUTER_THINK_MAX_TOKENS", "512"))
-# THINK su Anthropic (via forward_anthropic_direct → Anthropic API):
-# default Sonnet per reasoning forte; override con Haiku per velocità.
-THINK_MODEL = os.environ.get("AIROUTER_THINK_MODEL", "claude-sonnet-4-6")
+# THINK_MODEL / THINK_MODEL_ANTHROPIC rimossi: il router usa SEMPRE orig_model
+# (il modello scelto dalla config globale del client). La gerarchia THINK/exec/escalation
+# vive SOLO nella config globale ~/.claude/CLAUDE.md, mai nel router (tubo trasparente).
 THINK_TIMEOUT_SEC = float(os.environ.get("AIROUTER_THINK_TIMEOUT_SEC", "12"))
-# THINK_MODEL_ANTHROPIC: usato dalla catena anthropic_leads (fallback escalation).
-THINK_MODEL_ANTHROPIC = os.environ.get("AIROUTER_THINK_MODEL_ANTHROPIC", "claude-haiku-4-5-20251001")
 TRIM_TARGET_BYTES = MINIMAX_CONTEXT_BYTE_LIMIT // 2
 TRIM_MIN_MESSAGES = 4
 SUMMARY_BUDGET = MINIMAX_CONTEXT_BYTE_LIMIT * 3 // 4

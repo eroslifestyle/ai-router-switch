@@ -16,8 +16,6 @@ try:
     from router_constants import (
         MINIMAX_MODEL,
         MIXED_EXECUTOR_MODEL,
-        THINK_MODEL,
-        THINK_MODEL_ANTHROPIC,
         MINIMAX_FALLBACK_STATUSES,
         FALLBACK_STATUSES,
     )
@@ -27,8 +25,6 @@ except ImportError:
     )
     MINIMAX_MODEL = "MiniMax-M3"
     MIXED_EXECUTOR_MODEL = "MiniMax-M2.7"
-    THINK_MODEL = "claude-sonnet-4-6"
-    THINK_MODEL_ANTHROPIC = "claude-haiku-4-5-20251001"
     MINIMAX_FALLBACK_STATUSES = frozenset()
     FALLBACK_STATUSES = frozenset()
 
@@ -75,7 +71,7 @@ MODE_SPECS: dict[str, ModeSpec] = {
         verify_backend="anthropic",
         act_chain=(MIXED_EXECUTOR_MODEL, MINIMAX_MODEL),  # m2.7 → M3 escalation
         rescue_backend="anthropic",
-        rescue_model=THINK_MODEL_ANTHROPIC,  # Haiku rescue fixes bug (was THINK_MODEL=Sonnet)
+        rescue_model=None,  # rescue usa orig_model (client/config globale), non un modello del router
         use_hhem=False,
         verify_sampled=True,
     ),
@@ -87,7 +83,7 @@ MODE_SPECS: dict[str, ModeSpec] = {
         verify_backend="anthropic",
         act_chain=(),  # GLM tiering handled by glm_backend
         rescue_backend="anthropic",
-        rescue_model=THINK_MODEL_ANTHROPIC,
+        rescue_model=None,  # rescue usa orig_model (client/config globale)
         use_hhem=False,
         verify_sampled=True,
     ),
