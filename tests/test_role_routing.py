@@ -237,6 +237,37 @@ class TestInvariantNonAnthropicProviders:
         assert provider != "anthropic", "mix-gm mode should never use Anthropic provider"
 
 
+class TestModeListCoherence:
+    """role_routing ridefinisce VALID_MODES invece di importarlo.
+
+    È voluto: importare router_constants creerebbe un ciclo (router_constants
+    importa glm_backend, e un ciclo lì spegne silenziosamente GLM_AVAILABLE).
+    Il prezzo è una seconda fonte di verità: questi test la tengono allineata,
+    così una modalità aggiunta da una parte e non dall'altra fa fallire la
+    suite invece di produrre un routing incoerente a runtime.
+    """
+
+    def test_same_mode_set_as_router_constants(self):
+        import router_constants as rc
+        assert set(rr.VALID_MODES) == set(rc.VALID_MODES), (
+            f"disallineate: solo in role_routing={set(rr.VALID_MODES) - set(rc.VALID_MODES)}, "
+            f"solo in router_constants={set(rc.VALID_MODES) - set(rr.VALID_MODES)}"
+        )
+
+    def test_routing_table_covers_every_mode(self):
+        """Ogni modalità valida deve avere una rotta per THINK e per ACT."""
+        for mode in rr.VALID_MODES:
+            for role in (rr.ROLE_THINK, rr.ROLE_ACT):
+                assert (mode, role) in rr.ROUTING_TABLE, f"manca la rotta ({mode}, {role})"
+
+    def test_every_mode_has_a_default_provider(self):
+        """Il ruolo sconosciuto non deve mai far esplodere resolve_route."""
+        for mode in rr.VALID_MODES:
+            provider, override = rr.resolve_route(mode, "un-modello-mai-visto")
+            assert provider in ("anthropic", "minimax", "glm")
+            assert override is None
+
+
 def run_tests():
     """Run all tests and print results."""
     # Run pytest with minimal output
