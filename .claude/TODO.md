@@ -1,5 +1,12 @@
 # ai-router-switch — TODO
 
+## Completati (sessione 2026-07-25 — refactor gerarchia router + merge/cleanup)
+- [x] **Merge totale chiusa**: nessun commit nuovo da mergiare. `feat/glm-modes` e `fix/audit-4modes-p0-p1` già dentro main (0 commit avanti); branch `worktree-agent-adb871316334ad8d7` (WIP SUPERSEDED con 3 bug: up.read pre-relay, role:system→400, VERIFY 20s bloccante) cancellato locale. L'unica parte valida (fix test max_tokens 512) era già su main via 97f0cb8. Una sola istanza proxy live (systemd, sano).
+- [x] **Refactor gerarchia router (commit 99dcc0d, pushato origin/main)**: rimossi 3 selettori modello Anthropic da router — THINK_MODEL, VERIFY_MODEL, THINK_MODEL_ANTHROPIC. Router ora SEMPRE usa `orig_model` (modello client). 5 file toccati: router_constants.py, pipeline_anthropic.py, agent_loop_glm.py, mode_spec.py, ai-router-proxy.py. GLM_THINK_VERIFY_MODEL NON toccato (meccanica GLM interna).
+- [x] **Scoperta deploy critica**: proxy live risolve moduli da cwd=src/ (readlink /proc/<pid>/cwd). Igiene: rimossa copia orfana ~/.claude/scripts/router_constants.py (backup orphan-bak-20260725) → symlink a src/. Aggiunti symlink agent_loop_glm/mode_spec in scripts/.
+- [x] **Validazione**: test unit PASS, boot isolati 200, smoke anthropic pura 200, 7 porte UP, log puliti, restart checklist (active+Restart=always+3s+active). Router carica senza THINK_MODEL (hasattr=False). Gerarchia vive SOLO in ~/.claude/CLAUDE.md (già corretta, NON toccata).
+- [x] **Checkpoint unico**: CP_20260725_1534.md. TODO.md aggiornato. Nessun residuo azioni TODO su questa sessione.
+
 ## Completati (sessione 2026-07-23 pomeriggio — merge totale + cleanup worktree)
 - [x] Merge totale sessioni bloccate "api error": `feat/glm-modes` e `fix/audit-4modes-p0-p1` già dentro main (nessun commit da mergiare)
 - [x] WIP worktree `agent-adb871316334ad8d7` NON mergiato (superseded + 3 bug: up.read pre-relay, role:system→400, VERIFY bloccante); archiviato su branch omonimo commit `a713bc9`
