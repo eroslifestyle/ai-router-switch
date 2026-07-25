@@ -66,7 +66,8 @@ async def _mix_ag_stream(request, body, session, chat_fp, relay):
     if act_resp.status < 400:
         log(f"mix-ag STREAM passthrough GLM {act_resp.status} fp={chat_fp}")
         return await relay(act_resp,
-                           extra_headers={"x-ai-verified": f"mix-ag-stream({real_model})"})
+                           extra_headers={"x-ai-verified": f"mix-ag-stream({real_model})"},
+                           final_override=f"glm:{real_model}")
     log(f"mix-ag STREAM ACT fail {act_resp.status} -> rescue (user model -> Haiku) "
         f"fp={chat_fp}")
     try:
@@ -94,7 +95,8 @@ async def _mix_gm_stream(request, body, session, chat_fp, relay):
     if act_resp.status not in _FALLBACK:
         log(f"mix-gm STREAM passthrough MiniMax {act_resp.status} fp={chat_fp}")
         return await relay(act_resp,
-                           extra_headers={"x-ai-verified": "mix-gm-stream"})
+                           extra_headers={"x-ai-verified": "mix-gm-stream"},
+                           final_override="MiniMax-via-mix-gm")
     log(f"mix-gm STREAM ACT {act_resp.status} -> retry fp={chat_fp}")
     try:
         await act_resp.release()
@@ -103,7 +105,8 @@ async def _mix_gm_stream(request, body, session, chat_fp, relay):
     act_resp = await forward_minimax(request, body, session)
     if act_resp.status not in _FALLBACK:
         return await relay(act_resp,
-                           extra_headers={"x-ai-verified": "mix-gm-stream-retry"})
+                           extra_headers={"x-ai-verified": "mix-gm-stream-retry"},
+                           final_override="MiniMax-via-mix-gm")
     try:
         await act_resp.release()
     except Exception:
@@ -252,7 +255,8 @@ async def run_mix_ag_via_agent_loop(request, body, session, chat_fp, relay):
             except Exception:
                 pass
             return payload
-        return await relay(payload, extra_headers={"x-ai-verified": verified})
+        return await relay(payload, extra_headers={"x-ai-verified": verified},
+                           final_override=f"glm:{state.get('real_model') or '?'}")
     return await _anthropic_rescue(request, orig, session, chat_fp, relay)
 
 
@@ -465,7 +469,8 @@ async def run_mix_gm_via_agent_loop(request, body, session, chat_fp, relay):
                 pass
             return payload
         return await relay(payload,
-                           extra_headers={"x-ai-verified": "mix-gm-agent_loop"})
+                           extra_headers={"x-ai-verified": "mix-gm-agent_loop"},
+                           final_override="MiniMax-via-mix-gm")
     # Log il fallback "no payload"
     try:
         log_router_usage(

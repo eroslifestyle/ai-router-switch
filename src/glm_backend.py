@@ -31,7 +31,24 @@ from typing import Optional
 
 import tool_isolation
 import debug_catalog
-from router_utils import log_router_usage
+
+
+def _log_usage(**kw):
+    """Import LAZY di router_utils.log_router_usage.
+
+    NON importare router_utils a livello di modulo: router_constants importa
+    glm_backend (riga ~28) PRIMA di aver definito le proprie costanti, e
+    router_utils importa router_constants. Un import a livello di modulo crea
+    il ciclo router_constants -> glm_backend -> router_utils -> router_constants
+    (incompleto): l'ImportError finisce nell'except di router_constants, che
+    silenziosamente imposta GLM_AVAILABLE=False e manda TUTTE le modalità GLM
+    in fallback Anthropic senza errori visibili (regressione 2026-07-25).
+    """
+    try:
+        from router_utils import log_router_usage
+        log_router_usage(**kw)
+    except Exception:
+        pass
 
 # Z.ai Anthropic-compatible endpoint
 # GLM_API_BASE (env da glm.env) ha priorità; fallback su hardcoded
@@ -636,7 +653,8 @@ async def glm_think_act_verify(request, body: bytes, session, log_fn=print, rela
                                         content_type="application/json")
         log_fn("GLM THINK/VERIFY: skip su stream passthrough (body non bufferizzato)")
         return await relay(act_resp,
-                           extra_headers={"x-ai-verified": f"glm({real_model})"})
+                           extra_headers={"x-ai-verified": f"glm({real_model})"},
+                           final_override=f"glm:{real_model}")
 
     act_resp = await forward_glm(request, act_body, session,
                                   orig.get("model") or real_model, log_fn,
@@ -645,10 +663,10 @@ async def glm_think_act_verify(request, body: bytes, session, log_fn=print, rela
     if act_resp.status >= 400:
         log_fn(f"GLM ACT fail {act_resp.status}")
         try:
-            log_router_usage(
+            _log_usage(
                 chat_id="default",
                 orig=orig.get("model") or "?",
-                final=f"glm-mode:glm",
+                final=f"glm:{real_model}",
                 usage={},
                 mode="glm",
                 client=request.headers.get("User-Agent", "?")[:40] or "?",
@@ -673,10 +691,10 @@ async def glm_think_act_verify(request, body: bytes, session, log_fn=print, rela
 
     # Log della risposta non-streaming prima di rispondere
     try:
-        log_router_usage(
+        _log_usage(
             chat_id="default",
             orig=orig.get("model") or "?",
-            final=f"glm-mode:glm",
+            final=f"glm:{real_model}",
             usage=usage_dict,
             mode="glm",
             client=request.headers.get("User-Agent", "?")[:40] or "?",

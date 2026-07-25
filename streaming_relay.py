@@ -44,7 +44,14 @@ class StreamingRelay:
         upstream,
         chat_fp_for_rewrite: str = "default",
         extra_headers: dict | None = None,
+        final_override: str | None = None,
     ):
+        # final_override: il modello che ha REALMENTE eseguito, quando il call
+        # site lo conosce (es. mix-am sa che l'ACT è andato a MiniMax o al
+        # rescue Anthropic). Senza questo, _final veniva dedotto da un indice
+        # di remap costruito dal sidecar, che per mix-am ripiegava sul default
+        # "claude-direct" anche quando l'esecutore era MiniMax: la telemetria
+        # riportava il provider sbagliato (fix 2026-07-25).
         # FIX E: leggi e rimuovi orig_model da riscrivere nello SSE/non-stream
         # NB: i call site passano spesso chat_fp sbagliato (es 'default' vs IP reale).
         # Soluzione: prova la chiave esplicita; se manca e c'è esattamente UN orig
@@ -263,7 +270,9 @@ class StreamingRelay:
                 # FIX bug 2026-07-01: per mode=mixed il final NON è "?" — è il modello
                 # rimappato (MiniMax-M3 se orig è nel remap index) oppure "claude-direct"
                 # se mixed è caduto in fallback Anthropic.
-                if self.mode == "minimax":
+                if final_override:
+                    _final = final_override
+                elif self.mode == "minimax":
                     _final = self.minimax_model
                 elif self.mode == "anthropic":
                     _final = "claude-direct"

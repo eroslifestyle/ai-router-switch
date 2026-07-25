@@ -847,7 +847,8 @@ async def _pipeline_think_act(request, body, session, orig: dict, relay,
     if up is not None:
         log(f"mix-am ACT {used_exe} {up.status} {request.path} fp={chat_fp}")
         mixed_fail_reset(chat_fp)
-        return await relay(up, extra_headers={"x-ai-verified": f"anthropic-think+{used_exe.lower()}-act"})
+        return await relay(up, extra_headers={"x-ai-verified": f"anthropic-think+{used_exe.lower()}-act"},
+                           final_override=used_exe)
 
     if mixed_fail_last_status == 429:
         return web.json_response(
