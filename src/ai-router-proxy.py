@@ -105,21 +105,16 @@ from forward_minimax import (
     _route_v1_images, _route_v1_videos, _route_v1_music, _route_v1_audio_speech,
 )
 from pipeline_anthropic import (
-    _build_think_body, _build_finalize_body_p, _build_act_body_p,
-    _text_from_message, _parse_plan_text, _parse_think_json,
-    _call_full, _retry_forward, _force_no_stream,
-    _has_server_tools, _has_web_search_tool, _web_search_blocked_response,
+    _text_from_message,
+    _retry_forward,
+    _has_web_search_tool, _web_search_blocked_response,
     _is_context_too_large_for_minimax as _is_ctx_too_large,
     _is_context_exceed_400 as _is_ctx_exceed,
     _repair_message_sequence,
-    _shrink_and_retry_minimax,
-    _mixed_haiku_rescue, _anthropic_rescue,
-    _pipeline_think_act,
 )
 from pipeline_minimax import (
     _pipeline_minimax_orchestrate, _try_shrink_body,
 )
-from pipeline_glm import _handle_glm_mode
 
 # Load OAuth token at startup
 _load_oauth_token()
