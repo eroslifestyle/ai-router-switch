@@ -105,6 +105,11 @@ LISTEN_PORTS = [LISTEN_PORT] + list(PORT_MODE.keys())
 
 # ── Fallback statuses ─────────────────────────────────────────────────────────
 FALLBACK_STATUSES = {401, 403, 404, 408, 409, 413, 429, 500, 502, 503, 504, 529}
+# 429 è ESCLUSO di proposito per MiniMax: un rate limit non è un guasto del
+# provider, è pacing. Su 429 si aspetta il retry-after e si ritenta lo stesso
+# upstream — dirottare altrove moltiplicherebbe le richieste proprio mentre il
+# provider ci sta chiedendo di rallentare. (Il commento che diceva il contrario
+# era il finding audit 2026-07-17, MEDIA.)
 MINIMAX_FALLBACK_STATUSES = FALLBACK_STATUSES - {429}
 
 # ── Generative paths ──────────────────────────────────────────────────────────

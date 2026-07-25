@@ -100,12 +100,12 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
         retry_budget_sec = MINIMAX_RETRY_CAP_SEC
 
     # FIX BUG-COMPRESSIONE (2026-07-23): disabilitato double-rewrite.
-    # La compressione è già gestita dal layer superiore (ai-router-proxy.py linee 328-374)
-    # che comprime il body principale PRIMA di chiamare forward_minimax.
-    # Questo secondo rewrite ri-comprimeva l'act_body distruggendo il contesto
-    # preservato da orig_full in _pipeline_think_act.
-    # Il controllo a valle (linee 110-113) gestisce ancora i casi estremi (ritorna 400).
-    _orig_body = body
+    # La compressione è già gestita dal layer superiore, che comprime il body
+    # PRIMA di chiamare forward_minimax. Un secondo rewrite qui ri-comprimeva
+    # un body già compresso, distruggendo il contesto storico.
+    # Il controllo a valle gestisce ancora i casi estremi (ritorna 400).
+    # `_orig_body = body` rimosso: era assegnata e mai riletta (finding audit
+    # 2026-07-17, ALTA) e serviva alla pipeline THINK/ACT, non più esistente.
 
     # FIX BUG-COMPRESSIONE (2026-07-23): rimosso controllo anticipato context limit.
     # Questo controllo (len(body) > MINIMAX_CONTEXT_BYTE_LIMIT) è troppo aggressivo
@@ -220,7 +220,7 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
 
 
 async def _fwd_minimax_short(request, body, session):
-    """forward_minimax con budget corto — da usare SOLO via _call_full."""
+    """forward_minimax con budget di retry corto, per le chiamate non-streaming."""
     return await forward_minimax(request, body, session, retry_budget_sec=MINIMAX_RETRY_BUDGET_SHORT)
 
 

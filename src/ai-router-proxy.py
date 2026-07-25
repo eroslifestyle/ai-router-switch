@@ -127,8 +127,11 @@ try:
 except Exception as _rexc:
     Resilience = None
     _RESILIENCE_AVAILABLE = False
-    log_bootstrap = lambda m: print(f"[{time.strftime('%H:%M:%S')}] {m}", file=sys.stderr)
-    log_bootstrap(f"WARN: resilience module non disponibile: {_rexc}")
+    # log() non è ancora disponibile qui (import successivo): scrittura diretta
+    # su stderr. Era una lambda usata una sola volta, subito sotto la sua
+    # definizione (finding audit 2026-07-17, BASSA).
+    print(f"[{time.strftime('%H:%M:%S')}] WARN: resilience module non disponibile: {_rexc}",
+          file=sys.stderr)
 
 RESILIENCE_INST = None
 
