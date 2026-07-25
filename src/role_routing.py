@@ -30,6 +30,15 @@ ROLE_THINK = "think"
 ROLE_ACT = "act"
 ROLE_UNKNOWN = "unknown"
 
+# Le fasi della gerarchia sono TRE (THINK, ACT, VERIFY) ma i ruoli di routing
+# sono DUE. Non è una dimenticanza: il VERIFY lo esegue sempre lo stesso modello
+# che ha fatto il THINK, quindi la richiesta di verifica arriva qui con lo stesso
+# nome di modello (es. claude-opus-5) e ricade su ROLE_THINK — cioè esattamente
+# sul provider giusto. Una terza riga in ROUTING_TABLE sarebbe un duplicato di
+# quella del THINK, con il rischio che le due divergano nel tempo.
+# ROLE_VERIFY esiste per rendere leggibile questa scelta nel codice chiamante.
+ROLE_VERIFY = ROLE_THINK
+
 # ── Routing table (data-driven, not if/elif) ──────────────────────────────────
 # Keyed by (mode, role) → (provider, model_override)
 ROUTING_TABLE = {

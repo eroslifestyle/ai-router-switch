@@ -237,6 +237,45 @@ class TestInvariantNonAnthropicProviders:
         assert provider != "anthropic", "mix-gm mode should never use Anthropic provider"
 
 
+class TestVerifyFollowsThink:
+    """Il VERIFY non ha una rotta propria: usa quella del THINK.
+
+    La gerarchia ha tre fasi ma il routing due ruoli, perché il VERIFY lo esegue
+    lo stesso modello che ha fatto il THINK. Questi test rendono la scelta
+    esplicita e la bloccano: se qualcuno un giorno aggiungesse una rotta VERIFY
+    divergente, o cambiasse quella del THINK dimenticando il verify, qui si rompe.
+    """
+
+    THINK_MODELS = ("claude-opus-5", "claude-sonnet-5", "claude-fable-5")
+
+    def test_verify_alias_points_to_think(self):
+        assert rr.ROLE_VERIFY == rr.ROLE_THINK
+
+    def test_verify_route_equals_think_route_every_mode(self):
+        """Per ogni modalità, verificare costa esattamente come pensare."""
+        for mode in rr.VALID_MODES:
+            think = rr.ROUTING_TABLE[(mode, rr.ROLE_THINK)]
+            verify = rr.ROUTING_TABLE[(mode, rr.ROLE_VERIFY)]
+            assert think == verify, f"{mode}: VERIFY {verify} diverge da THINK {think}"
+
+    def test_verify_never_lands_on_the_executor(self):
+        """Chi verifica non deve essere chi ha eseguito, nelle modalità miste."""
+        for mode in ("mix-am", "mix-ag", "mix-gm"):
+            verify_provider, _ = rr.ROUTING_TABLE[(mode, rr.ROLE_VERIFY)]
+            act_provider, _ = rr.ROUTING_TABLE[(mode, rr.ROLE_ACT)]
+            assert verify_provider != act_provider, (
+                f"{mode}: il verify finirebbe sullo stesso provider dell'esecutore "
+                f"({verify_provider}) — l'esecutore non può validare se stesso"
+            )
+
+    def test_verify_reaches_think_provider_for_real_model_names(self):
+        """Una richiesta di verifica porta il nome del modello THINK: deve bastare."""
+        for mode in rr.VALID_MODES:
+            expected = rr.ROUTING_TABLE[(mode, rr.ROLE_THINK)]
+            for model in self.THINK_MODELS:
+                assert rr.resolve_route(mode, model) == expected
+
+
 class TestModeListCoherence:
     """role_routing ridefinisce VALID_MODES invece di importarlo.
 
