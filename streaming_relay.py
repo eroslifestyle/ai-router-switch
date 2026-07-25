@@ -267,12 +267,12 @@ class StreamingRelay:
                     _final = self.minimax_model
                 elif self.mode == "anthropic":
                     _final = "claude-direct"
-                elif self.mode in ("glm", "glm-minimax", "anthropic-glm"):
+                elif self.mode in ("glm", "glm-minimax", "anthropic-glm", "mix-gm", "mix-ag"):
                     # Il modello GLM effettivo è nell'header x-ai-verified (glm(<model>)).
                     # Registriamo il mode; il modello reale + moltiplicatore costo sono
                     # già loggati inline da _glm_execute_with_chain (x-glm-cost-mult).
                     _final = f"glm-mode:{self.mode}"
-                elif self.mode == "mixed":
+                elif self.mode in ("mixed", "mix-am"):
                     try:
                         _remap_idx = self.request_orig_model.get("__remap__") or {}
                         if not _remap_idx:

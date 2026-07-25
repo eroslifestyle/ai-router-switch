@@ -87,7 +87,7 @@ from router_utils import (
     log, log_exc, debug_capture, debug_errors, debug_last,
     debug_stats, debug_trace, debug_catalog_endpoint, debug_catalog_entry,
     MINIMAX_LIMITER, _MINIMAX_SEM,
-    _request_orig_model,
+    _request_orig_model, log_router_usage,
 )
 from router_debug import dl
 from router_mode import (
@@ -148,24 +148,6 @@ def _log_original_model(orig: str, final: str, chat_id: str) -> None:
         pass
 
 
-def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
-                     mode: str, client: str = "?", status: int = 200, path: str = ""):
-    if not final or final == "?":
-        final = "router-internal"
-    try:
-        USAGE_SIDECAR.parent.mkdir(parents=True, exist_ok=True)
-        entry = {
-            "ts": int(time.time()), "chat": chat_id, "orig": orig or "?",
-            "final": final, "mode": mode, "client": client, "status": status,
-            "input_tokens": int(usage.get("input_tokens", 0) or 0),
-            "output_tokens": int(usage.get("output_tokens", 0) or 0),
-            "cache_read": int(usage.get("cache_read_input_tokens", 0) or 0),
-            "cache_creation": int(usage.get("cache_creation_input_tokens", 0) or 0),
-        }
-        with open(USAGE_SIDECAR, "a") as f:
-            f.write(json.dumps(entry) + "\n")
-    except Exception:
-        pass
 
 
 # Wire defaults after all imports (avoids circular)

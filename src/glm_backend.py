@@ -31,6 +31,7 @@ from typing import Optional
 
 import tool_isolation
 import debug_catalog
+from router_utils import log_router_usage
 
 # Z.ai Anthropic-compatible endpoint
 # GLM_API_BASE (env da glm.env) ha priorità; fallback su hardcoded
@@ -643,10 +644,47 @@ async def glm_think_act_verify(request, body: bytes, session, log_fn=print, rela
 
     if act_resp.status >= 400:
         log_fn(f"GLM ACT fail {act_resp.status}")
+        try:
+            log_router_usage(
+                chat_id="default",
+                orig=orig.get("model") or "?",
+                final=f"glm-mode:glm",
+                usage={},
+                mode="glm",
+                client=request.headers.get("User-Agent", "?")[:40] or "?",
+                status=act_resp.status,
+                path=request.path
+            )
+        except Exception:
+            pass
         return act_resp
 
     # forward_glm ritorna una web.Response con il body già in memoria (.body).
     act_raw = act_resp.body if isinstance(act_resp.body, (bytes, bytearray)) else b""
+
+    # Estrai usage dal payload JSON
+    usage_dict = {}
+    try:
+        resp_data = json.loads(act_raw) if act_raw else {}
+        if resp_data.get("usage"):
+            usage_dict = resp_data["usage"]
+    except Exception:
+        pass
+
+    # Log della risposta non-streaming prima di rispondere
+    try:
+        log_router_usage(
+            chat_id="default",
+            orig=orig.get("model") or "?",
+            final=f"glm-mode:glm",
+            usage=usage_dict,
+            mode="glm",
+            client=request.headers.get("User-Agent", "?")[:40] or "?",
+            status=200,
+            path=request.path
+        )
+    except Exception:
+        pass
 
     # THINK + VERIFY in background: non bloccano la risposta già pronta.
     _fire_and_forget(_glm_think_verify_background(

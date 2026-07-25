@@ -10,7 +10,7 @@ portati qui come helper:
 """
 import json
 
-from router_utils import log
+from router_utils import log, log_router_usage
 import debug_catalog
 
 
@@ -229,6 +229,28 @@ async def run_mix_ag_via_agent_loop(request, body, session, chat_fp, relay):
         if not hasattr(payload, "content"):
             if not getattr(payload, "prepared", False):
                 payload.headers["x-ai-verified"] = verified
+            # Log la risposta non-streaming (bypass relay)
+            try:
+                usage_dict = {}
+                if hasattr(payload, "body"):
+                    try:
+                        resp_data = json.loads(payload.body) if payload.body else {}
+                        if resp_data.get("usage"):
+                            usage_dict = resp_data["usage"]
+                    except Exception:
+                        pass
+                log_router_usage(
+                    chat_id=chat_fp or "default",
+                    orig=orig.get("model") or "?",
+                    final=f"glm:{state.get('real_model') or '?'}",
+                    usage=usage_dict,
+                    mode="mix-ag",
+                    client=request.headers.get("User-Agent", "?")[:40] or "?",
+                    status=payload.status if hasattr(payload, "status") else 200,
+                    path=request.path
+                )
+            except Exception:
+                pass
             return payload
         return await relay(payload, extra_headers={"x-ai-verified": verified})
     return await _anthropic_rescue(request, orig, session, chat_fp, relay)
@@ -396,6 +418,20 @@ async def run_mix_gm_via_agent_loop(request, body, session, chat_fp, relay):
                 await result.payload.release()
             except Exception:
                 pass
+            # Log l'errore MiniMax
+            try:
+                log_router_usage(
+                    chat_id=chat_fp or "default",
+                    orig=orig.get("model") or "?",
+                    final="MiniMax-via-mix-gm",
+                    usage={},
+                    mode="mix-gm",
+                    client=request.headers.get("User-Agent", "?")[:40] or "?",
+                    status=result.payload.status,
+                    path=request.path
+                )
+            except Exception:
+                pass
             from aiohttp import web
             return web.json_response(
                 {"error": {"type": "minimax_unavailable",
@@ -405,9 +441,45 @@ async def run_mix_gm_via_agent_loop(request, body, session, chat_fp, relay):
         if not hasattr(payload, "content"):
             if not getattr(payload, "prepared", False):
                 payload.headers["x-ai-verified"] = "mix-gm-agent_loop"
+            # Log la risposta non-streaming success (bypass relay)
+            try:
+                usage_dict = {}
+                if hasattr(payload, "body"):
+                    try:
+                        resp_data = json.loads(payload.body) if payload.body else {}
+                        if resp_data.get("usage"):
+                            usage_dict = resp_data["usage"]
+                    except Exception:
+                        pass
+                log_router_usage(
+                    chat_id=chat_fp or "default",
+                    orig=orig.get("model") or "?",
+                    final="MiniMax-via-mix-gm",
+                    usage=usage_dict,
+                    mode="mix-gm",
+                    client=request.headers.get("User-Agent", "?")[:40] or "?",
+                    status=payload.status if hasattr(payload, "status") else 200,
+                    path=request.path
+                )
+            except Exception:
+                pass
             return payload
         return await relay(payload,
                            extra_headers={"x-ai-verified": "mix-gm-agent_loop"})
+    # Log il fallback "no payload"
+    try:
+        log_router_usage(
+            chat_id=chat_fp or "default",
+            orig=orig.get("model") or "?",
+            final="MiniMax-via-mix-gm",
+            usage={},
+            mode="mix-gm",
+            client=request.headers.get("User-Agent", "?")[:40] or "?",
+            status=502,
+            path=request.path
+        )
+    except Exception:
+        pass
     from aiohttp import web
     return web.json_response(
         {"error": {"type": "minimax_unavailable",
