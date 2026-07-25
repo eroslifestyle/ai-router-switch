@@ -78,7 +78,7 @@ def _minimax_est_tokens(new_body: bytes) -> int:
 
 
 async def forward_minimax(request, body, session, retry_budget_sec: float = None,
-                          act_timeout_sec: float = None):
+                          act_timeout_sec: float = None, model_override: str | None = None):
     """Chiama MiniMax con pacing preventivo (MinimaxRateLimiter) + retry 429.
 
     act_timeout_sec: se settato, timeout totale (ClientTimeout.total) applicato
@@ -86,7 +86,11 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
     executor di mix-am: un MiniMax disconnesso/degradato ecceziona dopo
     act_timeout_sec invece di ereditare il sock_read=120s della sessione,
     evitando che un singolo tentativo blocchi il turno per minuti (retry-storm
-    lato client). None = comportamento invariato (timeout di sessione)."""
+    lato client). None = comportamento invariato (timeout di sessione).
+
+    model_override: str | None
+        Modello MiniMax di destinazione per questa chiamata (es. "MiniMax-M2.7").
+        Se None, usa MINIMAX_MODEL (default). Inoltrato a remap_body_for_minimax come target_model."""
     from minimax_body import remap_body_for_minimax
     from router_utils import _repair_message_sequence
     from context_rewrite import rewrite_for_context
@@ -127,7 +131,8 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
                                        orig_model_store=_rom_store,
                                        resolve_fp=_resolve_chat_fingerprint,
                                        log_model_fn=None,
-                                       log_fn=_log)
+                                       log_fn=_log,
+                                       target_model=model_override)
     new_body = tool_isolation.filter_tools_for_backend(new_body, "minimax")
 
     # FIX #3 (audit 2026-07-22): remap_body_for_minimax NON ripara la sequenza
@@ -144,9 +149,9 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
             _log(f"transition_filters repair skip: {_e}")
 
     try:
-        model = json.loads(new_body).get("model", "") or MINIMAX_MODEL
+        model = json.loads(new_body).get("model", "") or (model_override or MINIMAX_MODEL)
     except Exception:
-        model = MINIMAX_MODEL
+        model = model_override or MINIMAX_MODEL
 
     est = _minimax_est_tokens(new_body)
     t0 = time.monotonic()

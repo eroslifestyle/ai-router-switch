@@ -484,6 +484,88 @@ async def handle(request):
     )
     relay = _relay.relay
 
+    # ─────────────────────────────────────────────────────────────────────────────
+    # TUNNEL TRASPARENTE: dispatch universale per tutte le modalità (righe 486-550)
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Nuovo dispatch basato su role_routing.resolve_route(): determina il provider
+    # e il model_override per la richiesta, poi la inoltra al provider appropriato.
+    # Questo blocco ritorna SEMPRE e rende irraggiungibile il codice sottostante.
+    try:
+        _req_model = (json.loads(body).get("model") or "").strip()
+    except Exception:
+        _req_model = ""
+
+    from role_routing import resolve_route
+    try:
+        _provider, _model_override = resolve_route(mode, _req_model)
+    except ValueError as e:
+        log(f"routing: {e} -> fallback anthropic")
+        _provider, _model_override = "anthropic", None
+
+    log(f"tunnel {mode}: model={_req_model or '?'} -> provider={_provider} override={_model_override or '-'}")
+
+    # Smistamento per provider
+    if _provider == "anthropic":
+        # Case 1: mode == "anthropic" (pure)
+        #   Lascia cadere nel codice sottostante (ramo "ANTHROPIC PURA" esistente).
+        # Case 2: mode != "anthropic" (mix-am, mix-ag, mix-gm con THINK su Anthropic)
+        #   Inoltra direttamente ad Anthropic dal blocco tunnel.
+        if mode != "anthropic":
+            # Inoltro diretto ad Anthropic per modalità miste
+            if not request.path.endswith("/v1/messages"):
+                up = await forward_anthropic(request, body, session)
+                return await relay(up, extra_headers={"x-ai-verified": f"tunnel-{mode}-anthropic"})
+            # Per /v1/messages, applica il retry certificato SDK
+            try:
+                up, exhausted = await _anthropic_forward_with_retry(request, body, session, relay)
+            except Exception as e:
+                log(f"ERR tunnel {mode} anthropic {request.path}: {e}")
+                debug_catalog.record_event(severity="error", category="anthropic",
+                                            kind="forward_exception", snippet=str(e))
+                return web.json_response({"type": "error", "error": {"type": "router_error", "message": str(e)}}, status=502)
+            if exhausted and up is not None and up.status == 429:
+                log(f"tunnel {mode} anthropic -> 429 PERSISTENTE dopo {ANTHROPIC_MAX_RETRIES} retry {request.path}")
+                debug_catalog.record_event(severity="error", category="anthropic",
+                                            kind="rate_limit_429_exhausted", code=429,
+                                            snippet=f"retry-after={up.headers.get('retry-after','?')}")
+                return await relay(up, extra_headers={"x-ai-verified": f"tunnel-{mode}-anthropic-ratelimit"})
+            log(f"tunnel {mode} anthropic -> {up.status} {request.path}")
+            return await relay(up, extra_headers={"x-ai-verified": f"tunnel-{mode}-anthropic"})
+        # Altrimenti: mode == "anthropic" → cadi nel ramo "ANTHROPIC PURA" sotto
+
+    elif _provider == "minimax":
+        if not request.path.endswith("/v1/messages"):
+            up = await forward_minimax(request, body, session, model_override=_model_override)
+            return await relay(up, final_override=_model_override)
+        try:
+            _orig = json.loads(body)
+            _inject_task_mode_for_images(_orig)
+        except Exception:
+            _orig = {}
+        return await _pipeline_minimax_orchestrate(request, body, session, _orig, relay, model_override=_model_override)
+
+    elif _provider == "glm":
+        if not GLM_AVAILABLE:
+            log(f"tunnel {mode}: GLM non disponibile -> 502")
+            return web.json_response({"type": "error", "error": {"type": "glm_unavailable",
+                                      "message": f"{mode}: modulo GLM assente"}}, status=502)
+        try:
+            import glm_backend as _glm_mod
+            _glm_model = _model_override or _glm_mod.resolve_glm_upstream_model(_glm_mod.GLM_TIER_MID)
+            # z.ai onora il campo "model" del BODY: senza set_body_model ignora
+            # il modello scelto qui e usa il proprio default (vedi docstring di
+            # set_body_model). forward_glm non riscrive il body: lo fa il caller.
+            _glm_body = _glm_mod.set_body_model(body, _glm_model)
+            up = await _glm_mod.forward_glm(request, _glm_body, session,
+                                            _req_model or _glm_model, log_fn=log,
+                                            passthrough=True, upstream_model=_glm_model)
+            return await relay(up, extra_headers={"x-ai-verified": f"tunnel-{mode}-glm({_glm_model})"}, final_override=f"glm:{_glm_model}")
+        except Exception as e:
+            log(f"tunnel {mode} GLM EXC: {e} -> 502")
+            debug_catalog.record_event(severity="error", category="glm", kind="forward_exception", snippet=str(e))
+            return web.json_response({"type": "error", "error": {"type": "glm_unavailable",
+                                      "message": f"{mode}: {e}"}}, status=502)
+
     # ANTHROPIC PURA
     if mode == "anthropic":
         if not request.path.endswith("/v1/messages"):

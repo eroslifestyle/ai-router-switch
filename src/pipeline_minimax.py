@@ -17,8 +17,12 @@ import debug_catalog
 # L'import _text_from_message serviva solo a queste funzioni.
 
 
-async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, relay):
+async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, relay, model_override: str | None = None):
     """mode=minimax: passthrough streaming diretto a MiniMax-M3.
+
+    Parametri:
+      - model_override: se non None, riscrive il modello nelle chiamate a forward_minimax
+                       (es. "MiniMax-M2.7" per forzare l'ACT anche in modalità THINK).
 
     Redesign 2026-07-22 (perf/latenza): rimossa l'orchestrazione THINK/ACT/VERIFY.
     Root cause verificata dai log (giorni di "THINK: piano non valido -> executor
@@ -48,10 +52,10 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
         shrunk = await _try_shrink_body(orig, MINIMAX_CONTEXT_BYTE_LIMIT)
         if shrunk is not None and shrunk != body:
             try:
-                up_pre = await forward_minimax(request, shrunk, session)
+                up_pre = await forward_minimax(request, shrunk, session, model_override=model_override)
                 if up_pre.status < 400:
                     log(f"minimax PRE shrunk OK {up_pre.status} fp={chat_fp}")
-                    return await relay(up_pre, extra_headers={"x-ai-verified": "minimax-m3-shrunk"})
+                    return await relay(up_pre, extra_headers={"x-ai-verified": "minimax-m3-shrunk"}, final_override=model_override or "MiniMax-M3")
                 try:
                     await up_pre.release()
                 except Exception:
@@ -74,7 +78,7 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
 
     # Passthrough streaming diretto: primo byte appena MiniMax risponde, zero overhead.
     try:
-        up = await forward_minimax(request, body, session)
+        up = await forward_minimax(request, body, session, model_override=model_override)
     except Exception as e:
         log(f"minimax passthrough EXC: {e} fp={chat_fp}")
         debug_catalog.record_event(severity="error", category="minimax",
@@ -82,7 +86,7 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
         return web.json_response({"type": "error", "error": {"type": "router_error",
                                   "message": str(e)}}, status=502)
     log(f"minimax passthrough {up.status} {request.path} fp={chat_fp}")
-    return await relay(up, extra_headers={"x-ai-verified": f"minimax-direct({MINIMAX_MODEL.lower()})"})
+    return await relay(up, extra_headers={"x-ai-verified": f"minimax-direct({MINIMAX_MODEL.lower()})"}, final_override=model_override or "MiniMax-M3")
 
 
 async def _try_shrink_body(orig: dict, target_bytes: int):

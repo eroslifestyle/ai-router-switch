@@ -92,7 +92,7 @@ def strip_server_tools_for_minimax(data: dict) -> None:
 
 def remap_body_for_minimax(raw: bytes, request=None, *,
                            orig_model_store=None, resolve_fp=None,
-                           log_model_fn=None, log_fn=None) -> bytes:
+                           log_model_fn=None, log_fn=None, target_model: str | None = None) -> bytes:
     """Riscrive il model Claude -> MiniMax-M3 e rimuove i campi beta non supportati.
 
     Dependency injection (proxy passes its globals):
@@ -100,8 +100,12 @@ def remap_body_for_minimax(raw: bytes, request=None, *,
     - resolve_fp: callable(request) -> chat fingerprint
     - log_model_fn: callable(orig_model, new_model, chat_id)
     - log_fn: callable(msg) for logging
+    - target_model: str | None
+        Modello MiniMax di destinazione per questa chiamata. Se None, usa MINIMAX_MODEL (default).
+        Permette di selezionare il modello MiniMax per singola richiesta (es. "MiniMax-M2.7").
     """
     _log = log_fn or print
+    _target = target_model or MINIMAX_MODEL
     try:
         data = json.loads(raw)
         orig = data.get("model", "")
@@ -109,7 +113,7 @@ def remap_body_for_minimax(raw: bytes, request=None, *,
             if resolve_fp and request:
                 chat_id = resolve_fp(request)
                 if log_model_fn:
-                    log_model_fn(orig, MINIMAX_MODEL, chat_id)
+                    log_model_fn(orig, _target, chat_id)
             else:
                 chat_id = "?"
             # Ricorda per riscrittura SSE — consumato dal relay()
@@ -120,7 +124,7 @@ def remap_body_for_minimax(raw: bytes, request=None, *,
                     if _keep is not None:
                         orig_model_store["__remap__"] = _keep
                 orig_model_store[chat_id] = orig
-            data["model"] = MINIMAX_MODEL
+            data["model"] = _target
         for f in MINIMAX_UNSUPPORTED_FIELDS:
             data.pop(f, None)
         strip_server_tools_for_minimax(data)
