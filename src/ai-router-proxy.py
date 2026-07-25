@@ -61,10 +61,6 @@ from providers.base import (
     _body_has_images,
     classify_t2,
 )
-from pipelines.primitives import (
-    build_think_body, build_act_body, build_finalize_body,
-    to_json_bytes,
-)
 from sse_utils import _sse_events_from_message, _prepare_sse_response, _send_sse_message
 
 # ── Router modules (this refactoring) ─────────────────────────────────────────

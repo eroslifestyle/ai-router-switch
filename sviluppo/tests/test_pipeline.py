@@ -11,9 +11,6 @@ def test_imports():
         _is_context_exceed_400, strip_images_body, call_full,
         T2_KEYWORDS, trim_old_messages,
     )
-    from pipelines.primitives import (
-        build_think_body, build_act_body, build_finalize_body,
-    )
     print(f"  imports: OK ({len(FALLBACK_STATUSES)} status codes)")
 
 def test_text_extraction():
@@ -55,28 +52,6 @@ def test_strip_images():
     assert len(imgs) == 0, f"Still has {len(imgs)} images"
     print("  strip_images: OK")
 
-def test_pipeline_primitives():
-    from pipelines.primitives import build_think_body, build_act_body, build_finalize_body
-    orig = {"model": "sonnet-4-7", "system": "sei un assistente", "messages": [{"role": "user", "content": "pippo"}]}
-    think = build_think_body(orig)
-    # model preservato (orig è Anthropic)
-    assert think["model"] in ("sonnet-4-7", "claude-haiku-4-5-20251001"), think["model"]
-    assert "ORCHESTRATORE" in think["system"]
-    from pipelines.primitives import THINK_MAX_TOKENS
-    assert think["max_tokens"] == THINK_MAX_TOKENS, think["max_tokens"]
-    assert "tools" not in think  # rimossi da think
-    # MiniMax -> fallback Haiku
-    orig_mm = {"model": "MiniMax-M2.7", "messages": [{"role": "user", "content": "x"}]}
-    think_mm = build_think_body(orig_mm)
-    assert think_mm["model"] == "claude-haiku-4-5-20251001", think_mm["model"]
-    act = build_act_body(orig, "fai pippo", [], executor="MiniMax-M2.7")
-    assert act["model"] == "MiniMax-M2.7", act["model"]  # executor forzato
-    act_preserve = build_act_body(orig, "fai pippo", [])  # no executor
-    assert act_preserve["model"] == "sonnet-4-7"  # preservato da orig
-    fin = build_finalize_body(orig, "pippo?", "draft risposta")
-    assert "draft risposta" in fin["messages"][0]["content"], fin["messages"][0]["content"]
-    print("  pipeline primitives: OK")
-
 def test_router_http():
     import urllib.request, json
     try:
@@ -96,7 +71,6 @@ def main():
     test_text_extraction()
     test_context_checks()
     test_strip_images()
-    test_pipeline_primitives()
     test_router_http()
     print("=" * 40)
     print("TUTTI I TEST PASSATI ✅")
