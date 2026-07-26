@@ -42,7 +42,6 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
     from forward_minimax import forward_minimax
     from pipeline_anthropic import (
         _is_context_too_large_for_minimax,
-        _has_web_search_tool, _web_search_blocked_response,
         _body_has_images, _serve_minimax_vision,
     )
 
@@ -68,8 +67,21 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
                  "message": f"body {len(body)}b > limit e shrink non riesce."}},
                 status=400)
 
-    if _has_web_search_tool(orig):
-        return _web_search_blocked_response()
+    # GATE web_search RIMOSSO (2026-07-26). Rifiutava con 400 ogni richiesta che
+    # avesse il tool web_search fra i tools: in mix-am basta che l'esecutore
+    # delegato dal main Anthropic lo abbia in lista perche' il turno muoia con un
+    # API error a schermo. Il rifiuto era gia' superfluo — a valle di questo punto
+    # forward_minimax ripulisce tutto, sempre e incondizionatamente:
+    #   - remap_body_for_minimax -> strip_server_tools_for_minimax() toglie le
+    #     definizioni server-tool e converte in testo i blocchi server_tool_use /
+    #     web_search_tool_result rimasti nella history (era il 400 "2013");
+    #   - tool_isolation.filter_tools_for_backend() toglie i tool brandizzati di
+    #     altri provider (WebSearch/WebFetch inclusi per nome esatto);
+    #   - sanitize_tool_choice() riallinea tool_choice ai tool superstiti.
+    # Effetto atteso: la richiesta passa, l'esecutore MiniMax semplicemente non
+    # vede il tool WebSearch di Anthropic — coerente con la policy globale
+    # "web search = MiniMax/m3-web, non Anthropic". Degrado di capacita', non
+    # errore in faccia all'utente.
 
     if _body_has_images(orig):
         res = await _serve_minimax_vision(request, orig, session, chat_fp, relay)

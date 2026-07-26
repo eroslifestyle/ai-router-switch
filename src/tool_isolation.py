@@ -68,6 +68,27 @@ _BRAND_CHECK = {
 }
 
 
+def sanitize_tool_choice(data: dict) -> None:
+    """Riallinea `tool_choice` all'array `tools` dopo uno strip. Muta `data`.
+
+    Un tool_choice del tipo {"type":"tool","name":"web_search"} che punta a un
+    tool appena rimosso fa rispondere 400 all'upstream ("unknown tool"): lo
+    strip da solo non basta, va sanato anche il riferimento. Se il tool citato
+    non c'e' piu' si degrada a "auto" (il modello sceglie tra quelli rimasti);
+    senza piu' alcun tool, tool_choice sparisce del tutto."""
+    tc = data.get("tool_choice")
+    if not isinstance(tc, dict) or tc.get("type") != "tool":
+        return
+    tools = data.get("tools")
+    names = {t.get("name") for t in tools if isinstance(t, dict)} if isinstance(tools, list) else set()
+    if tc.get("name") in names:
+        return
+    if names:
+        data["tool_choice"] = {"type": "auto"}
+    else:
+        data.pop("tool_choice", None)
+
+
 def filter_tools_for_backend(body: bytes, backend: str) -> bytes:
     """Rimuove dall'array `tools` i tool brandizzati di provider DIVERSI da
     `backend` ('anthropic'|'minimax'|'glm'). I tool locali di Claude Code
@@ -97,4 +118,5 @@ def filter_tools_for_backend(body: bytes, backend: str) -> bytes:
     else:
         data.pop("tools", None)
         data.pop("tool_choice", None)
+    sanitize_tool_choice(data)
     return json.dumps(data).encode()

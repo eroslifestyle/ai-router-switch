@@ -104,7 +104,6 @@ from forward_minimax import (
 from pipeline_anthropic import (
     _text_from_message,
     _retry_forward,
-    _has_web_search_tool, _web_search_blocked_response,
     _is_context_too_large_for_minimax as _is_ctx_too_large,
     _is_context_exceed_400 as _is_ctx_exceed,
     _repair_message_sequence,

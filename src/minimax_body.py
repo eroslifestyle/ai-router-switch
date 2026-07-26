@@ -100,6 +100,10 @@ def strip_server_tools_for_minimax(data: dict) -> None:
             else:
                 data.pop("tools", None)
                 data.pop("tool_choice", None)
+            # tool_choice puo' ancora nominare un tool appena rimosso -> 400
+            # "unknown tool" su MiniMax. Va riallineato, non basta lo strip.
+            from tool_isolation import sanitize_tool_choice
+            sanitize_tool_choice(data)
     for m in data.get("messages", []):
         c = m.get("content")
         if not isinstance(c, list):

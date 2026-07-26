@@ -87,17 +87,10 @@ async def _is_context_exceed_400(up) -> tuple:
               or b"context_exceeded" in low)
     return (is_ctx, raw)
 
-def _has_web_search_tool(orig: dict) -> bool:
-    return any(isinstance(t, dict) and (str(t.get("type", "")).startswith("web_search")
-               or t.get("name") == "web_search") for t in orig.get("tools") or [])
-
-
-def _web_search_blocked_response():
-    from aiohttp import web
-    return web.json_response(
-        {"type": "error", "error": {"type": "invalid_request_error",
-         "message": "web_search Anthropic disabilitato in mixed/minimax: usa MCP MiniMax."}},
-        status=400)
+# _has_web_search_tool / _web_search_blocked_response RIMOSSE (2026-07-26):
+# servivano solo al gate 400 di pipeline_minimax, eliminato perche' rifiutava
+# richieste che forward_minimax ripulisce gia' da solo. Nessun altro chiamante
+# (verificato via AST su tutto il repo).
 
 # ── Shrink ─────────────────────────────────────────────────────────────────────
 async def _try_shrink_body_haiku(orig: dict, target_bytes: int):
