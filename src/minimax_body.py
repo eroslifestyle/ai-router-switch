@@ -63,15 +63,37 @@ _SERVER_TOOL_BLOCK_TYPES = (
     "code_execution_tool_result",
 )
 
+# Client tool che orchestrano subagent: NON vanno MAI rimossi da nessuna
+# modalità, nemmeno se arrivassero privi di input_schema. Guardia esplicita
+# (regola utente 2026-07-26: "dentro il router non devo avere questi blocchi"
+# sul tool Agent). Match case-insensitive sul name della definizione tool.
+_NEVER_STRIP_TOOL_NAMES = {"agent", "task", "subagent"}
+
+
+def _is_protected_tool(tool: object) -> bool:
+    """True se la definizione tool è un client-tool di orchestrazione subagent
+    (Agent/Task/SubAgent) che va sempre conservato per MiniMax."""
+    if not isinstance(tool, dict):
+        return False
+    name = str(tool.get("name") or "").strip().lower()
+    return name in _NEVER_STRIP_TOOL_NAMES
+
 
 def strip_server_tools_for_minimax(data: dict) -> None:
     """Bug 2026-07-04: MiniMax non conosce i server tool Anthropic (web_search_20250305...).
     Rifiuta sia le definizioni in `tools` (niente input_schema) sia i blocchi
     server_tool_use/web_search_tool_result rimasti nella history → 400 (2013).
-    Strip delle definizioni + conversione dei blocchi in testo. Muta `data`."""
+    Strip delle definizioni + conversione dei blocchi in testo. Muta `data`.
+
+    GUARDIA (2026-07-26): i client-tool Agent/Task/SubAgent NON vengono mai
+    rimossi, in nessuna modalità, anche se privi di input_schema."""
     tools = data.get("tools")
     if isinstance(tools, list):
-        kept = [t for t in tools if not (isinstance(t, dict) and "input_schema" not in t)]
+        kept = [
+            t for t in tools
+            if _is_protected_tool(t)
+            or not (isinstance(t, dict) and "input_schema" not in t)
+        ]
         if len(kept) != len(tools):
             if kept:
                 data["tools"] = kept
