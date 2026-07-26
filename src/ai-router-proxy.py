@@ -310,6 +310,18 @@ async def handle(request):
 
     mode = get_mode(request, fp)
 
+    # FIX 2026-07-26: risoluzione anticipata del provider effettivo per evitare
+    # shrink inutile su richieste THINK (es. mix-am con Claude Opus inoltrato
+    # ad Anthropic). Il provider dipende dal modello richiesto, non dalla modalità.
+    _early_provider = None
+    try:
+        from role_routing import resolve_route as _resolve_route
+        _early_model = (json.loads(body).get("model") or "").strip()
+        if _early_model:
+            _early_provider, _ = _resolve_route(mode, _early_model)
+    except Exception:
+        pass
+
     # CTX PRE-CHECK (AQ-REF3): azione proattiva su compact/error
     ctx_check = {"action": "ok", "pct": 0.0}
     try:
@@ -337,7 +349,15 @@ async def handle(request):
                 "glm": "glm-5.2", "mix-am": "MiniMax-M2.7",
                 "mix-ag": "claude-opus-4-8", "mix-gm": "MiniMax-M2.7",
             }
-            ctx_model = _ctx_model_map.get(mode, "MiniMax-M2.7")
+            _provider_ctx_model_map = {
+                "anthropic": "claude-opus-4-8",
+                "minimax": "MiniMax-M2.7",
+                "glm": "glm-5.2",
+            }
+            if _early_provider and _early_provider in _provider_ctx_model_map:
+                ctx_model = _provider_ctx_model_map[_early_provider]
+            else:
+                ctx_model = _ctx_model_map.get(mode, "MiniMax-M2.7")
             rewrit, was_rewrit = rewrite_for_context(body, ctx_model, fp)
             if was_rewrit and len(rewrit) < len(body):
                 _orig_len = len(body)
@@ -359,8 +379,13 @@ async def handle(request):
     # non torna 400. A quel punto il modello downstream ha già "visto" il body
     # pieno → si lamenta "vuoto/troncato". Fix: shrink proattivo se body >
     # limit_MiniMax, INDIPENDENTEMENTE dal ctx_check (che usa il limite client).
+    # FIX 2026-07-26: gate sul provider effettivo per non shrinkare richieste
+    # THINK inoltrate ad Anthropic (es. mix-am con claude-opus-*).
     _MINIMAX_BACKEND_MODES = {"minimax", "mix-am", "mix-gm"}
-    if mode in _MINIMAX_BACKEND_MODES:
+    _shrink_for_minimax = mode in _MINIMAX_BACKEND_MODES and (_early_provider == "minimax" or _early_provider is None)
+    if mode in _MINIMAX_BACKEND_MODES and not _shrink_for_minimax:
+        log(f"ctx: bottleneck-shrink SKIP provider={_early_provider} mode={mode} bytes={len(body)} fp={fp}")
+    if _shrink_for_minimax:
         try:
             from router_constants import MINIMAX_CONTEXT_BYTE_LIMIT
             _ctx_bottleneck = {

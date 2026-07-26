@@ -304,6 +304,40 @@ class StreamingRelay:
                         _final = "?"
                 else:
                     _final = "?"
+                try:
+                    if _final == "claude-direct" and upstream.status == 200:
+                        _cc = 0
+                        try:
+                            _bj = json.loads(self.body.decode("utf-8", errors="replace")) if isinstance(self.body, bytes) else (json.loads(self.body) if isinstance(self.body, str) else {})
+                            if isinstance(_bj, dict):
+                                if "system" in _bj and isinstance(_bj["system"], list):
+                                    for _item in _bj["system"]:
+                                        if isinstance(_item, dict) and "cache_control" in _item:
+                                            _cc += 1
+                                if "messages" in _bj and isinstance(_bj["messages"], list):
+                                    for _msg in _bj["messages"]:
+                                        if isinstance(_msg, dict):
+                                            if "cache_control" in _msg:
+                                                _cc += 1
+                                            if "content" in _msg and isinstance(_msg["content"], list):
+                                                for _ct in _msg["content"]:
+                                                    if isinstance(_ct, dict) and "cache_control" in _ct:
+                                                        _cc += 1
+                                if "tools" in _bj and isinstance(_bj["tools"], list):
+                                    for _tool in _bj["tools"]:
+                                        if isinstance(_tool, dict) and "cache_control" in _tool:
+                                            _cc += 1
+                        except Exception:
+                            pass
+                        _ch = int(_usage.get("cache_read_input_tokens", 0)) + int(_usage.get("cache_creation_input_tokens", 0))
+                        if _cc > 0 and _ch == 0:
+                            self.log_fn(f"cache: MISS TOTALE breakpoints={_cc} input={_usage['input_tokens']} (nessun cache_read/creation nella risposta)")
+                        elif _cc == 0:
+                            self.log_fn(f"cache: nessun breakpoint cache_control nel body inviato input={_usage['input_tokens']}")
+                        else:
+                            self.log_fn(f"cache: OK read={_usage['cache_read_input_tokens']} creation={_usage['cache_creation_input_tokens']} input={_usage['input_tokens']}")
+                except Exception:
+                    pass
                 self.log_router_usage_fn(
                     chat_id=chat_fp_for_rewrite,
                     orig=_orig,
