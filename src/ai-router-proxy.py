@@ -136,12 +136,14 @@ RESILIENCE_INST = None
 # non si verificano quasi più e il gate era diventato cieco), senza inondare il
 # catalogo: un evento per chat ogni CTX_GATE_HEARTBEAT_SEC.
 _CTX_GATE_HEARTBEAT: dict = {}
-CTX_GATE_HEARTBEAT_SEC = 300
+# Entrambe le costanti accettano un override da env, così una taratura mirata
+# (o un'indagine temporanea) non richiede di modificare il codice.
+CTX_GATE_HEARTBEAT_SEC = int(os.environ.get("AIROUTER_CTX_HEARTBEAT_SEC", "300"))
 # 0.30 e non 0.50 (taratura 2026-07-26 sui dati reali): col limite Anthropic da 1M
 # una soglia 0.50 richiede un body da ~2 MB e sul traffico osservato (max 548 KB)
 # non sarebbe scattata mai. Il costo di abbassarla è nullo: il catalogo deduplica
 # per (modalità, azione) e il throttle resta a 300 s per chat.
-CTX_GATE_HEARTBEAT_PCT = 0.30
+CTX_GATE_HEARTBEAT_PCT = float(os.environ.get("AIROUTER_CTX_HEARTBEAT_PCT", "0.30"))
 
 # Aliases for backward compat with pipeline modules
 def _log_original_model(orig: str, final: str, chat_id: str) -> None:
