@@ -84,7 +84,7 @@ async def count_tokens_real(body: bytes, upstream_url: str, api_key: str = "") -
     AQ-8: campiona 1 su 10 richieste per calibrazione.
     Ritorna None se non campionata (caller usa stima).
     """
-    import aiohttp, json, random
+    import aiohttp, random  # json è già importato a livello modulo
     # Campionamento 1/10
     if random.random() > 0.1:
         return None

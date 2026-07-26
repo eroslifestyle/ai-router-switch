@@ -137,7 +137,11 @@ RESILIENCE_INST = None
 # catalogo: un evento per chat ogni CTX_GATE_HEARTBEAT_SEC.
 _CTX_GATE_HEARTBEAT: dict = {}
 CTX_GATE_HEARTBEAT_SEC = 300
-CTX_GATE_HEARTBEAT_PCT = 0.50
+# 0.30 e non 0.50 (taratura 2026-07-26 sui dati reali): col limite Anthropic da 1M
+# una soglia 0.50 richiede un body da ~2 MB e sul traffico osservato (max 548 KB)
+# non sarebbe scattata mai. Il costo di abbassarla è nullo: il catalogo deduplica
+# per (modalità, azione) e il throttle resta a 300 s per chat.
+CTX_GATE_HEARTBEAT_PCT = 0.30
 
 # Aliases for backward compat with pipeline modules
 def _log_original_model(orig: str, final: str, chat_id: str) -> None:
@@ -479,6 +483,12 @@ async def handle(request):
                     severity=_severity,
                     category=mode,
                     kind="ctx_gate",
+                    # code=action: la signature del catalogo è (category, kind, code,
+                    # snippet). Senza l'azione, heartbeat e error collassavano nella
+                    # STESSA entry e ogni heartbeat successivo sovrascriveva
+                    # example_detail — cancellando proprio il last_user_prefix del
+                    # turno /compact che serve a chiudere G4.
+                    code=ctx_check["action"],
                     chat_fp=fp,
                     detail=detail
                 )
@@ -502,7 +512,6 @@ async def handle(request):
         log(f"ctx: bottleneck-shrink SKIP provider={_early_provider} mode={mode} bytes={len(body)} fp={fp}")
     if _shrink_for_minimax:
         try:
-            from router_constants import MINIMAX_CONTEXT_BYTE_LIMIT
             _ctx_bottleneck = {
                 "anthropic": "claude-opus-4-8", "minimax": "MiniMax-M2.7",
                 "glm": "glm-5.2", "mix-am": "MiniMax-M2.7",

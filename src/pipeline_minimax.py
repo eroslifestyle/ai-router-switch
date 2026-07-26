@@ -2,6 +2,10 @@
 """MiniMax pipeline (orchestrate/think/act) extracted from ai-router-proxy.py (~lines 2798-2994)."""
 import json
 
+from aiohttp import web  # usato nei rami d'errore (righe ~65 e ~98): senza questo
+                         # import il gestore stesso sollevava NameError e aiohttp
+                         # rispondeva 500 "Server got itself in trouble" opaco.
+
 from router_constants import (
     MINIMAX_MODEL, MINIMAX_ORCHESTRATOR_MODEL, MINIMAX_EXECUTORS,
     MINIMAX_CONTEXT_BYTE_LIMIT,

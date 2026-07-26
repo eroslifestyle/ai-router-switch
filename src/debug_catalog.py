@@ -123,6 +123,11 @@ def record_event(*, severity: str, category: str, kind: str, chat_fp: str = "",
         else:
             entry["last_seen"] = ts
             entry["count"] = entry.get("count", 0) + 1
+            # Promuove la severità: un'entry nata da un evento osservativo non deve
+            # restare "info" quando la stessa firma torna come errore reale.
+            _rank = {"info": 0, "block": 1, "error": 2, "bug": 3}
+            if _rank.get(severity, 0) > _rank.get(entry.get("severity", "info"), 0):
+                entry["severity"] = severity
             if category not in entry.get("categories", []):
                 entry.setdefault("categories", []).append(category)
             if snippet:

@@ -259,7 +259,6 @@ def glm_alert(msg: str):
         return
     _last_alert_ts = now
     try:
-        import subprocess
         subprocess.Popen(["notify-send", "-u", "normal", "-t", "20000",
                           "GLM Quota", msg[:300]],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

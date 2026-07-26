@@ -144,9 +144,10 @@ async def _escalate_anthropic(request, orig: dict, session, chat_fp: str, relay,
     anthropic_leads=False (default): fallback dopo singolo fail MiniMax nel turno.
       Prova modello utente → Haiku → 502.
     """
-    from forward_anthropic import forward_anthropic, forward_anthropic_direct
-    from router_utils import log as _log, _analyze_body_structure
-    from router_constants import ANTHROPIC_HAIKU_CONTEXT_BYTE_LIMIT
+    # Solo l'alias _log resta locale: gli altri nomi sono già importati a livello
+    # modulo e re-importarli qui li renderebbe locali all'intera funzione (ogni uso
+    # precedente diventerebbe UnboundLocalError).
+    from router_utils import log as _log
     tr = getattr(request, "transport", None)
     if tr is None or tr.is_closing():
         # Relay al client già iniziato e rotto (o client sparito): ogni rescue
