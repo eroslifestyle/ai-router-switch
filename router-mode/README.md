@@ -5,7 +5,7 @@
 Standalone control panel for the AI Router (`:8787`) with 5 orchestration modes. Provides both CLI and GUI interfaces to switch modes and monitor router health in real-time.
 
 **Location**: `~/.claude/router-mode/`  
-**Modes**: anthropic · minimax · mixed · inverse · glm · glm-minimax · anthropic-glm  
+**Modes**: anthropic · minimax · mix-am · mix-ag · mix-gm · glm  
 **Proxy**: `:9988` (CORS bypass for browser fetch)
 
 ---
@@ -144,11 +144,16 @@ Planned: badge in GNOME topbar showing `MODE: mixed` with quick-switch dropdown.
 |------|------|--------------|----------|-----------|----------|
 | **anthropic** | 🔵 | Claude Sonnet | Claude Haiku | — | Default, highest quality, full Claude stack |
 | **minimax** | 🟠 | MiniMax M3 | MiniMax M2.7 | — | Cost-optimized, pure MiniMax |
-| **mixed** | 🔷 | Claude Sonnet | MiniMax M2.7 | Anthropic fallback | Balanced: smart planning + fast exec |
-| **inverse** | 🔶 | MiniMax M3 | MiniMax M2.7 | Claude Opus | Adversarial verify (slow, thorough) |
-| **glm** | 🟢 | GLM tiered (5.2→4.7) | GLM tiered | — | Z.ai only, context-aware tiering |
-| **glm-minimax** | 🟢🟠 | GLM 5.2 (THINK) | MiniMax M2.7 (ACT) | GLM verify | Hybrid: GLM reasoning + MiniMax execution |
-| **anthropic-glm** | 🔵🟢 | Claude Sonnet (THINK) | GLM tiered (ACT) | Claude Opus | Hybrid: Anthropic planning + GLM cost-efficiency |
+| **mix-am** | 🔷 | Claude (THINK) | MiniMax M2.7 | same model as THINK | Balanced: smart planning + fast exec |
+| **glm** | 🟢 | GLM 5.2 (THINK) | GLM 4.7 | same model as THINK | Z.ai only, context-aware tiering |
+| **mix-gm** | 🟢🟠 | GLM 5.2 (THINK) | MiniMax M2.7 (ACT) | same model as THINK | Hybrid: GLM reasoning + MiniMax execution |
+| **mix-ag** | 🔵🟢 | Claude (THINK) | GLM 4.7 (ACT) | same model as THINK | Hybrid: Anthropic planning + GLM cost-efficiency |
+
+The THINK model is always chosen manually by the user; it is never fixed in code and
+never escalates on its own. VERIFY has no separate route — it is performed by the same
+model that did the THINK. Only execution escalates, after 2 failures.
+Legacy names `mixed`/`glm-minimax`/`anthropic-glm` are aliases; `inverse` was removed
+on 2026-07-26.
 
 ---
 

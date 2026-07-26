@@ -1,6 +1,6 @@
 # AI Router Proxy — Operational Guide
 
-> Document version: 2026-07-14 · Project: [ai-router-switch](https://github.com/eroslifestyle/ai-router-switch)
+> Document version: 2026-07-26 · Project: [ai-router-switch](https://github.com/eroslifestyle/ai-router-switch)
 
 ---
 
@@ -10,72 +10,79 @@ AI Router Proxy is a **self-hosted** proxy that sits in front of Claude Code (an
 Anthropic-format client) and routes traffic to **Claude**, **MiniMax**, or **GLM/z.ai**
 depending on the active mode.
 
-The router is a **single Python/aiohttp process** listening on 8 ports:
+The router is a **single Python/aiohttp process** listening on 7 ports:
 
 | Port | Role |
 |------|------|
 | `8787` | Dynamic — follows `ai-mode` |
 | `8771` | Forced: `anthropic` |
 | `8772` | Forced: `minimax` |
-| `8773` | Forced: `mixed` |
-| `8774` | Forced: `inverse` |
+| `8773` | Forced: `mix-am` |
 | `8775` | Forced: `glm` |
-| `8776` | Forced: `glm-minimax` |
-| `8777` | Forced: `anthropic-glm` |
+| `8776` | Forced: `mix-gm` |
+| `8777` | Forced: `mix-ag` |
+
+*(port `8774` served the `inverse` mode, removed on 2026-07-26)*
 
 **Golden rule:** the router selects the backend. It never touches model settings,
 skills, agents, MCP, tools, or system prompt.
 
+**The router is a transparent tunnel.** It orchestrates no phases and holds no state:
+it looks at which model is requested and which mode is active, rewrites the `model`
+field, and forwards. The THINK/ACT/VERIFY hierarchy and escalation live in the client
+configuration, not here. The map is a data table in `src/role_routing.py`.
+
 ---
 
-## The Seven Modes
+## The Six Modes
+
+Each mode is a pair of destinations: one for the model that **thinks** (THINK) and
+one for the model that **executes** (ACT). The router infers the role from the
+incoming model name — `claude-opus`/`claude-sonnet`/`claude-fable` are THINK,
+`claude-haiku` is ACT — and forwards to the matching provider.
+
+**VERIFY has no route of its own**: it is always performed by the same model that did
+the THINK, so the verification request carries that model's name and naturally lands
+on the THINK route. In mixed modes this means *the one who verifies is never the one
+who executed*.
+
+| Mode | THINK | ACT | Legacy alias accepted |
+|---|---|---|---|
+| `anthropic` | Anthropic | Anthropic (Haiku) | — |
+| `minimax` | MiniMax-M3 | MiniMax-M2.7 | — |
+| `glm` | glm-5.2 | glm-4.7 | — |
+| `mix-am` | Anthropic | MiniMax-M2.7 | `mixed` |
+| `mix-ag` | Anthropic | glm-4.7 | `anthropic-glm` |
+| `mix-gm` | glm-5.2 | MiniMax-M2.7 | `glm-minimax` |
+
+Source: `ROUTING_TABLE` in `src/role_routing.py` (pure function, covered by 48 tests).
+Legacy aliases are accepted by `ai-mode`, which **always** writes the canonical name
+to the state file.
 
 ### 1. `anthropic` — Pure Claude
 
-All traffic goes to `api.anthropic.com`. No fallback. If the backend returns an
-error, the error is passed through unchanged.
+Everything goes to `api.anthropic.com`, both THINK and ACT. The router does not
+rewrite the model name: Anthropic negotiates the version server-side.
 
 **Use when:** you need Claude and nothing else.
 
 ### 2. `minimax` — Pure MiniMax
 
-All traffic goes to `api.minimaxi.chat/anthropic` (MiniMax **Anthropic-compatible**
-endpoint). No fallback. MiniMax-M3 orchestrates, M2.7 executes.
+Everything goes to `api.minimaxi.chat/anthropic` (MiniMax **Anthropic-compatible**
+endpoint). M3 thinks, M2.7 executes.
 
 **Use when:** simple tasks, limited budget, no weekly limit.
 
-### 3. `mixed` — Bidirectional Fallback
+### 3. `mix-am` — Claude thinks, MiniMax executes
 
-Attempts the primary backend (`ai-mode` or env `AIROUTER_MIXED_PRIMARY`, default:
-`anthropic`). If the response has a status in `FALLBACK_STATUSES`, automatically
-retries on the secondary backend.
+THINK goes to Anthropic, ACT to MiniMax-M2.7. This is the everyday mixed mode:
+planning and verification on Claude, low-cost execution on MiniMax.
 
-**Statuses triggering Anthropic→MiniMax fallback:**
-`401, 403, 408, 409, 413, 429, 500, 502, 503, 504, 529`
+Accepts the historical alias `mixed`.
 
-**Statuses triggering MiniMax→Anthropic fallback:**
-`401, 403, 408, 409, 413, 500, 502, 503, 504, 529`
-*(429 is excluded because MiniMax handles its own rate limit internally)*
+**Use when:** production — quality on reasoning, contained cost on execution.
 
-**Note:** status `400` and `404` do not trigger fallback (client errors, not backend).
-
-**Use when:** production with service continuity even if a subscription expires.
-
-### 4. `inverse` — MiniMax generates, Claude verifies
-
-Generation always from MiniMax. For **T2** tasks (classified as critical/complex),
-an additional verification pass by Claude Opus runs before delivering the response.
-
-**T2 classification** (heuristic on system prompt):
-keywords such as `"critically"`, `"security"`, `"audit"`, `"vulnerability"`,
-`"analyze"`, `"explain in detail"`, `"find issues"`, `"architect"`, `"review"`.
-
-If Claude Opus is unavailable, the MiniMax response is still returned with flag
-`"unverified"`.
-
-**Use when:** cost-saving with verification on critical tasks.
-
-### 5. `glm` — GLM/z.ai with tiering
+### 4. `glm` — GLM/z.ai with tiering
 
 GLM-5.2 classifies task complexity → routes to the most appropriate tier:
 
@@ -90,27 +97,28 @@ In peak, `glm-5.2`/`glm-5-turbo` cost 3× and are blocked for complex tasks →
 complex tasks fall back to Claude, simple ones use `glm-4.7`.
 Off-peak: full tiering, 1× promo pricing until 2026-09-30.
 
-**Fallback chain:** GLM → MiniMax → Claude.
+**Escalation:** stays on the GLM ladder. Neither MiniMax nor Anthropic steps in here.
 
 **Use when:** you want GLM as the primary backend.
 
-### 6. `glm-minimax` — GLM thinks, MiniMax acts
+### 5. `mix-gm` — GLM thinks, MiniMax executes
 
-- **GLM-5.2** generates the reasoning (THINK)
-- **MiniMax** executes (ACT, streaming)
-- For complex/agentic tasks: **GLM verifies** the result
+- **glm-5.2** does THINK and VERIFY
+- **MiniMax-M2.7** executes
 
-**Use when:** combining GLM's reasoning with MiniMax's speed and cost.
+Accepts the historical alias `glm-minimax`.
+**Execution escalation:** `M2.7 → M3 → GLM`, **never** Anthropic.
 
-### 7. `anthropic-glm` — Claude orchestrates, GLM executes, Claude verifies T2
+**Use when:** GLM reasoning with MiniMax speed and cost, keeping Claude out of the loop.
 
-- **Claude** (user's model) orchestrates and classifies
-- **GLM** executes with tiering (`glm-5-turbo` → `glm-4.7` → `glm-5.2`)
-- **T2** (critical/complex) tasks: **Claude verifies** before delivery
+### 6. `mix-ag` — Claude thinks, GLM executes
 
-**Fallback chain:** GLM → MiniMax → Claude.
+- **Claude** does THINK and VERIFY
+- **glm-4.7** executes
 
-**Use when:** Claude is the primary orchestrator but you want to leverage GLM for execution.
+Accepts the historical alias `anthropic-glm`.
+
+**Use when:** Claude as the orchestrator, GLM for low-cost execution.
 
 ---
 
@@ -122,13 +130,12 @@ Port `8787` reads `~/.claude/ai-router-mode` on every request.
 To change mode on the fly:
 
 ```bash
-ai-mode minimax         # most convenient way
 ai-mode anthropic
-ai-mode mixed
-ai-mode inverse
+ai-mode minimax
+ai-mode mix-am          # aliases: mixam, mixed
+ai-mode mix-ag          # aliases: mixag, anthropic-glm
+ai-mode mix-gm          # aliases: mixgm, glm-minimax
 ai-mode glm
-ai-mode glm-minimax
-ai-mode anthropic-glm
 ai-mode status
 ai-mode log
 ```
@@ -148,20 +155,27 @@ During a conversation you can send commands **isolated to that chat** (not globa
 The proxy identifies the conversation from the Claude Code session fingerprint.
 
 ```
-!router minimax        # switch to MiniMax for this chat only
 !router anthropic      # switch to pure Claude for this chat
-!router mixed          # fallback for this chat
-!router inverse        # inverse mode for this chat
+!router minimax        # switch to MiniMax for this chat only
+!router mixam          # Claude thinks + MiniMax executes
+!router mixag          # Claude thinks + GLM executes
+!router mixgm          # GLM thinks + MiniMax executes
 !router glm            # GLM for this chat
-!router glm-minimax
-!router anthropic-glm
 !router status         # show current mode and backend status
 !router reset          # restore global mode from ai-mode
 !router help           # inline help
 ```
 
-The proxy also understands natural phrases like `"usa solo claude"` or
-`"passa a minimax"`.
+**Accepted arguments:** the 6 canonical names plus the aliases
+`mixam`/`mixag`/`mixgm`. Any other argument — including the legacy `mixed`,
+`glm-minimax`, `anthropic-glm` that `ai-mode` does accept — replies with the help
+text and **changes nothing**.
+
+> **Voice switching removed on 2026-07-26.** The proxy also recognised natural-language
+> phrases (*"usa solo claude"*), but it switched modes **without authorisation**: a
+> short message with a common verb plus a mode word anywhere in the text was enough,
+> so ordinary working sentences silently switched the chat. Explicit `!router` is now
+> the only switch available from chat.
 
 **Scope:** the command changes mode only for that conversation.
 **Important:** `!router` is handled by the proxy `:8787` — these messages travel
@@ -179,16 +193,13 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:8771
 # Pure MiniMax session
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8772
 
-# Mixed session
+# Mixed session: Claude thinks, MiniMax executes
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8773
-
-# Inverse session
-export ANTHROPIC_BASE_URL=http://127.0.0.1:8774
 
 # GLM sessions
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8775   # glm
-export ANTHROPIC_BASE_URL=http://127.0.0.1:8776   # glm-minimax
-export ANTHROPIC_BASE_URL=http://127.0.0.1:8777   # anthropic-glm
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8776   # mix-gm
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8777   # mix-ag
 ```
 
 ---
@@ -245,29 +256,30 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:8775
 
 Sessions operate independently without interference.
 
-### Automatic failover
+### Reasoning on Claude, cheap execution
 
 ```bash
-ai-mode mixed
+ai-mode mix-am
 ```
 
-If Claude is down, the subscription expired, or the rate limit is hit,
-the router automatically switches to MiniMax.
+THINK and VERIFY stay on Claude, execution goes to MiniMax-M2.7. If the executor
+fails repeatedly, escalation climbs the Anthropic tiers (Sonnet → Opus → Fable) —
+the thinking model never changes on its own.
 
-### Smart saving with verification
+### Keeping Claude out of the loop
 
 ```bash
-ai-mode inverse
+ai-mode mix-gm
 ```
 
-MiniMax generates for all tasks. Critical tasks (T2) are verified by Claude Opus
-before delivery.
+glm-5.2 thinks and verifies, MiniMax-M2.7 executes. Escalation stays on
+`M2.7 → M3 → GLM`: Anthropic is never involved.
 
 ---
 
 ## GLM — API Key
 
-Modes `glm`, `glm-minimax`, `anthropic-glm` require a z.ai key.
+Modes `glm`, `mix-gm`, `mix-ag` require a z.ai key.
 
 ```bash
 export GLM_API_KEY=...
@@ -300,7 +312,7 @@ Tested: `kill -9` on all services → full restore in <10 seconds.
 - **Don't kill** the service without an immediate recovery plan
 - **Don't edit** systemd unit files manually without understanding the consequences
 - **Don't point** directly to `:8790` or `:8791` — always use `:8787` or fixed ports
-- **Don't change** mode in production without first testing in `mixed`
+- **Don't change** mode in production without first trying it on a fixed port
 - **Don't ignore** watchdog alarms
 
 ---
@@ -309,11 +321,12 @@ Tested: `kill -9` on all services → full restore in <10 seconds.
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| All responses 401 | Anthropic key expired/absent | Use `mixed` or update secrets |
+| All responses 401 | Anthropic key expired/absent | Switch to `minimax` or `glm`, or update secrets |
 | Mode doesn't change | Persistent connections (~2s) | Wait 2 seconds |
 | GLM mode returns 500 | `GLM_API_KEY` not set | `export GLM_API_KEY=...` |
-| Proxy doesn't respond | Service not started | `systemctl --user start ai-router-proxy.service` |
-| `mixed` doesn't fallback | Status is 400 or 404 (client errors, not backend) | Check the request |
+| Proxy doesn't respond | Service not started | `systemctl --user start ai-router.service` |
+| `!router <mode>` replies with help | Non-canonical argument (e.g. `mixed`, `inverse`) | Use a canonical name or the `mixam`/`mixag`/`mixgm` aliases |
+| Hand-written mode not applied | The state file only accepts the 6 canonical names | Use `ai-mode`, which normalises aliases |
 
 ### Debug
 
@@ -340,10 +353,15 @@ curl http://127.0.0.1:8787/__router_health
 | `AIROUTER_PORT` | `8787` | Base port |
 | `AIROUTER_ANTHROPIC_UPSTREAM` | `http://127.0.0.1:8791` | Anthropic backend |
 | `AIROUTER_MINIMAX_UPSTREAM` | `http://127.0.0.1:8790` | MiniMax backend |
-| `AIROUTER_MIXED_PRIMARY` | `anthropic` | Primary backend in mixed |
-| `AIROUTER_MINIMAX_MODEL` | `MiniMax-M3` | MiniMax model |
-| `AIROUTER_VERIFY_MODEL` | `claude-opus-4-8` | Verify model in inverse |
+| `AIROUTER_LISTEN_HOST` | `127.0.0.1` | Listen interface |
+| `AIROUTER_MINIMAX_MODEL` | `MiniMax-M2.7` | MiniMax model for ACT |
+| `AIROUTER_NEW_PIPELINE` | `1` | Enables the current routing path |
+| `AIROUTER_TRANSITION_FILTERS` | `1` | MiniMax transition filters (systemd drop-in) |
 | `GLM_API_KEY` | — | z.ai key for GLM modes |
+
+Checked one by one against the source on 2026-07-26. `AIROUTER_MIXED_PRIMARY` and
+`AIROUTER_VERIFY_MODEL` were dropped from this table: **neither has a reader in the
+codebase**, both were leftovers from pipelines that no longer exist.
 
 ---
 

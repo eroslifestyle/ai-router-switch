@@ -19,13 +19,14 @@ with automatic failover, per-chat isolation, and cross-model verification.
 
 ## Quick Reference
 
-**7 modes:** `anthropic` · `minimax` · `mixed` · `inverse` · `glm` · `glm-minimax` · `anthropic-glm`
+**6 modes:** `anthropic` · `minimax` · `mix-am` · `mix-ag` · `mix-gm` · `glm`
+*(legacy aliases `mixed`/`glm-minimax`/`anthropic-glm` still accepted by `ai-mode`)*
 
-**8 ports:** `8787` (dynamic) + `8771–8777` (forced per mode)
+**7 ports:** `8787` (dynamic) + `8771`, `8772`, `8773`, `8775`, `8776`, `8777` (forced per mode)
 
 **Per-chat switch:** `!router minimax` · `!router status` · `!router reset`
 
-**Global switch:** `ai-mode mixed`
+**Global switch:** `ai-mode mix-am`
 
 ---
 
