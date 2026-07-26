@@ -2,11 +2,11 @@
 
 > Generato automaticamente da `scripts/generate_bug_report.py` a partire da `logs/BUG-CATALOG.jsonl`. Non modificare a mano — rilanciare lo script. Vedi `DEBUG-CATALOG-SPEC.md` per lo schema completo.
 
-**125 tipi distinti di bug/blocco/errore** · **10928 occorrenze totali** su 6 modalita'.
+**125 tipi distinti di bug/blocco/errore** · **10978 occorrenze totali** su 6 modalita'.
 
 ## Modalita': `anthropic`
 
-55 tipi distinti, 7178 occorrenze.
+55 tipi distinti, 7228 occorrenze.
 
 ### `rate_limit_429_exhausted` (429)
 
@@ -451,9 +451,9 @@
 
 - **Firma**: `1b910b74f7b880e0`
 - **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 6306
+- **Occorrenze**: 6356
 - **Prima volta**: 2026-07-19T21:40:09Z
-- **Ultima volta**: 2026-07-26T23:28:15+0200
+- **Ultima volta**: 2026-07-26T23:40:37+0200
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `stripped=['mcp__MiniMax__understand_image', 'mcp__MiniMax__web_search', 'mcp__zai__web_search_prime'] kept=43/46`
 
