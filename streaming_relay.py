@@ -195,7 +195,27 @@ class StreamingRelay:
             try:
                 _usage = {"input_tokens": 0, "output_tokens": 0,
                           "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
-                _buf_str = _acc_buf.decode("utf-8", errors="replace")
+                # Decompress because auto_decompress=False; buffer may be truncated.
+                _enc = (upstream.headers.get("content-encoding", "") or "").lower().strip()
+                _raw = bytes(_acc_buf)
+                try:
+                    if "gzip" in _enc:
+                        import zlib
+                        _raw = zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(_raw)
+                    elif "deflate" in _enc:
+                        import zlib
+                        _raw = zlib.decompressobj().decompress(_raw)
+                    elif "br" in _enc:
+                        try:
+                            import brotli
+                            _raw = brotli.Decompress().process(_raw)
+                        except ImportError:
+                            import brotlicffi as brotli
+                            _raw = brotli.Decompress().process(_raw)
+                except Exception:
+                    # Decompression failed; fall back to raw compressed bytes.
+                    pass
+                _buf_str = _raw.decode("utf-8", errors="replace")
                 if is_sse:
                     # Cerca message_start (input) e message_delta (output) nei chunk SSE
                     for _data in re_module.findall(r"^data: (.+)$", _buf_str, re_module.MULTILINE):
