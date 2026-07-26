@@ -16,6 +16,9 @@ from router_utils import (
 )
 from router_auth import _load_oauth_token, _reload_oauth_token
 from router_debug import dl
+# A livello modulo, MAI dentro le funzioni: un import locale renderebbe il nome
+# locale all'intera funzione (vedi test_module_names_resolved.py).
+from anthropic_body import sanitize_server_tool_ids
 
 # Deep-debug (analyze struttura body + dump _DEBUG_LAST_SENT su disco) è overhead
 # SINCRONO nel path caldo, eseguito ad ogni richiesta e scalante col body (deep-copy
@@ -229,6 +232,14 @@ async def forward_anthropic(request, body, session):
         except Exception:
             pass
 
+    # Anthropic rifiuta con 400 gli id server_tool_use non conformi a
+    # ^srvtoolu_[a-zA-Z0-9_]+$ (in mix-am li produce l'esecutore MiniMax e
+    # finiscono nella history). Fast path interno: se il body non contiene
+    # "server_tool_use" non viene nemmeno parsato.
+    safe_body, _n_srv = sanitize_server_tool_ids(safe_body)
+    if _n_srv:
+        log(f"anthropic: sanificati {_n_srv} id server_tool_use non conformi")
+
     # Deep debug (gated: default OFF, vedi _emit_deep_debug)
     if _DEEP_DEBUG:
         _emit_deep_debug("forward_anthropic", request, safe_body)
@@ -321,6 +332,13 @@ async def forward_anthropic_direct(request, body, session):
                 safe_body = json.dumps(body_dict).encode()
         except Exception:
             pass
+
+    # Stessa sanificazione del path principale: questa funzione è usata dalle
+    # rescue chain delle modalità miste, dove la history contiene proprio i
+    # blocchi prodotti dall'esecutore non-Anthropic.
+    safe_body, _n_srv = sanitize_server_tool_ids(safe_body)
+    if _n_srv:
+        log(f"anthropic-direct: sanificati {_n_srv} id server_tool_use non conformi")
 
     # Deep debug (gated: default OFF, vedi _emit_deep_debug)
     if _DEEP_DEBUG:

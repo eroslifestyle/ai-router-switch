@@ -1,0 +1,103 @@
+"""Modulo per la sanificazione dei body delle richieste API inviate ad Anthropic.
+
+Anthropic rifiuta con HTTP 400 i body che contengono blocchi *server_tool_use* il cui campo ``id``
+non rispetta il pattern ``'^srvtoolu_[a-zA-Z0-9_]+$'``. Questo si verifica in modalità *mix-am*,
+dove l'esecutore MiniMax genera id propri che vengono inseriti nella history rimandata ad Anthropic.
+Messaggio di errore osservato: ``messages.1.content.0.server_tool_use.id: String should match pattern '^srvtoolu_[a-zA-Z0-9_]+$'``.
+
+La funzione ``sanitize_server_tool_ids`` corregge in modo deterministico gli id non conformi
+e aggiorna tutti i riferimenti ``tool_use_id`` nei blocchi risultato, in modo che il body
+possa essere ritrasmesso senza errori 400.
+"""
+
+import hashlib
+import json
+import re
+
+SRVTOOLU_ID_PATTERN = re.compile(r'^srvtoolu_[a-zA-Z0-9_]+$')
+
+_RESULT_BLOCK_TYPES = (
+    'web_search_tool_result',
+    'web_fetch_tool_result',
+    'code_execution_tool_result',
+)
+
+
+def sanitize_server_tool_ids(body: bytes) -> tuple[bytes, int]:
+    """
+    Sanifica i body che potrebbero contenere id ``server_tool_use`` non conformi.
+
+    :param body: corpo della richiesta in bytes (JSON)
+    :return: tuple (body_sanificato, numero_id_corretti). Se nessuna correzione
+             è necessaria viene restituito il body originale e 0.
+    """
+    # Fast path: se non c'è traccia di 'server_tool_use' non serve parsare il JSON
+    if b'server_tool_use' not in body:
+        return body, 0
+
+    try:
+        data = json.loads(body)
+    except Exception:
+        # JSON non valido o altri errori di parsing: non possiamo sanificare
+        return body, 0
+
+    # Mappa per tenere traccia delle sostituzioni vecchio_id -> nuovo_id
+    id_mapping: dict[str, str] = {}
+    # Contatore delle correzioni effettuate (numero di id server_tool_use sostituiti)
+    corrected_count = 0
+
+    try:
+        messages = data.get('messages', [])
+        for message in messages:
+            content = message.get('content')
+            if not isinstance(content, list):
+                continue
+
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+
+                # --- blocco server_tool_use ---
+                if block.get('type') == 'server_tool_use':
+                    old_id = block.get('id')
+                    if isinstance(old_id, str) and not SRVTOOLU_ID_PATTERN.match(old_id):
+                        # Generazione deterministica del nuovo id
+                        alphanum_underscore = re.sub(r'[^a-zA-Z0-9_]', '', old_id)
+                        if alphanum_underscore:
+                            new_id = 'srvtoolu_' + alphanum_underscore
+                        else:
+                            # nessun carattere valido -> si usa un hash MD5 troncato a 16 esadecimali
+                            new_id = 'srvtoolu_' + hashlib.md5(old_id.encode()).hexdigest()[:16]
+
+                        id_mapping[old_id] = new_id
+                        block['id'] = new_id
+                        corrected_count += 1
+                    # else: già conforme, non si tocca
+
+        # SECONDA PASSATA sui riferimenti: non può stare nel ciclo sopra, perché
+        # un blocco risultato che PRECEDE il suo server_tool_use troverebbe la
+        # mappa ancora vuota e resterebbe orfano (→ altro 400 di Anthropic per
+        # accoppiamento rotto). Si aggiorna qualunque blocco con 'tool_use_id',
+        # non solo i tipi noti: un tipo nuovo lato Anthropic romperebbe in silenzio.
+        if id_mapping:
+            for message in messages:
+                content = message.get('content')
+                if not isinstance(content, list):
+                    continue
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    ref = block.get('tool_use_id')
+                    if isinstance(ref, str) and ref in id_mapping:
+                        block['tool_use_id'] = id_mapping[ref]
+    except Exception:
+        # Fail‑safe: qualsiasi errore inatteso non deve propagarsi
+        return body, 0
+
+    # Se non è stato corretto nulla, restituisco il body originale senza riserializzare
+    if corrected_count == 0:
+        return body, 0
+
+    # Serializzazione del body sanificato
+    sanitized_body = json.dumps(data, ensure_ascii=False).encode('utf-8')
+    return sanitized_body, corrected_count
