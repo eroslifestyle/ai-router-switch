@@ -1,5 +1,20 @@
 # ai-router-switch — TODO
 
+## Attivo (dopo la sessione 2026-07-25 sera)
+- [ ] **Due divergenze segnalate da `router_mode_lint.py`**, entrambe latenti oggi ma sono lo stesso pattern del fallback silenzioso già corretto: l'alias `inverse` è mappato a `mix-am` da `~/.local/bin/ai-mode` e a `minimax` da `~/.claude/lib/router_chain_dispatcher.py`; il token `interactive` è accettato dalla CLI di `ai-mode` ma non è né canonico né alias, quindi finirebbe nel file di stato e verrebbe poi rifiutato in silenzio. Il linter li segnala, non li corregge.
+- [ ] **Stub residui** `~/.claude/scripts/obsidian_auto_update.py` e `cost_report.py`: riscriverli o eliminarli. Non sono agganciati ad alcun hook.
+- [ ] **Valutare l'aggancio a un hook SessionStart** di `router_mode_lint.py` e `version_drift_check.py --advisory` (entrambi escono 0). Gli hook si dichiarano in `~/.claude/settings.json`.
+
+## Completati (sessione 2026-07-25 sera — piano weft: T1-T7, due tracce cancellate)
+- [x] **T1 — `build_executor_body` era codice morto**: analisi AST a punto fisso (alias di import risolti + chiusura transitiva) → 28 simboli senza un solo call site di produzione. Il grep sbagliava in entrambe le direzioni. Conseguenza: F3 del piano era **falso** (il contratto in prosa non veniva inviato a nessuno) e F2 è passthrough per design, non un'asimmetria.
+- [x] **T2 — BUG-CATALOG rigenerato** (commit `a1312ce`): era fermo al 19/07 con 2 tipi/39 occorrenze, i log ne contenevano 112/8974. Zero eventi context-exceeded in 4 giorni su 6 modalità.
+- [x] **T3 — nuovo `~/.claude/scripts/router_mode_lint.py`** (574 righe, advisory, exit 0 sempre): 7 controlli sui 5 punti di verità delle modalità. Verificato con 3 guasti iniettati su copia: li trova tutti. Trova 2 divergenze reali (vedi Attivo).
+- [x] **T4 — traccia `typed_plan` cancellata** (bersaglio inesistente), sostituita dalla **rimozione del codice morto** (commit `2bd4212`): 438 righe, `src/pipelines/` eliminata (conteneva `THINK_MODEL`/`VERIFY_MODEL`), `pipeline_common.py` 377→106 righe. Verificato: 48/48 test_role_routing, test_pipeline verde, 27/27 moduli importano, router vivo con PID invariato.
+- [x] **T5 — `context_fold` CANCELLATA**: entrambe le motivazioni cadute. Zero eventi context-exceeded (difensiva) e prefix-cache al 66.2% che il folding romperebbe, facendo pagare a prezzo pieno token che oggi costano il 10% — cinque volte peggio (economica).
+- [x] **T6 — `VERSION_MANIFEST.json` riallineato** 7/7: le date erano indietro fino a 48 giorni. Causa: `version_drift_check.py` era uno stub di 74 byte che stampava `OK` sempre. **Riscritto** e testato in positivo, negativo e `--advisory`.
+- [x] **T7 — checkpoint** `CP_20260726_0647.md` + pagina vault `progetti/ai-router-switch/pipeline-morta-e-validator-stub-2026-07-25.md`.
+- [x] **Debito diagnosticato, non risolto**: l'incidente del 12/07 aveva lasciato 4 stub. `auto_memory.py` è agganciato all'hook Stop ma **non va ripristinato**: anche l'originale ha un path Windows hardcoded e su Linux non fa nulla — nessuna perdita reale.
+
 ## Completati (sessione 2026-07-25 — refactor gerarchia router + merge/cleanup)
 - [x] **Merge totale chiusa**: nessun commit nuovo da mergiare. `feat/glm-modes` e `fix/audit-4modes-p0-p1` già dentro main (0 commit avanti); branch `worktree-agent-adb871316334ad8d7` (WIP SUPERSEDED con 3 bug: up.read pre-relay, role:system→400, VERIFY 20s bloccante) cancellato locale. L'unica parte valida (fix test max_tokens 512) era già su main via 97f0cb8. Una sola istanza proxy live (systemd, sano).
 - [x] **Refactor gerarchia router (commit 99dcc0d, pushato origin/main)**: rimossi 3 selettori modello Anthropic da router — THINK_MODEL, VERIFY_MODEL, THINK_MODEL_ANTHROPIC. Router ora SEMPRE usa `orig_model` (modello client). 5 file toccati: router_constants.py, pipeline_anthropic.py, agent_loop_glm.py, mode_spec.py, ai-router-proxy.py. GLM_THINK_VERIFY_MODEL NON toccato (meccanica GLM interna).
