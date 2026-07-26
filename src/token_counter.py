@@ -1,5 +1,6 @@
 """Token counter con cache per richieste Anthropic-compatibili."""
 
+import json
 import time
 from typing import Dict, Tuple
 
@@ -9,6 +10,57 @@ CACHE_TTL_SEC = 30
 def estimate_tokens(text: str) -> int:
     """Stima token: char/4 per English+code mix."""
     return max(len(text) // 4, 1)
+
+IMAGE_TOKEN_COST = 1600
+
+def estimate_tokens_body(body: bytes) -> int:
+    """Stima token per un body che può contenere immagini base64.
+    I byte base64 delle immagini non sono testo; char/4 li sovrastima di ~200x
+    (es. 1,4 MB base64 ≈ 350 k token stimati contro ~1 600 reali).
+    LIMITE NOTO: i blocchi type=="document" (PDF base64) restano fuori scope
+    in questa versione.
+    """
+    # Prova a parsare il body come JSON
+    try:
+        data = json.loads(body)
+    except Exception:
+        # JSON non valido: fallback sulla stima plain‑text
+        return estimate_tokens(body.decode("utf-8", errors="replace"))
+
+    # Ricerca ricorsiva di blocchi immagine con profondità massima 12
+    images_count = 0
+    b64_bytes = 0
+    max_depth = 12
+
+    def walk(obj: object, depth: int) -> None:
+        nonlocal images_count, b64_bytes
+        if depth > max_depth:
+            return
+        if isinstance(obj, dict):
+            # Rileva un blocco di tipo "image"
+            if obj.get("type") == "image":
+                source = obj.get("source")
+                if isinstance(source, dict) and source.get("type") == "base64":
+                    data_str = source.get("data")
+                    if isinstance(data_str, str):
+                        images_count += 1
+                        b64_bytes += len(data_str)
+            # Continua la camminata su tutti i valori
+            for value in obj.values():
+                walk(value, depth + 1)
+        elif isinstance(obj, list):
+            for item in obj:
+                walk(item, depth + 1)
+
+    try:
+        walk(data, 0)
+    except Exception:
+        # Errore imprevisto durante il walk: fallback
+        return estimate_tokens(body.decode("utf-8", errors="replace"))
+
+    # Calcolo finale: si sottraggono i caratteri base64 dal totale e si aggiunge
+    # il costo fisso per ogni immagine rilevata.
+    return max(1, (len(body) - b64_bytes) // 4 + images_count * IMAGE_TOKEN_COST)
 
 def count_tokens(body: bytes, fp: str, upstream_url: str = None) -> int:
     """Conta token reali. Prima controlla cache (30s), poi stima."""

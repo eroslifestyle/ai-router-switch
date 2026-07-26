@@ -323,9 +323,26 @@ async def handle(request):
         pass
 
     # CTX PRE-CHECK (AQ-REF3): azione proattiva su compact/error
+    # Il limite del gate e del rewrite devono essere lo stesso, misurato sul
+    # provider che ricevera davvero il body (fix 2026-07-26).
+    _ctx_model_map = {
+        "anthropic": "claude-opus-4-8", "minimax": "MiniMax-M2.7",
+        "glm": "glm-5.2", "mix-am": "MiniMax-M2.7",
+        "mix-ag": "claude-opus-4-8", "mix-gm": "MiniMax-M2.7",
+    }
+    _provider_ctx_model_map = {
+        "anthropic": "claude-opus-4-8",
+        "minimax": "MiniMax-M2.7",
+        "glm": "glm-5.2",
+    }
+    if _early_provider and _early_provider in _provider_ctx_model_map:
+        ctx_model = _provider_ctx_model_map[_early_provider]
+    else:
+        ctx_model = _ctx_model_map.get(mode, "MiniMax-M2.7")
+
     ctx_check = {"action": "ok", "pct": 0.0}
     try:
-        ctx_check = CTX.pre_check(fp, mode, len(body))
+        ctx_check = CTX.pre_check(fp, mode, len(body), model=ctx_model, body=body)
         if ctx_check["action"] in ("error", "compact", "warn", "warn2"):
             log(f"ctx: {ctx_check['action'].upper()} fp={fp} mode={mode} pct={ctx_check['pct']:.1%}")
         # ALERT PRE-COMPRESSIONE: avvisa l'utente (3 canali) a 80% (warn) e 88% (warn2),
@@ -340,36 +357,40 @@ async def handle(request):
         # Questo libera spazio prima che upstream torni 400 context-exceeded.
         # post_check compatta_or_clear resta come safety net se la riscrittura non basta.
         if ctx_check["action"] in ("compact", "error"):
-            # Modello di riferimento per la soglia di rewrite = il collo di bottiglia
-            # REALE del path. Nelle modalità dove MiniMax esegue (minimax/mix-am/mix-gm)
-            # il body deve stare nei 200K di MiniMax anche se il client è Opus/Sonnet.
-            # Nelle modalità Anthropic/GLM pure vale il context reale (fino a 1M).
-            _ctx_model_map = {
-                "anthropic": "claude-opus-4-8", "minimax": "MiniMax-M2.7",
-                "glm": "glm-5.2", "mix-am": "MiniMax-M2.7",
-                "mix-ag": "claude-opus-4-8", "mix-gm": "MiniMax-M2.7",
-            }
-            _provider_ctx_model_map = {
-                "anthropic": "claude-opus-4-8",
-                "minimax": "MiniMax-M2.7",
-                "glm": "glm-5.2",
-            }
-            if _early_provider and _early_provider in _provider_ctx_model_map:
-                ctx_model = _provider_ctx_model_map[_early_provider]
-            else:
-                ctx_model = _ctx_model_map.get(mode, "MiniMax-M2.7")
+            # ctx_model gia calcolato prima del pre_check (misurato sul provider reale)
+            _orig_body_len = len(body)
             rewrit, was_rewrit = rewrite_for_context(body, ctx_model, fp)
             if was_rewrit and len(rewrit) < len(body):
-                _orig_len = len(body)
                 body = rewrit
-                log(f"ctx: proactive rewrite {len(rewrit)}b < {_orig_len}b fp={fp}")
+                log(f"ctx: proactive rewrite {len(rewrit)}b < {_orig_body_len}b fp={fp}")
             elif ctx_check["action"] == "error":
-                log(f"ctx: ERROR threshold {ctx_check['pct']:.1%} fp={fp}")
-                return web.json_response({
-                    "type": "error",
-                    "error": {"type": "context_window_exceeded",
-                              "message": f"Context a {ctx_check['pct']:.0%}. Usa /compact."}
-                }, status=400)
+                # Un 400 nostro bloccava anche l'unica via d'uscita (/compact),
+                # rendendo la sessione irrecuperabile. post_check/_compact_or_clear
+                # resta la rete di sicurezza sul 400 reale di upstream.
+                log(f"ctx: ERROR threshold {ctx_check['pct']:.1%} fp={fp} model={ctx_model} — inoltro comunque (gate osservatore)")
+            # Telemetria del gate (misurata dopo il tentativo di rewrite)
+            _rewritten_len = len(body)
+            detail = {
+                "mode": mode,
+                "model": ctx_model,
+                "provider": _early_provider,
+                "action": ctx_check["action"],
+                "est_tokens": ctx_check.get("est_tokens", 0),
+                "limit": ctx_check.get("limit", 0),
+                "pct": round(ctx_check["pct"], 4),
+                "body_bytes": _orig_body_len,
+                "rewritten_bytes": _rewritten_len
+            }
+            try:
+                debug_catalog.record_event(
+                    severity="error" if ctx_check["action"] == "error" else "block",
+                    category=mode,
+                    kind="ctx_gate",
+                    chat_fp=fp,
+                    detail=detail
+                )
+            except Exception:
+                pass
     except Exception as e:
         log(f"ctx: pre_check EXC {e} fp={fp} mode={mode}")
 

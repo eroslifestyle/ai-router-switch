@@ -29,3 +29,4 @@ router-mode/__pycache__/
 
 # worktree agenti Claude (mai tracciare)
 .claude/worktrees/
+*.bak

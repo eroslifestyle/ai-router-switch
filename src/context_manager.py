@@ -54,31 +54,47 @@ class ContextManager:
 
     # ── Pre-check (AQ-7) ──────────────────────────────────────────────────────
 
-    def pre_check(self, chat_fp: str, modo: str, body_bytes: int) -> dict:
+    def pre_check(self, chat_fp: str, modo: str, body_bytes: int, model: str | None = None, body: bytes | None = None) -> dict:
         """Controlla se il body sta nella soglia.
 
         Ritorna:
             {action: 'ok'|'warn'|'compact'|'error',
-             est_tokens: int, limit: int, pct: float}
+             est_tokens: int, limit: int, pct: float, model_used: str}
         """
         with self._lock:
             row = self._get_state(chat_fp, modo)
-            if row and row.get('tokens_limit'):
+            # Risoluzione limite: priorità model > row > resolve_model
+            # fix 2026-07-26: pre_check e rewrite usavano misure disallineate -> 400 sintetico
+            if model:
+                limit_model = model
+                limit = get_context_limit(limit_model)
+            elif row and row.get('tokens_limit'):
+                limit_model = self._resolve_model(modo)
                 limit = row['tokens_limit']
             else:
-                model = self._resolve_model(modo)
-                limit = get_context_limit(model)
-            est = self._estimate_tokens(body_bytes)
+                limit_model = self._resolve_model(modo)
+                limit = get_context_limit(limit_model)
+
+            # Stima token
+            if body is not None:
+                try:
+                    from token_counter import estimate_tokens_body
+                    est = estimate_tokens_body(body)
+                except ImportError:
+                    est = max(1, body_bytes // 4)
+            else:
+                est = self._estimate_tokens(body_bytes)
+
             pct = est / limit if limit else 0.0
             if pct >= ERROR_PCT:
-                return {'action': 'error', 'est_tokens': est, 'limit': limit, 'pct': pct}
+                return {'action': 'error', 'est_tokens': est, 'limit': limit, 'pct': pct, 'model_used': limit_model}
             if pct >= COMPACT_PCT:
-                return {'action': 'compact', 'est_tokens': est, 'limit': limit, 'pct': pct}
+                return {'action': 'compact', 'est_tokens': est, 'limit': limit, 'pct': pct, 'model_used': limit_model}
             if pct >= WARN2_PCT:
-                return {'action': 'warn2', 'est_tokens': est, 'limit': limit, 'pct': pct}
+                return {'action': 'warn2', 'est_tokens': est, 'limit': limit, 'pct': pct, 'model_used': limit_model}
             if pct >= WARN_PCT:
-                return {'action': 'warn', 'est_tokens': est, 'limit': limit, 'pct': pct}
-            return {'action': 'ok', 'est_tokens': est, 'limit': limit, 'pct': pct}
+                return {'action': 'warn', 'est_tokens': est, 'limit': limit, 'pct': pct, 'model_used': limit_model}
+            return {'action': 'ok', 'est_tokens': est, 'limit': limit, 'pct': pct, 'model_used': limit_model}
 
     # ── Post-check (AQ-7) ─────────────────────────────────────────────────────
 
