@@ -260,9 +260,27 @@ async def _anthropic_forward_with_retry(request, body, session, relay):
         log_fn=_log_and_event, tag="anthropic")
 
 
+import re as _re
+
+# Un content-hash fingerprint è esattamente 12 hex (conversation_fingerprint ->
+# hexdigest()[:12]). È STABILE e UNIVOCO per conversazione, quindi pinnabile come
+# un sid:. Restano NON pinnabili "default" e gli IP (request.remote): sono
+# condivisi tra chat diverse, pinnarli le legherebbe insieme (bug originale).
+_CONTENT_HASH_FP = _re.compile(r"^[0-9a-f]{12}$")
+
+
+def _is_pinnable_fp(fp: str) -> bool:
+    """True se il fingerprint identifica UNA sola conversazione (sid: o
+    content-hash), False per i fp condivisi (default / IP remoto)."""
+    if not fp:
+        return False
+    if fp.startswith("sid:"):
+        return True
+    return bool(_CONTENT_HASH_FP.match(fp))
+
+
 async def handle(request):
     fp = _resolve_chat_fingerprint(request)
-    mode = get_mode(request, fp)
     ct = (request.headers.get("Content-Type") or "").lower()
     if "multipart/form-data" in ct:
         return _err_response("multipart not supported", status=415)
@@ -272,16 +290,25 @@ async def handle(request):
     # ma le pipeline (THINK/ACT) devono poter accedere ai messaggi COMPLETI.
     _original_body = body
 
-    # Audit fp 2026-07-21: senza session-id header le chat locali collassano su
-    # request.remote (store _think_count/fail_tracker/_verify_turn_count condivisi
-    # cross-chat). Cache del content-hash sul request: ogni _resolve_chat_fingerprint
-    # a valle (pipeline, remap MiniMax, GLM) risolve la stessa fp per-chat.
+    # FIX ISOLAMENTO-CROSS-SESSIONE (2026-07-26): il content-hash fingerprint va
+    # calcolato PRIMA di get_mode(). Bug precedente: get_mode() girava con
+    # fp="default"/IP (header X-Claude-Code-Session-Id assente su CLI/SDK locale),
+    # quindi ~115k richieste collassavano su "default" e rileggevano il MODE_FILE
+    # GLOBALE ad ogni turno. Risultato: cambiare modello in UNA sessione (o un
+    # `ai-mode X` da terminale) spostava TUTTE le chat aperte. Ora una chat senza
+    # header ottiene un fp stabile per-conversazione (hash system+primo msg) e il
+    # pin-on-first-use la isola come una chat sid:. request.remote/"default" restano
+    # NON pinnabili (condivisi tra chat diverse) e ricadono sul default globale.
+    # Audit fp 2026-07-21: la cache su request['chat_fp'] fa risolvere la stessa fp
+    # a valle (pipeline, remap MiniMax, GLM).
     if not fp.startswith("sid:") and request.path.endswith("/v1/messages"):
         try:
             request["chat_fp"] = conversation_fingerprint(json.loads(body))
             fp = request["chat_fp"]
         except Exception:
             pass
+
+    mode = get_mode(request, fp)
 
     # CTX PRE-CHECK (AQ-REF3): azione proattiva su compact/error
     ctx_check = {"action": "ok", "pct": 0.0}
@@ -459,7 +486,7 @@ async def handle(request):
             _cm = _LEGACY_MODE_MAP.get(_cm, _cm)
             if _cm in VALID_MODES:
                 mode = _cm
-            elif _fp.startswith("sid:"):
+            elif _is_pinnable_fp(_fp):
                 # PIN-ON-FIRST-USE (2026-07-26, decisione utente): una chat nuova
                 # EREDITA il default globale nel momento in cui nasce, poi la
                 # modalita' e' SUA. Prima il default era dinamico: ogni richiesta
@@ -468,8 +495,11 @@ async def handle(request):
                 # ("ai-mode travolge tutto"). Con il pin, `ai-mode` governa solo le
                 # chat che nascono DOPO. `!router reset` cancella il pin: la chat
                 # torna al default globale corrente e si ri-pinna a quello.
-                # Solo per fp reali (sid:): i fingerprint collassati su IP/"default"
-                # sono condivisi tra chat diverse e pinnarli le legherebbe insieme.
+                # ESTESO 2026-07-26: pin anche per i fp content-hash (12 hex), non
+                # solo sid:. Senza header X-Claude-Code-Session-Id (CLI/SDK locale)
+                # la chat ha un fp content-hash stabile e univoco -> isolabile.
+                # Restano fuori solo default/IP (_is_pinnable_fp -> False): condivisi
+                # tra chat, pinnarli le legherebbe insieme.
                 _pin = get_file_mode()
                 set_chat_mode(_fp, _pin)
                 mode = _pin
