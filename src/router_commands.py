@@ -25,12 +25,36 @@ _INTERNAL_TO_DISPLAY = {
 # L'UNICO switch da chat e' ora il comando esplicito !router.
 _EXPLICIT = _re.compile(r"(?:^|>|\n)\s*!router\s+([\w-]+)", _re.I)
 
+# FIX 2026-07-26: il CLI appende al messaggio utente blocchi che l'utente non ha
+# scritto (<system-reminder> con memoria/CLAUDE.md, <ide_selection>, ...). Il vecchio
+# strip a riga 36 toglieva solo i TAG e lasciava il CONTENUTO: la "coda" dopo !router
+# risultava lunga centinaia di char, il guardrail `len(trailing) > 5` scartava il
+# comando, e "!router glm" partiva verso il provider come messaggio normale -> API
+# error in chat (riprodotto: 429 rate_limit_error). Ora i blocchi iniettati spariscono
+# per intero PRIMA del parse. Il guardrail resta: protegge dal cambio-modalita'
+# accidentale quando !router e' citato dentro un discorso vero.
+_INJECTED_BLOCK = _re.compile(
+    r"<(system-reminder|ide_selection|ide_opened_file|ide_diagnostics|"
+    r"local-command-stdout|command-name|command-message|command-args)\b[^>]*>"
+    r".*?</\1\s*>",
+    _re.I | _re.S,
+)
+
+
+def _strip_injected_blocks(text: str) -> str:
+    """Rimuove i blocchi iniettati dall'harness (tag + contenuto)."""
+    prev, out = None, text
+    while prev != out:  # blocchi consecutivi/annidati
+        prev = out
+        out = _INJECTED_BLOCK.sub(" ", out)
+    return out
+
 
 def parse_router_command(text: str):
     """Ritorna {'action': ...} se il messaggio è un comando router, altrimenti None."""
     if not text:
         return None
-    t = text.strip()
+    t = _strip_injected_blocks(text).strip()
     m = _EXPLICIT.search(t)
     if m:
         trailing = _re.sub(r"</?\w[\w-]*>", "", t[m.end():]).strip()

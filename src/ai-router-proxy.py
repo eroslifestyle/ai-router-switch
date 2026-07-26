@@ -90,6 +90,7 @@ from router_mode import (
     get_file_mode, _current_mode, _err_response, get_mode,
     conversation_fingerprint, _resolve_chat_fingerprint,
     get_chat_mode, set_chat_mode, clear_chat_mode,
+    _LEGACY_MODE_MAP,
 )
 from router_commands import (
     parse_router_command, _router_reply_text, _synthetic_message,
@@ -456,8 +457,24 @@ async def handle(request):
             _cm = get_chat_mode(_fp)
             if not _cm:
                 _cm = get_chat_mode(conversation_fingerprint(_data))
+            _cm = _LEGACY_MODE_MAP.get(_cm, _cm)
             if _cm in VALID_MODES:
                 mode = _cm
+            elif _fp.startswith("sid:"):
+                # PIN-ON-FIRST-USE (2026-07-26, decisione utente): una chat nuova
+                # EREDITA il default globale nel momento in cui nasce, poi la
+                # modalita' e' SUA. Prima il default era dinamico: ogni richiesta
+                # rileggeva ai-router-mode, quindi un solo `ai-mode X` da terminale
+                # spostava di colpo TUTTE le chat aperte prive di override esplicito
+                # ("ai-mode travolge tutto"). Con il pin, `ai-mode` governa solo le
+                # chat che nascono DOPO. `!router reset` cancella il pin: la chat
+                # torna al default globale corrente e si ri-pinna a quello.
+                # Solo per fp reali (sid:): i fingerprint collassati su IP/"default"
+                # sono condivisi tra chat diverse e pinnarli le legherebbe insieme.
+                _pin = get_file_mode()
+                set_chat_mode(_fp, _pin)
+                mode = _pin
+                log(f"chat {_fp}: pin-on-first-use -> {_pin}")
         except Exception:
             pass
 
