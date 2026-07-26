@@ -24,6 +24,69 @@ from router_debug import dl
 _DEEP_DEBUG = os.environ.get("AIROUTER_DEEP_DEBUG", "0") == "1"
 
 
+def _readable_err(raw: bytes) -> str:
+    """Rende leggibile un body d'errore upstream per il log.
+
+    Anthropic risponde compresso: finora il log stampava i byte gzip grezzi
+    (b'\\x1f\\x8b...'), inutili per capire cosa fosse andato storto. Prova
+    gzip, poi zlib/deflate, poi testo semplice."""
+    if not raw:
+        return "(vuoto)"
+    if raw[:2] == b"\x1f\x8b":
+        try:
+            import gzip
+            return gzip.decompress(raw).decode("utf-8", "replace")
+        except Exception:
+            pass
+    try:
+        import zlib
+        return zlib.decompress(raw).decode("utf-8", "replace")
+    except Exception:
+        pass
+    return raw.decode("utf-8", "replace")
+
+
+class _PreReadResponse:
+    """Risposta upstream il cui body e' gia' stato letto, riproposta al relay.
+
+    FIX 2026-07-26: sul 400 il codice legge il body per capire se e' un
+    context-exceeded (e in quel caso ritenta senza immagini). Se NON lo e',
+    faceva `return up` — ma lo stream era gia' consumato e la connessione
+    rilasciata, quindi il relay inoltrava un corpo VUOTO: il client vedeva un
+    "API Error" muto, senza il messaggio diagnostico di Anthropic (es.
+    "messages.1.content.0.server_tool_use.id: String should match pattern
+    '^srvtoolu_...'"), che invece finiva solo nel log del router — e li' pure
+    compresso gzip, cioe' illeggibile. Questa classe ripropone status, header e
+    body ESATTI gia' letti, cosi' l'errore arriva intero al client.
+
+    Emula la superficie di ClientResponse usata da StreamingRelay:
+    .status, .headers, .read(), .release(), .content.iter_any()."""
+
+    def __init__(self, status: int, headers, body: bytes):
+        self.status = status
+        self.headers = dict(headers or {})
+        self._body = body or b""
+
+    async def read(self):
+        return self._body
+
+    async def json(self):
+        return json.loads(self._body)
+
+    async def release(self):
+        return None
+
+    @property
+    def content(self):
+        body = self._body
+
+        class _OneShot:
+            async def iter_any(self):
+                yield body
+
+        return _OneShot()
+
+
 def _emit_deep_debug(fn: str, request, safe_body: bytes) -> None:
     """Analisi strutturale + dump ultimo body inviato. No-op se _DEEP_DEBUG off."""
     try:
@@ -175,12 +238,13 @@ async def forward_anthropic(request, body, session):
             request.method, url, data=safe_body, headers=headers, allow_redirects=False
         )
         if up.status == 400:
+            err_headers = dict(up.headers)
             try:
                 raw_err = await up.read()
             except Exception:
                 raw_err = b""
             await up.release()
-            log(f"[forward_anthropic] 400 body: {raw_err[:300]}")
+            log(f"[forward_anthropic] 400 body: {_readable_err(raw_err)[:300]}")
             low = raw_err.lower()
             is_ctx = (b"context window" in low or b"reached its context" in low
                       or b"context_exceeded" in low or b"context limit" in low
@@ -201,11 +265,20 @@ async def forward_anthropic(request, body, session):
                              upstream_status=up.status,
                              note="context exceed retry with images stripped failed", mode="anthropic",
                              severity="error")
+                    retry_headers = dict(up.headers)
                     try:
-                        await up.read()
+                        retry_err = await up.read()
                     except Exception:
-                        pass
+                        retry_err = b""
                     await up.release()
+                    log(f"[forward_anthropic] ctx-retry fallito {up.status}: "
+                        f"{_readable_err(retry_err)[:300]}")
+                    # anche qui lo stream e' consumato: ripropone il body letto
+                    return _PreReadResponse(up.status, retry_headers, retry_err)
+            # 400 non-context: lo stream e' gia' stato consumato sopra, quindi
+            # `return up` consegnerebbe al client un corpo VUOTO. Ripropone il
+            # body reale, cosi' il messaggio di Anthropic arriva a schermo.
+            return _PreReadResponse(400, err_headers, raw_err)
         return up
     except Exception:
         raise
