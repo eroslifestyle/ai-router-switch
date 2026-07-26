@@ -2,11 +2,11 @@
 
 > Generato automaticamente da `scripts/generate_bug_report.py` a partire da `logs/BUG-CATALOG.jsonl`. Non modificare a mano — rilanciare lo script. Vedi `DEBUG-CATALOG-SPEC.md` per lo schema completo.
 
-**123 tipi distinti di bug/blocco/errore** · **10683 occorrenze totali** su 6 modalita'.
+**124 tipi distinti di bug/blocco/errore** · **10742 occorrenze totali** su 6 modalita'.
 
 ## Modalita': `anthropic`
 
-55 tipi distinti, 6953 occorrenze.
+55 tipi distinti, 7009 occorrenze.
 
 ### `rate_limit_429_exhausted` (429)
 
@@ -451,9 +451,9 @@
 
 - **Firma**: `1b910b74f7b880e0`
 - **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 6081
+- **Occorrenze**: 6137
 - **Prima volta**: 2026-07-19T21:40:09Z
-- **Ultima volta**: 2026-07-26T19:48:02+0200
+- **Ultima volta**: 2026-07-26T20:38:14+0200
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `stripped=['mcp__MiniMax__understand_image', 'mcp__MiniMax__web_search', 'mcp__zai__web_search_prime'] kept=60/63`
 
@@ -852,15 +852,15 @@
 
 ## Modalita': `minimax`
 
-12 tipi distinti, 2572 occorrenze.
+12 tipi distinti, 2574 occorrenze.
 
 ### `forward_exception`
 
 - **Firma**: `46cf435b9a06795b`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 14
+- **Occorrenze**: 16
 - **Prima volta**: 2026-07-26T10:06:51Z
-- **Ultima volta**: 2026-07-26T19:37:18+0200
+- **Ultima volta**: 2026-07-26T20:35:12+0200
 - **Modalita' coinvolte**: minimax
 - **Esempio**: `Timeout on reading data from socket`
 
@@ -1015,7 +1015,7 @@
 
 ## Modalita': `mix-am`
 
-14 tipi distinti, 434 occorrenze.
+15 tipi distinti, 435 occorrenze.
 
 ### `minimax_fallback_5xx` (404)
 
@@ -1154,6 +1154,15 @@
 - **Ultima volta**: 2026-07-23T14:40:16Z
 - **Modalita' coinvolte**: mix-am
 - **Esempio**: `status=0`
+
+### `ctx_gate` (ok)
+
+- **Firma**: `4e55ecf61db90635`
+- **Severita'**: info
+- **Occorrenze**: 1
+- **Prima volta**: 2026-07-26T20:35:53+0200
+- **Ultima volta**: 2026-07-26T20:35:53+0200
+- **Modalita' coinvolte**: mix-am
 
 ## Modalita': `mix-gm`
 
