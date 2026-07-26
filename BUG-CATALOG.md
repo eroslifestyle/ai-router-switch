@@ -2,11 +2,11 @@
 
 > Generato automaticamente da `scripts/generate_bug_report.py` a partire da `logs/BUG-CATALOG.jsonl`. Non modificare a mano — rilanciare lo script. Vedi `DEBUG-CATALOG-SPEC.md` per lo schema completo.
 
-**125 tipi distinti di bug/blocco/errore** · **10833 occorrenze totali** su 6 modalita'.
+**125 tipi distinti di bug/blocco/errore** · **10928 occorrenze totali** su 6 modalita'.
 
 ## Modalita': `anthropic`
 
-55 tipi distinti, 7090 occorrenze.
+55 tipi distinti, 7178 occorrenze.
 
 ### `rate_limit_429_exhausted` (429)
 
@@ -451,9 +451,9 @@
 
 - **Firma**: `1b910b74f7b880e0`
 - **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 6218
+- **Occorrenze**: 6306
 - **Prima volta**: 2026-07-19T21:40:09Z
-- **Ultima volta**: 2026-07-26T23:08:08+0200
+- **Ultima volta**: 2026-07-26T23:28:15+0200
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `stripped=['mcp__MiniMax__understand_image', 'mcp__MiniMax__web_search', 'mcp__zai__web_search_prime'] kept=43/46`
 
@@ -852,15 +852,15 @@
 
 ## Modalita': `minimax`
 
-12 tipi distinti, 2578 occorrenze.
+12 tipi distinti, 2582 occorrenze.
 
 ### `forward_exception`
 
 - **Firma**: `46cf435b9a06795b`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 20
+- **Occorrenze**: 24
 - **Prima volta**: 2026-07-26T10:06:51Z
-- **Ultima volta**: 2026-07-26T20:47:42+0200
+- **Ultima volta**: 2026-07-26T23:26:17+0200
 - **Modalita' coinvolte**: minimax
 - **Esempio**: `Timeout on reading data from socket`
 
@@ -1166,7 +1166,7 @@
 
 ## Modalita': `mix-gm`
 
-10 tipi distinti, 19 occorrenze.
+10 tipi distinti, 22 occorrenze.
 
 ### `minimax_act_fail` (502)
 
@@ -1177,6 +1177,16 @@
 - **Ultima volta**: 2026-07-23T02:17:01Z
 - **Modalita' coinvolte**: mix-gm
 
+### `relay_error_400` (400)
+
+- **Firma**: `577a16219018ae0d`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 4
+- **Prima volta**: 2026-07-26T20:47:42+0200
+- **Ultima volta**: 2026-07-26T23:26:18+0200
+- **Modalita' coinvolte**: mix-gm
+- **Esempio**: `{"error":"boom"}`
+
 ### `minimax_act_fail` (404)
 
 - **Firma**: `e139ea6c37521d22`
@@ -1185,16 +1195,6 @@
 - **Prima volta**: 2026-07-19T21:14:54Z
 - **Ultima volta**: 2026-07-19T21:17:06Z
 - **Modalita' coinvolte**: mix-gm
-
-### `relay_error_400` (400)
-
-- **Firma**: `577a16219018ae0d`
-- **Severita'**: 🔴 Errori
-- **Occorrenze**: 1
-- **Prima volta**: 2026-07-26T20:47:42+0200
-- **Ultima volta**: 2026-07-26T20:47:42+0200
-- **Modalita' coinvolte**: mix-gm
-- **Esempio**: `{"error":"boom"}`
 
 ### `hhem_warning`
 
