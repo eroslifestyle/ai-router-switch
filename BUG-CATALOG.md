@@ -2,11 +2,11 @@
 
 > Generato automaticamente da `scripts/generate_bug_report.py` a partire da `logs/BUG-CATALOG.jsonl`. Non modificare a mano — rilanciare lo script. Vedi `DEBUG-CATALOG-SPEC.md` per lo schema completo.
 
-**125 tipi distinti di bug/blocco/errore** · **10796 occorrenze totali** su 6 modalita'.
+**125 tipi distinti di bug/blocco/errore** · **10815 occorrenze totali** su 6 modalita'.
 
 ## Modalita': `anthropic`
 
-55 tipi distinti, 7055 occorrenze.
+55 tipi distinti, 7073 occorrenze.
 
 ### `rate_limit_429_exhausted` (429)
 
@@ -451,9 +451,9 @@
 
 - **Firma**: `1b910b74f7b880e0`
 - **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 6183
+- **Occorrenze**: 6201
 - **Prima volta**: 2026-07-19T21:40:09Z
-- **Ultima volta**: 2026-07-26T20:50:14+0200
+- **Ultima volta**: 2026-07-26T21:59:42+0200
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `stripped=['mcp__MiniMax__understand_image', 'mcp__MiniMax__web_search', 'mcp__zai__web_search_prime'] kept=60/63`
 
@@ -1015,7 +1015,7 @@
 
 ## Modalita': `mix-am`
 
-15 tipi distinti, 438 occorrenze.
+15 tipi distinti, 439 occorrenze.
 
 ### `minimax_fallback_5xx` (404)
 
@@ -1159,9 +1159,9 @@
 
 - **Firma**: `4e55ecf61db90635`
 - **Severita'**: info
-- **Occorrenze**: 4
+- **Occorrenze**: 5
 - **Prima volta**: 2026-07-26T20:35:53+0200
-- **Ultima volta**: 2026-07-26T21:53:08+0200
+- **Ultima volta**: 2026-07-26T21:58:24+0200
 - **Modalita' coinvolte**: mix-am
 
 ## Modalita': `mix-gm`
