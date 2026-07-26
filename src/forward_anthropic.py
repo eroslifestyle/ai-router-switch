@@ -92,7 +92,8 @@ def _emit_deep_debug(fn: str, request, safe_body: bytes) -> None:
     try:
         analysis = _analyze_body_structure(safe_body)
         SENT_ANALYSIS.append({
-            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            # %z e non "Z": prima era ora locale con suffisso UTC (vedi debug_catalog)
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "fn": fn, "path": request.path,
             "sent_bytes": analysis["size_bytes"],
             "analysis": analysis,

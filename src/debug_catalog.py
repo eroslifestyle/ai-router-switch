@@ -92,7 +92,11 @@ def record_event(*, severity: str, category: str, kind: str, chat_fp: str = "",
     """
     if severity not in VALID_SEVERITIES:
         severity = "error"
-    ts = time.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Offset esplicito, non "Z": il formato precedente stampava l'ora LOCALE con
+    # il suffisso che significa UTC (2 h di scarto in CEST), e chi leggeva il
+    # catalogo confrontava orari falsi. Si usa %z invece di convertire in UTC per
+    # non creare un salto all'indietro rispetto alle entry già scritte.
+    ts = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     snippet = (snippet or "")[:SNIPPET_MAX_CHARS]
     # Limite caratteri per il detail serializzato (1000)
     _detail_max = 1000
