@@ -131,6 +131,14 @@ except Exception as _rexc:
 
 RESILIENCE_INST = None
 
+# Heartbeat del gate di contesto: {chat_fp: ts_ultimo_evento}. Serve a registrare
+# telemetria anche SOTTO soglia (dopo il fix 2026-07-26 le azioni compact/error
+# non si verificano quasi più e il gate era diventato cieco), senza inondare il
+# catalogo: un evento per chat ogni CTX_GATE_HEARTBEAT_SEC.
+_CTX_GATE_HEARTBEAT: dict = {}
+CTX_GATE_HEARTBEAT_SEC = 300
+CTX_GATE_HEARTBEAT_PCT = 0.50
+
 # Aliases for backward compat with pipeline modules
 def _log_original_model(orig: str, final: str, chat_id: str) -> None:
     try:
@@ -353,23 +361,95 @@ async def handle(request):
                 ctx_check.get("est_tokens", 0), ctx_check.get("limit", 0),
                 ctx_check["action"],
             )
-        # FIX BUG-1: su compact/error, riscrivi proattivamente il body PRIMA di processare.
-        # Questo libera spazio prima che upstream torni 400 context-exceeded.
-        # post_check compatta_or_clear resta come safety net se la riscrittura non basta.
-        if ctx_check["action"] in ("compact", "error"):
-            # ctx_model gia calcolato prima del pre_check (misurato sul provider reale)
-            _orig_body_len = len(body)
+
+        # Nuovo: calcola safe_limit e determina se serve rewrite
+        try:
+            _safe_limit = get_safe_input_limit(ctx_model)
+        except Exception:
+            _safe_limit = 0
+
+        _est = ctx_check.get("est_tokens", 0)
+
+        # pre_check misura sul context limit pieno mentre rewrite_for_context sul safe input limit
+        # (context - 20% riservato all'output). Questo gap lasciava una zona morta dove il buffer
+        # di output poteva essere consumato senza intervento, anche quando l'input superava la soglia sicura.
+        _needs_rewrite = ctx_check["action"] in ("compact", "error") or (_safe_limit and _est > _safe_limit)
+
+        _orig_body_len = len(body)
+        if _needs_rewrite:
             rewrit, was_rewrit = rewrite_for_context(body, ctx_model, fp)
             if was_rewrit and len(rewrit) < len(body):
                 body = rewrit
                 log(f"ctx: proactive rewrite {len(rewrit)}b < {_orig_body_len}b fp={fp}")
             elif ctx_check["action"] == "error":
-                # Un 400 nostro bloccava anche l'unica via d'uscita (/compact),
-                # rendendo la sessione irrecuperabile. post_check/_compact_or_clear
-                # resta la rete di sicurezza sul 400 reale di upstream.
+                # Mantengo il gate in modalita' osservatore per preservare la via di recupero /compact
                 log(f"ctx: ERROR threshold {ctx_check['pct']:.1%} fp={fp} model={ctx_model} — inoltro comunque (gate osservatore)")
-            # Telemetria del gate (misurata dopo il tentativo di rewrite)
-            _rewritten_len = len(body)
+
+        # Helper inline per estrarre stats dal body JSON.
+        # Serve a identificare il marker del turno /compact dai dati reali invece di inventarlo.
+        def _get_body_stats(b: bytes):
+            try:
+                _data = json.loads(b)
+                # Il body è un dict Anthropic Messages API: {"messages": [...]},
+                # non una lista. Leggerlo come lista azzerava ogni statistica.
+                if not isinstance(_data, dict):
+                    return 0, 0, ""
+                _msgs = _data.get("messages", [])
+                if not isinstance(_msgs, list):
+                    return 0, 0, ""
+            except Exception:
+                return 0, 0, ""
+
+            _msgs_count = len(_msgs)
+            _largest_chars = 0
+            _last_user_text = ""
+
+            for msg in reversed(_msgs):
+                if not isinstance(msg, dict):
+                    continue
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+
+                # Estrai testo dal content (stringa o lista di blocchi)
+                text_parts = []
+                if isinstance(content, str):
+                    text_parts.append(content)
+                elif isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            block_text = block.get("text", "")
+                            if isinstance(block_text, str):
+                                text_parts.append(block_text)
+
+                full_text = "".join(text_parts)
+                text_len = len(full_text)
+
+                if text_len > _largest_chars:
+                    _largest_chars = text_len
+
+                if role == "user" and not _last_user_text:
+                    _last_user_text = full_text[:80]
+
+            return _msgs_count, _largest_chars, _last_user_text
+
+        _rewritten_len = len(body)
+
+        # Determina se registrare heartbeat
+        _heartbeat = False
+        _should_record = ctx_check["action"] in ("compact", "error")
+
+        if not _should_record:
+            if ctx_check["pct"] >= CTX_GATE_HEARTBEAT_PCT:
+                _last_heartbeat = _CTX_GATE_HEARTBEAT.get(fp, 0)
+                if time.time() - _last_heartbeat >= CTX_GATE_HEARTBEAT_SEC:
+                    _should_record = True
+                    _heartbeat = True
+                    _CTX_GATE_HEARTBEAT[fp] = time.time()
+
+        if _should_record:
+            # Parsing del body solo quando l'evento viene davvero registrato, per non pesare sull'hot path.
+            _msgs_count, _largest_chars, _last_user_text = _get_body_stats(body)
+
             detail = {
                 "mode": mode,
                 "model": ctx_model,
@@ -377,13 +457,26 @@ async def handle(request):
                 "action": ctx_check["action"],
                 "est_tokens": ctx_check.get("est_tokens", 0),
                 "limit": ctx_check.get("limit", 0),
+                "safe_limit": _safe_limit,
                 "pct": round(ctx_check["pct"], 4),
                 "body_bytes": _orig_body_len,
-                "rewritten_bytes": _rewritten_len
+                "rewritten_bytes": _rewritten_len,
+                "msgs": _msgs_count,
+                "largest_msg_chars": _largest_chars,
+                "last_user_prefix": _last_user_text,
+                "heartbeat": _heartbeat,
             }
+
             try:
+                if ctx_check["action"] == "error":
+                    _severity = "error"
+                elif ctx_check["action"] == "compact":
+                    _severity = "block"
+                else:
+                    _severity = "info"
+
                 debug_catalog.record_event(
-                    severity="error" if ctx_check["action"] == "error" else "block",
+                    severity=_severity,
                     category=mode,
                     kind="ctx_gate",
                     chat_fp=fp,
@@ -391,6 +484,7 @@ async def handle(request):
                 )
             except Exception:
                 pass
+
     except Exception as e:
         log(f"ctx: pre_check EXC {e} fp={fp} mode={mode}")
 
@@ -415,7 +509,10 @@ async def handle(request):
                 "mix-ag": "claude-opus-4-8", "mix-gm": "MiniMax-M2.7",
             }
             _bottleneck_model = _ctx_bottleneck.get(mode, "MiniMax-M2.7")
-            from model_context_map import get_safe_input_limit
+            # NIENTE import locale qui: get_safe_input_limit è già importata a livello
+            # modulo (riga 51). Re-importarla dentro handle() la rendeva LOCALE all'intera
+            # funzione, quindi l'uso precedente nel gate di contesto sollevava
+            # UnboundLocalError → _safe_limit=0 → il rewrite proattivo non scattava mai.
             _bottleneck_safe = get_safe_input_limit(_bottleneck_model)
             if len(body) > _bottleneck_safe:
                 rewrit2, was_rewrit2 = rewrite_for_context(body, _bottleneck_model, fp)
@@ -806,18 +903,10 @@ async def _run_multiport():
         log("shutdown complete")
 
 
-if __name__ == "__main__":
-    # Self-check: _repair_message_sequence ripara coppie tool troncate
-    from pipeline_anthropic import _repair_message_sequence
-    broken = [
-        {"role": "user", "content": [{"type": "tool_result", "id": "t1", "content": "res1"}]},
-        {"role": "user", "content": "hello"},
-        {"role": "assistant", "content": "think"},
-        {"role": "assistant", "content": [{"type": "tool_use", "id": "t2", "name": "foo"}]},
-    ]
-    fixed = _repair_message_sequence(broken)
-    assert fixed[0]["role"] == "user" and fixed[0]["content"] == "hello", f"FAIL: {fixed[0]}"
-    print("OK: _repair_message_sequence test passed")
+# Il self-check di _repair_message_sequence che stava qui è stato spostato in
+# sviluppo/tests/test_repair_message_sequence.py: era un assert dentro il blocco
+# __main__ del processo di produzione, quindi una sua rottura non faceva fallire
+# un test ma impediva al router di avviarsi.
 
 
 def main():

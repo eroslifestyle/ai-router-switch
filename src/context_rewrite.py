@@ -87,11 +87,103 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
     if estimate_tokens_body(new2_bytes) <= safe_limit:
         return (new2_bytes, True)
 
+    # ATTEMPT 3: troncamento hard - un singolo messaggio piu' grande del limite non e' riducibile dai tentativi precedenti (tail, degradazione e ultimi-2 lo contengono comunque)
+    def _hard_truncate_messages(candidate, target_tokens):
+        """
+        Helper inline per troncamento hard del testo.
+        Ritorna una copia del candidato con testo troncato.
+        Fail-safe: qualsiasi eccezione ritorna il candidato invariato.
+        """
+        TRUNC_SUFFIX = "\n…[troncato per limiti di contesto]"
+        MIN_TEXT_CHARS = 500  # soglia sotto la quale un blocco non viene toccato
+        try:
+            result = json.loads(json.dumps(candidate))
+            if estimate_tokens_body(json.dumps(result).encode()) <= target_tokens:
+                return result
+
+            def _get_text_size(msg):
+                """Calcola la dimensione in caratteri del testo di un messaggio."""
+                size = 0
+                content = msg.get("content", "")
+                if isinstance(content, str):
+                    size = len(content)
+                elif isinstance(content, list):
+                    for block in content:
+                        if not isinstance(block, dict):
+                            continue
+                        if block.get("type") == "text":
+                            size += len(block.get("text", ""))
+                        elif block.get("type") == "tool_result":
+                            tr_content = block.get("content", "")
+                            if isinstance(tr_content, str):
+                                size += len(tr_content)
+                            elif isinstance(tr_content, list):
+                                for sub in tr_content:
+                                    if isinstance(sub, dict) and sub.get("type") == "text":
+                                        size += len(sub.get("text", ""))
+                return size
+
+            def _truncate_text(text, min_chars):
+                """Tronca il testo aggiungendo il suffisso di troncamento."""
+                if len(text) <= min_chars:
+                    return text
+                return text[:min_chars] + TRUNC_SUFFIX
+
+            # Ordina i messaggi per dimensione testuale (dal piu' grande)
+            # L'ultimo messaggio viene troncato per ultimo: e' la richiesta corrente,
+            # mutilarla per prima rende la risposta inutile
+            messages_with_size = []
+            total_msgs = len(result.get("messages", []))
+            for i, msg in enumerate(result.get("messages", [])):
+                size = _get_text_size(msg)
+                messages_with_size.append((size, i, msg))
+
+            messages_with_size.sort(key=lambda x: (1 if x[1] == total_msgs - 1 else 0, -x[0]))
+
+            # Tronca iterativamente partendo dal messaggio piu' grande (non-ultimo)
+            for size, idx, msg in messages_with_size:
+                if size <= MIN_TEXT_CHARS:
+                    continue
+
+                content = msg.get("content", "")
+                if isinstance(content, str):
+                    msg["content"] = _truncate_text(content, MIN_TEXT_CHARS)
+                elif isinstance(content, list):
+                    for block in content:
+                        if not isinstance(block, dict):
+                            continue
+                        if block.get("type") == "tool_use":
+                            continue
+                        if block.get("type") == "text":
+                            block["text"] = _truncate_text(block.get("text", ""), MIN_TEXT_CHARS)
+                        elif block.get("type") == "tool_result":
+                            tr_content = block.get("content", "")
+                            if isinstance(tr_content, str):
+                                block["content"] = _truncate_text(tr_content, MIN_TEXT_CHARS)
+                            elif isinstance(tr_content, list):
+                                for sub in tr_content:
+                                    if isinstance(sub, dict) and sub.get("type") == "text":
+                                        sub["text"] = _truncate_text(sub.get("text", ""), MIN_TEXT_CHARS)
+
+                # Verifica se siamo rientrati nel limite
+                if estimate_tokens_body(json.dumps(result).encode()) <= target_tokens:
+                    return result
+
+            return result
+        except Exception:
+            return candidate
+
+    new3 = _hard_truncate_messages(new2, safe_limit)
+    new3_bytes = json.dumps(new3).encode()
+    if estimate_tokens_body(new3_bytes) <= safe_limit:
+        return (new3_bytes, True)
+
     # Fallback: ritorna il piu' piccolo fra tutti i candidati
     candidates = [
         (new_bytes, len(new_bytes)),
         (new_1b_bytes, len(new_1b_bytes)),
         (new2_bytes, len(new2_bytes)),
+        (new3_bytes, len(new3_bytes)),
     ]
     best_bytes, best_len = min(candidates, key=lambda x: x[1])
     if best_len < len(body):

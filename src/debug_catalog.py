@@ -13,7 +13,10 @@ _CATALOG_LOGS_DIR.mkdir(exist_ok=True)
 CATALOG_JSONL = _CATALOG_LOGS_DIR / "BUG-CATALOG.jsonl"
 
 SNIPPET_MAX_CHARS = 300
-VALID_SEVERITIES = ("bug", "block", "error")
+# "info" (2026-07-26): eventi osservativi, non anomalie — es. l'heartbeat del
+# gate di contesto. Senza questo valore record_event li degradava a "error",
+# inquinando proprio la metrica degli errori che servono a osservare.
+VALID_SEVERITIES = ("bug", "block", "error", "info")
 
 _catalog_cache = {"data": None, "ts": 0}
 _CACHE_TTL_SEC = 5
@@ -80,16 +83,27 @@ def record_event(*, severity: str, category: str, kind: str, chat_fp: str = "",
                   detail: dict = None, snippet: str = "", code=None) -> str:
     """Registra un evento bug/block/error nel catalogo unificato. Ritorna la firma.
 
-    severity: 'bug' | 'block' | 'error'
+    severity: 'bug' | 'block' | 'error' | 'info' (osservativo, non anomalia)
     category: modalita' del router che ha generato l'evento (anthropic/minimax/
               mix-am/mix-ag/mix-gm/glm) — usare il mode REALMENTE risolto per la
               richiesta (get_mode/self.mode), mai il file globale.
     kind: tipo specifico (es. 'relay_error_404', 'tool_isolation_strip', 'hhem_reject')
+    detail: dizionario diagnostico; viene serializzato in JSON e conservato (troncato) come example_detail dell'ultima occorrenza.
     """
     if severity not in VALID_SEVERITIES:
         severity = "error"
     ts = time.strftime("%Y-%m-%dT%H:%M:%SZ")
     snippet = (snippet or "")[:SNIPPET_MAX_CHARS]
+    # Limite caratteri per il detail serializzato (1000)
+    _detail_max = 1000
+    _detail_safe = ""
+    if detail:
+        # json è già importato a livello modulo: un import locale lo renderebbe
+        # locale all'intera funzione (rischio UnboundLocalError).
+        try:
+            _detail_safe = json.dumps(detail, ensure_ascii=False, default=str)[:_detail_max]
+        except Exception:
+            _detail_safe = str(detail)[:_detail_max]
     sig = _signature(category, kind, "", code, snippet)
 
     # Note: DEBUG_EVENTS_JSONL è gia' scritto da router_debug.capture()
@@ -104,6 +118,7 @@ def record_event(*, severity: str, category: str, kind: str, chat_fp: str = "",
                 "categories": [category],
                 "first_seen": ts, "last_seen": ts, "count": 1,
                 "example_snippet": snippet, "example_fp": chat_fp,
+                "example_detail": _detail_safe,
             }
         else:
             entry["last_seen"] = ts
@@ -114,6 +129,8 @@ def record_event(*, severity: str, category: str, kind: str, chat_fp: str = "",
                 entry["example_snippet"] = snippet
             if chat_fp:
                 entry["example_fp"] = chat_fp
+            if _detail_safe:
+                entry["example_detail"] = _detail_safe
         catalog[sig] = entry
         _save_catalog(catalog)
     except Exception as e:

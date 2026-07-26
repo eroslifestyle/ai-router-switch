@@ -32,8 +32,21 @@ for model in list(MODEL_CONTEXT_MAP.keys()):
         MODEL_CONTEXT_MAP[model] = int(val)
 
 def get_context_limit(model: str) -> int:
-    """Restituisce il context window per un modello. Default 200K."""
-    return MODEL_CONTEXT_MAP.get(model.lower(), 200_000)
+    """Restituisce il context window per un modello. Default 200K.
+
+    Lookup case-insensitive: le chiavi della mappa contengono maiuscole
+    ("MiniMax-M2.7", "glm-5V-Turbo") mentre il modello richiesto veniva
+    normalizzato a lowercase — quelle voci non erano MAI trovate e cadevano
+    sul default 200K. Finora innocuo (i valori coincidevano col default), ma
+    sarebbe diventato un bug silenzioso al primo modello con context diverso.
+    """
+    key = model.lower()
+    if key in MODEL_CONTEXT_MAP:
+        return MODEL_CONTEXT_MAP[key]
+    for name, limit in MODEL_CONTEXT_MAP.items():
+        if name.lower() == key:
+            return limit
+    return 200_000
 
 def get_safe_input_limit(model: str) -> int:
     """Restituisce il limite sicuro per input: context - buffer%."""
