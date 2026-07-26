@@ -34,7 +34,12 @@ ExecStart=/home/mrxxx/.claude/scripts/ai-router-proxy-wrapper.sh
 # Stop: SIGTERM → 3s → SIGKILL (il proxy si blocca, non aspettare 90s default)
 KillMode=mixed
 KillSignal=SIGTERM
-TimeoutStopSec=3
+# 8 s e non 3 (2026-07-26): lo stop tipico dura ~0,04 s misurati — il drain di
+# aiohttp (r.cleanup()) è già istantaneo senza stream aperti, quindi il timeout
+# morde SOLO quando c'è un SSE in corso, cioè esattamente quando il SIGKILL
+# tronca una risposta a metà. 8 s dà respiro a quegli stream senza bloccare i
+# restart per minuti. SendSIGKILL resta la rete di sicurezza.
+TimeoutStopSec=8
 SendSIGKILL=yes
 FinalKillSignal=SIGKILL
 

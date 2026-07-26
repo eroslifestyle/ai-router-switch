@@ -2,19 +2,19 @@
 
 > Generato automaticamente da `scripts/generate_bug_report.py` a partire da `logs/BUG-CATALOG.jsonl`. Non modificare a mano — rilanciare lo script. Vedi `DEBUG-CATALOG-SPEC.md` per lo schema completo.
 
-**112 tipi distinti di bug/blocco/errore** · **8974 occorrenze totali** su 6 modalita'.
+**123 tipi distinti di bug/blocco/errore** · **10683 occorrenze totali** su 6 modalita'.
 
 ## Modalita': `anthropic`
 
-51 tipi distinti, 5272 occorrenze.
+55 tipi distinti, 6953 occorrenze.
 
 ### `rate_limit_429_exhausted` (429)
 
 - **Firma**: `9c7020f92cb35d8a`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 65
+- **Occorrenze**: 131
 - **Prima volta**: 2026-07-22T11:14:43Z
-- **Ultima volta**: 2026-07-25T16:04:15Z
+- **Ultima volta**: 2026-07-26T10:09:35Z
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `retry-after=?`
 
@@ -22,9 +22,9 @@
 
 - **Firma**: `752f347e44651cc7`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 25
+- **Occorrenze**: 27
 - **Prima volta**: 2026-07-21T20:44:09Z
-- **Ultima volta**: 2026-07-23T15:26:58Z
+- **Ultima volta**: 2026-07-26T08:35:55Z
 - **Modalita' coinvolte**: anthropic
 
 ### `rate_limit_429_exhausted` (429)
@@ -36,6 +36,26 @@
 - **Ultima volta**: 2026-07-23T15:42:52Z
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `retry-after=80227`
+
+### `relay_error_400` (400)
+
+- **Firma**: `9cbf1e5e7aec7060`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-07-26T08:39:54Z
+- **Ultima volta**: 2026-07-26T08:39:54Z
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0.server_tool_use.id: String should match pattern '^srvtoolu_[a-zA-Z0-9_]+$'"},"request_id":"req_011CdQDBXB9w2RAAeRZbDqPh"}`
+
+### `relay_error_404` (404)
+
+- **Firma**: `59c9d40b47a29cfb`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-07-26T07:58:29Z
+- **Ultima volta**: 2026-07-26T07:58:29Z
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `{"type":"error","error":{"type":"not_found_error","message":"model: MiniMax-M3"},"request_id":"req_011CdQA2LFj4EyydWTganSr5"}`
 
 ### `relay_error_404` (404)
 
@@ -431,29 +451,29 @@
 
 - **Firma**: `1b910b74f7b880e0`
 - **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 4612
+- **Occorrenze**: 6081
 - **Prima volta**: 2026-07-19T21:40:09Z
-- **Ultima volta**: 2026-07-25T19:14:39Z
+- **Ultima volta**: 2026-07-26T19:48:02+0200
 - **Modalita' coinvolte**: anthropic
-- **Esempio**: `stripped=['mcp__MiniMax__understand_image', 'mcp__MiniMax__web_search', 'mcp__zai__web_search_prime'] kept=302/305`
+- **Esempio**: `stripped=['mcp__MiniMax__understand_image', 'mcp__MiniMax__web_search', 'mcp__zai__web_search_prime'] kept=60/63`
 
 ### `tool_isolation_strip`
 
 - **Firma**: `5eb9aca25569b15f`
 - **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 343
+- **Occorrenze**: 349
 - **Prima volta**: 2026-07-19T19:41:54Z
-- **Ultima volta**: 2026-07-25T16:02:43Z
+- **Ultima volta**: 2026-07-26T09:09:22Z
 - **Modalita' coinvolte**: anthropic
-- **Esempio**: `stripped=['mcp__MiniMax__understand_image', 'mcp__MiniMax__web_search'] kept=302/304`
+- **Esempio**: `stripped=['mcp__MiniMax__understand_image', 'mcp__MiniMax__web_search'] kept=182/184`
 
 ### `rate_limit_429`
 
 - **Firma**: `e648db5b3f6e697e`
 - **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 128
+- **Occorrenze**: 260
 - **Prima volta**: 2026-07-22T13:08:58Z
-- **Ultima volta**: 2026-07-25T16:04:14Z
+- **Ultima volta**: 2026-07-26T10:09:34Z
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `anthropic 429: retry 2/2 retry-after=None sleep=0.62s`
 
@@ -487,6 +507,16 @@
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `anthropic 429: retry 2/2 retry-after=80288.0 sleep=60.00s`
 
+### `tool_isolation_strip`
+
+- **Firma**: `7446f99926bbc6ef`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 2
+- **Prima volta**: 2026-07-26T17:54:14Z
+- **Ultima volta**: 2026-07-26T17:54:15Z
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `stripped=['mcp__zai__web_search_prime'] kept=57/58`
+
 ### `rate_limit_429` (429)
 
 - **Firma**: `435d593edd4ea264`
@@ -517,9 +547,18 @@
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `stripped=['mcp__zai__webSearchPrime', 'mcp__MiniMax__web_search'] kept=1/3`
 
+### `ctx_gate`
+
+- **Firma**: `164bcf4c47d65947`
+- **Severita'**: info
+- **Occorrenze**: 2
+- **Prima volta**: 2026-07-26T18:23:30Z
+- **Ultima volta**: 2026-07-26T18:25:46Z
+- **Modalita' coinvolte**: anthropic
+
 ## Modalita': `glm`
 
-28 tipi distinti, 693 occorrenze.
+29 tipi distinti, 698 occorrenze.
 
 ### `glm_client_error`
 
@@ -731,6 +770,16 @@
 - **Modalita' coinvolte**: glm
 - **Esempio**: `model=claude-sonnet-5 glm rate-limit: budget 8s esaurito (waited 0s)`
 
+### `tool_isolation_strip`
+
+- **Firma**: `8dc3755f203663e5`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 5
+- **Prima volta**: 2026-07-26T08:34:50Z
+- **Ultima volta**: 2026-07-26T08:36:44Z
+- **Modalita' coinvolte**: glm
+- **Esempio**: `stripped=['web_search'] kept=1/2`
+
 ### `glm_429_backoff` (429)
 
 - **Firma**: `bea2afb7568d2fad`
@@ -803,7 +852,17 @@
 
 ## Modalita': `minimax`
 
-9 tipi distinti, 2556 occorrenze.
+12 tipi distinti, 2572 occorrenze.
+
+### `forward_exception`
+
+- **Firma**: `46cf435b9a06795b`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 14
+- **Prima volta**: 2026-07-26T10:06:51Z
+- **Ultima volta**: 2026-07-26T19:37:18+0200
+- **Modalita' coinvolte**: minimax
+- **Esempio**: `Timeout on reading data from socket`
 
 ### `think_failed` (404)
 
@@ -823,6 +882,16 @@
 - **Ultima volta**: 2026-07-19T21:16:59Z
 - **Modalita' coinvolte**: minimax
 - **Esempio**: `<html> <head><title>404 Not Found</title></head> <body> <center><h1>404 Not Found</h1></center> <hr><center>nginx</center> </body> </html>`
+
+### `forward_exception`
+
+- **Firma**: `75e2c80cbe7c83d0`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-07-26T19:29:54Z
+- **Ultima volta**: 2026-07-26T19:29:54Z
+- **Modalita' coinvolte**: minimax
+- **Esempio**: `'NoneType' object has no attribute 'request'`
 
 ### `tool_isolation_strip`
 
@@ -885,6 +954,16 @@
 
 ### `tool_isolation_strip`
 
+- **Firma**: `3a3b86a151e6a0af`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 1
+- **Prima volta**: 2026-07-26T08:28:18Z
+- **Ultima volta**: 2026-07-26T08:28:18Z
+- **Modalita' coinvolte**: minimax
+- **Esempio**: `stripped=['web_search'] kept=1/2`
+
+### `tool_isolation_strip`
+
 - **Firma**: `d8907f8dc0ec3574`
 - **Severita'**: 🟡 Blocchi
 - **Occorrenze**: 1
@@ -895,7 +974,16 @@
 
 ## Modalita': `mix-ag`
 
-2 tipi distinti, 3 occorrenze.
+4 tipi distinti, 8 occorrenze.
+
+### `relay_error_400` (400)
+
+- **Firma**: `0760b542de558c08`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 4
+- **Prima volta**: 2026-07-26T08:34:38Z
+- **Ultima volta**: 2026-07-26T08:35:51Z
+- **Modalita' coinvolte**: mix-ag
 
 ### `glm_act_fail` (502)
 
@@ -905,6 +993,16 @@
 - **Prima volta**: 2026-07-22T08:43:17Z
 - **Ultima volta**: 2026-07-22T08:45:28Z
 - **Modalita' coinvolte**: mix-ag
+
+### `relay_error_400` (400)
+
+- **Firma**: `90a11f6016d29c33`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-07-26T08:39:55Z
+- **Ultima volta**: 2026-07-26T08:39:55Z
+- **Modalita' coinvolte**: mix-ag
+- **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0.server_tool_use.id: String should match pattern '^srvtoolu_[a-zA-Z0-9_]+$'"},"request_id":"req_011CdQDBYcUMhEtsmpC4WTAg"}`
 
 ### `mixed_rescue_502` (429)
 
@@ -917,7 +1015,7 @@
 
 ## Modalita': `mix-am`
 
-13 tipi distinti, 432 occorrenze.
+14 tipi distinti, 434 occorrenze.
 
 ### `minimax_fallback_5xx` (404)
 
@@ -988,6 +1086,15 @@
 - **Modalita' coinvolte**: mix-am
 - **Esempio**: `{"type":"error","error":{"type":"overloaded_error","message":"The server cluster is currently under high load. Please retry after a short wait and thank you for your patience. (2064) (529)"},"request_id":"06ae3391b50f3513a44220f22331796d"}`
 
+### `relay_error_400` (400)
+
+- **Firma**: `90aa86dc348601fe`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 2
+- **Prima volta**: 2026-07-19T22:32:12Z
+- **Ultima volta**: 2026-07-26T08:35:51Z
+- **Modalita' coinvolte**: mix-am
+
 ### `relay_error_404` (404)
 
 - **Firma**: `32299002d5d61611`
@@ -998,6 +1105,16 @@
 - **Modalita' coinvolte**: mix-am
 - **Esempio**: `{"error":{"code":"not_found_error","message":"model: MiniMax-M2.7","type":"invalid_request_error","param":null}}`
 
+### `relay_error_400` (400)
+
+- **Firma**: `351d784df2502cb2`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-07-26T08:39:55Z
+- **Ultima volta**: 2026-07-26T08:39:55Z
+- **Modalita' coinvolte**: mix-am
+- **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0.server_tool_use.id: String should match pattern '^srvtoolu_[a-zA-Z0-9_]+$'"},"request_id":"req_011CdQDBZtNFvWkWaUS383wh"}`
+
 ### `mixed_rescue_502` (400)
 
 - **Firma**: `4eeae187d3a31265`
@@ -1007,15 +1124,6 @@
 - **Ultima volta**: 2026-07-21T20:41:32Z
 - **Modalita' coinvolte**: mix-am
 - **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","message":"Tool reference 'mcp__MiniMax__understand_image' not found in available tools"},"request_id":"req_011CdFhATYpN2rySQGKPywEK"}`
-
-### `relay_error_400` (400)
-
-- **Firma**: `90aa86dc348601fe`
-- **Severita'**: 🔴 Errori
-- **Occorrenze**: 1
-- **Prima volta**: 2026-07-19T22:32:12Z
-- **Ultima volta**: 2026-07-19T22:32:12Z
-- **Modalita' coinvolte**: mix-am
 
 ### `think_timeout`
 
