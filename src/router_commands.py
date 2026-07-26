@@ -14,15 +14,15 @@ _INTERNAL_TO_DISPLAY = {
     "mix-am": "MixAM", "mix-gm": "MixGM", "mix-ag": "MixAG",
     "anthropic": "anthropic", "minimax": "minimax", "glm": "glm",
 }
-_NL_MODE = [
-    (_re.compile(r"anthropic\s*[-+ ]?\s*glm|claude\s*[-+ ]?\s*glm|glm\s+esecutore|anthropic\s+con\s+glm", _re.I), "mix-ag"),
-    (_re.compile(r"glm\s*[-+ ]?\s*minimax|glm\s+con\s+minimax|glm\s+orchestr\w+\s+minimax", _re.I), "mix-gm"),
-    (_re.compile(r"solo\s+glm|usa\s+glm|glm\b", _re.I), "glm"),
-    (_re.compile(r"solo\s+(claude|anthropic)|usa\s+(claude|anthropic)", _re.I), "anthropic"),
-    (_re.compile(r"solo\s+minimax|usa\s+minimax", _re.I), "minimax"),
-    (_re.compile(r"mod\w*\s+mist|mixed|mist[ao]\b", _re.I), "mix-am"),
-]
-_CMD_VERB = _re.compile(r"\b(usa|passa|metti|imposta|attiva|cambia|adesso\s+usa)\b", _re.I)
+# RIMOSSO 2026-07-26 (decisione utente): riconoscimento in linguaggio naturale
+# (_NL_MODE + _CMD_VERB). Cambiava la modalita' SENZA autorizzazione esplicita:
+# bastava un messaggio <=80 char con un verbo comune ("usa|cambia|metti|attiva|
+# imposta|passa") piu' una parola-modalita' ovunque nel testo. Il pattern "glm\b"
+# matchava la sola parola "glm", quindi frasi di lavoro normali come "cambia il
+# commento che cita glm" o "usa il file glm.py" commutavano la chat su glm; e per
+# ordine di valutazione "usa solo claude, non glm" finiva su glm, l'OPPOSTO del
+# richiesto. Evidenza: 31 override glm su 86 accumulati in ai-router-chats.json.
+# L'UNICO switch da chat e' ora il comando esplicito !router.
 _EXPLICIT = _re.compile(r"(?:^|>|\n)\s*!router\s+([\w-]+)", _re.I)
 
 
@@ -43,10 +43,6 @@ def parse_router_command(text: str):
         if arg in ("status", "reset", "help"):
             return {"action": arg}
         return {"action": "help"}
-    if len(t) <= 80 and _CMD_VERB.search(t):
-        for rx, mode in _NL_MODE:
-            if rx.search(t):
-                return {"action": "set", "mode": mode}
     return None
 
 
@@ -68,7 +64,7 @@ def _router_reply_text(action: dict, fp: str, fallback_fp: str = None) -> str:
         _gm = get_file_mode()
         return f"↺ Chat riportata al default: **{_INTERNAL_TO_DISPLAY.get(_gm, _gm)}**"
     return ("🧭 Comandi: `!router <anthropic|minimax|mixam|glm|mixgm|mixag>` · "
-            "`!router status` · `!router reset`. Anche a voce: «usa solo minimax».")
+            "`!router status` · `!router reset`.")
 
 
 def _synthetic_message(text: str, model: str = "ai-router") -> dict:

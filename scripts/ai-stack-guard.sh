@@ -34,8 +34,8 @@ ensure(){
 }
 
 # ai-router (8787) — porta primaria dinamica. Lo STESSO processo multiport apre
-# anche le porte a modalità fissa: 8771-8774 (anthropic/minimax/mixed/inverse) e
-# 8775-8777 (glm/glm-minimax/anthropic-glm). Se :8787 è up, lo sono tutte (stesso PID).
+# anche le porte a modalità fissa: 8771-8773 (anthropic/minimax/mix-am) e
+# 8775-8777 (glm/mix-gm/mix-ag). Se :8787 è up, lo sono tutte (stesso PID).
 ensure "ai-router" 8787 "ai-router.service" \
   /usr/bin/python3 "$ROUTER"
 

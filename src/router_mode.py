@@ -144,7 +144,7 @@ def clear_chat_mode(fp: str):
 
 
 # ── Combined mode getter ────────────────────────────────────────────────────────
-_LEGACY_MODE_MAP = {"mixed": "mix-am", "inverse": "minimax",
+_LEGACY_MODE_MAP = {"mixed": "mix-am",
                     "glm-minimax": "mix-gm", "anthropic-glm": "mix-ag"}
 
 

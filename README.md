@@ -36,8 +36,7 @@ your model's settings, skills, agents, MCP, tools, or system prompt.
 |---|---|
 | `anthropic` | Claude only — no fallback |
 | `minimax` | MiniMax-M3 only (no weekly limit, cheap) |
-| `mixed` | Claude first → MiniMax on 429 / 5xx (bidirectional) |
-| `inverse` | MiniMax generates → Claude Opus verifies critical tasks (auto-detected) |
+| `mix-am` | Claude THINK → MiniMax ACT (alias: `mixed`) |
 
 ### GLM / z.ai (Anthropic-compatible endpoint `api.z.ai/api/anthropic`)
 
@@ -61,8 +60,7 @@ Fallback chain on error/quota: GLM → MiniMax → Claude.
 | `8787` | Dynamic — follows `ai-mode` (default) |
 | `8771` | Forced: `anthropic` |
 | `8772` | Forced: `minimax` |
-| `8773` | Forced: `mixed` |
-| `8774` | Forced: `inverse` |
+| `8773` | Forced: `mix-am` |
 | `8775` | Forced: `glm` |
 | `8776` | Forced: `glm-minimax` |
 | `8777` | Forced: `anthropic-glm` |
@@ -74,7 +72,7 @@ Fallback chain on error/quota: GLM → MiniMax → Claude.
 **Global** (all apps connected to `:8787`):
 
 ```bash
-ai-mode anthropic      # or: minimax / mixed / inverse / glm / glm-minimax / anthropic-glm
+ai-mode anthropic      # or: minimax / mix-am / mix-ag / mix-gm / glm
 ai-mode status
 ai-mode log
 ```
@@ -88,7 +86,10 @@ ai-mode log
 !router reset          # restore global mode from ai-mode
 ```
 
-Natural phrases like "usa solo minimax" or "passa a Claude" also work.
+Only the explicit `!router` command switches modes. Natural-language switching was
+removed on 2026-07-26: a short message containing a common verb plus a mode word
+anywhere in the text used to change the mode, so ordinary sentences silently
+switched the chat.
 Per-chat commands are confined to the conversation fingerprint — no cross-talk between chats.
 
 **Fixed-port** (explicit, no file writes):

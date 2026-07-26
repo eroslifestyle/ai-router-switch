@@ -1,7 +1,14 @@
 # ai-router-switch — TODO
 
-## Attivo (dopo la sessione 2026-07-25 sera)
-- [ ] **Due divergenze segnalate da `router_mode_lint.py`**, entrambe latenti oggi ma sono lo stesso pattern del fallback silenzioso già corretto: l'alias `inverse` è mappato a `mix-am` da `~/.local/bin/ai-mode` e a `minimax` da `~/.claude/lib/router_chain_dispatcher.py`; il token `interactive` è accettato dalla CLI di `ai-mode` ma non è né canonico né alias, quindi finirebbe nel file di stato e verrebbe poi rifiutato in silenzio. Il linter li segnala, non li corregge.
+## Attivo (dopo la sessione 2026-07-26 mattina)
+- [ ] **Allineare i manuali ai 6 nomi canonici** — `docs/MANUAL.md` e `docs/MANUAL.en.md` hanno una sezione dedicata a `inverse` come modalità (righe ~21, 63, 127, 153, 183, 258, 343), documentano la porta `8774` che non esiste più e la env `AIROUTER_VERIFY_MODEL` rimossa oggi. Idem `docs/index.md:22` e `router-mode/README.md:8,148` («7 modes»). Richiede riscrittura di sezione, non un sed.
+- [ ] **Contraddizione nella tabella di `~/.claude/AI-ROUTER-POLICY.md` (~riga 107)** — dice che in modalità `anthropic` l'esecutore è «minimax code (m2.7-hs)», mentre `CLAUDE.md` e `get_chain('anthropic')` dicono **Haiku**. Una delle due fonti è sbagliata: da decidere quale prima di correggere.
+
+## Completati (sessione 2026-07-26 mattina — rimozione switch non autorizzato)
+- [x] **Switch a voce (natural language) RIMOSSO** — `_NL_MODE` + `_CMD_VERB` in `src/router_commands.py` cambiavano la modalità **senza autorizzazione**: messaggio ≤80 char + verbo comune + parola-modalità ovunque nel testo. Il pattern `glm\b` matchava la sola parola «glm». Verificato empiricamente: 8 frasi di lavoro normali su 8 commutavano la chat, e per ordine di valutazione «usa solo claude, non glm» finiva su **glm**, l'opposto del richiesto. Evidenza a supporto: 31 override `glm` su 86 in `ai-router-chats.json`. Resta solo `!router` esplicito. Zero test coprivano il codice rimosso.
+- [x] **`inverse` e `interactive` rimossi ovunque** (decisione utente) — `interactive` era il nome di due rinomine fa: nato a giugno come 4ª modalità (porta `8774`, «MiniMax genera + Opus verifica»), rinominato `inverse` il 2026-07-02 (commit `9813e5a`, voce L4, che già lo definiva «modo inesistente mostrato all'utente»), poi alias di `minimax` dal 25/07. Ripuliti: `ai-mode` (3 punti), `router_chain_dispatcher.py`, `src/router_mode.py`, `scripts/ai-stack-guard.sh`, `systemd/ai-router.service`, `README.md`, `CLAUDE.md` (4 punti), `AI-ROUTER-POLICY.md` (5 punti). Linter da **5 OK/2 WARN → 7 OK/0 WARN**.
+- [x] **`AIROUTER_VERIFY_MODEL` orfana rimossa** dal service — residuo della pipeline `interactive-T2` morta, imponeva `claude-sonnet-4-6` (modello vecchio). `router_constants.py:20`: «VERIFY_MODEL rimosso: il router non sceglie il modello Anthropic».
+- [x] **86 override per-chat azzerati** (`ai-router-chats.json`), backup in `ai-router-chats.json.bak-20260726-preclean`. Ogni chat riparte dal MODE_FILE.
 - [ ] **Stub residui** `~/.claude/scripts/obsidian_auto_update.py` e `cost_report.py`: riscriverli o eliminarli. Non sono agganciati ad alcun hook.
 - [ ] **Valutare l'aggancio a un hook SessionStart** di `router_mode_lint.py` e `version_drift_check.py --advisory` (entrambi escono 0). Gli hook si dichiarano in `~/.claude/settings.json`.
 
