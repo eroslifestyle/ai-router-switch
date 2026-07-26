@@ -708,7 +708,8 @@ async def handle(request):
             # Inoltro diretto ad Anthropic per modalità miste
             if not request.path.endswith("/v1/messages"):
                 up = await forward_anthropic(request, body, session)
-                return await relay(up, extra_headers={"x-ai-verified": f"tunnel-{mode}-anthropic"})
+                return await relay(up, extra_headers={"x-ai-verified": f"tunnel-{mode}-anthropic"},
+                                   final_override="claude-direct")
             # Per /v1/messages, applica il retry certificato SDK
             try:
                 up, exhausted = await _anthropic_forward_with_retry(request, body, session, relay)
@@ -724,7 +725,12 @@ async def handle(request):
                                             snippet=f"retry-after={up.headers.get('retry-after','?')}")
                 return await relay(up, extra_headers={"x-ai-verified": f"tunnel-{mode}-anthropic-ratelimit"})
             log(f"tunnel {mode} anthropic -> {up.status} {request.path}")
-            return await relay(up, extra_headers={"x-ai-verified": f"tunnel-{mode}-anthropic"})
+            # final_override esplicito: senza, `_final` veniva dedotto dall'indice di
+            # remap (che per le miste risponde col modello dell'ACT anche quando ha
+            # eseguito Anthropic) e la guardia response-side si asteneva sul provider
+            # sbagliato. Qui l'esecutore e' noto con certezza: e' Anthropic diretto.
+            return await relay(up, extra_headers={"x-ai-verified": f"tunnel-{mode}-anthropic"},
+                               final_override="claude-direct")
         # Altrimenti: mode == "anthropic" → cadi nel ramo "ANTHROPIC PURA" sotto
 
     elif _provider == "minimax":

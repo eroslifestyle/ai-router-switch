@@ -8,6 +8,7 @@ import re as re_module
 
 from aiohttp import web
 from router_debug import dl
+import tool_isolation
 
 
 class StreamingRelay:
@@ -142,6 +143,7 @@ class StreamingRelay:
         model_rewrite_done = orig_model is None  # se non c'è orig_model, skip subito
         # FIX F: accumula chunks per estrarre usage reale dai record SSE/JSON
         _acc_buf = bytearray()
+        _buf_str = ""
         _acc_limit = 16384  # massimo 16KB per evitare OOM su risposte enormi
         # Precompila pattern per SSE message_start rewrite
         sse_model_pat = re_module.compile(rb'"model":"[^"]*"')
@@ -392,6 +394,32 @@ class StreamingRelay:
                         upstream_encoding=upstream.headers.get("Content-Encoding", ""),
                         orig=self.orig, mode=self.mode,
                         note=f"marker={_hit}",
+                    )
+        except Exception:
+            pass
+        # GUARD isolamento response-side (2026-07-26): il filtro request-side rimuove
+        # le DEFINIZIONI dei tool stranieri, ma non impedisce al modello di imitare
+        # dalla history il NOME di un tool di un altro provider. Qui si RILEVA soltanto,
+        # senza toccare la risposta: riscrivere uno stream SSE a valle spezzerebbe la
+        # numerazione dei content_block, e il fenomeno non e' mai stato osservato.
+        try:
+            _bk = tool_isolation.backend_from_final(
+                final_override or ("claude-direct" if self.mode == "anthropic" else ""))
+            if _bk:
+                _txt = _buf_str or _acc_buf.decode("utf-8", errors="replace")
+                _foreign = tool_isolation.detect_foreign_tool_use(_txt, _bk)
+                if _foreign:
+                    self.log_fn(f"FOREIGN-TOOLUSE {_foreign} backend={_bk} "
+                                f"mode={self.mode} fp={chat_fp_for_rewrite}")
+                    dl.capture(
+                        kind="foreign_tool_use_response", request=self.request,
+                        fp=chat_fp_for_rewrite, client_model=orig_model or "",
+                        status=upstream.status, stage="relay",
+                        upstream_status=upstream.status,
+                        upstream_raw=bytes(_acc_buf[:4096]),
+                        upstream_encoding=upstream.headers.get("Content-Encoding", ""),
+                        orig=self.orig, mode=self.mode,
+                        note=f"foreign={_foreign} backend={_bk}",
                     )
         except Exception:
             pass

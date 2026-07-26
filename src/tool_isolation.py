@@ -14,6 +14,7 @@ pipeline — presente o futura — eredita l'isolamento senza doverlo richiamare
 esplicitamente a ogni nuovo mix.
 """
 import json
+import re
 
 import debug_catalog
 
@@ -120,3 +121,75 @@ def filter_tools_for_backend(body: bytes, backend: str) -> bytes:
         data.pop("tool_choice", None)
     sanitize_tool_choice(data)
     return json.dumps(data).encode()
+
+
+_TOOL_USE_NAME_AFTER = re.compile(r'"type"\s*:\s*"tool_use"\s*,\s*(?:[^{}]*?,\s*)??"name"\s*:\s*"([^"]+)"')
+_TOOL_USE_NAME_BEFORE = re.compile(r'"name"\s*:\s*"([^"]+)"\s*,\s*(?:[^{}]*?,\s*)??"type"\s*:\s*"tool_use"')
+
+def brand_of_tool_name(name: str) -> str | None:
+    """
+    Classifica un nome nudo di tool (senza input_schema) nel provider che lo esegue.
+    Restituisce 'minimax', 'glm' o 'anthropic' a seconda del brand,
+    oppure None se il tool non è brandizzato (es. Bash, Read, tool MCP di terze parti).
+    In nessun caso si deve bloccare un tool con brand None: sono sempre leciti.
+
+    Perché non si riutilizza ``is_anthropic_server_tool``?
+    Quel criterio classifica per *assenza* di ``input_schema`` e funziona solo sulle
+    *definizioni* dei tool. Su un nome nudo direbbe "anthropic" per qualsiasi tool,
+    compresi Bash e Read, generando falsi positivi su ogni turno.
+    """
+    if not name or not isinstance(name, str):
+        return None
+    name_lower = name.lower()
+    if "minimax" in name_lower:
+        return "minimax"
+    if "websearchprime" in name_lower or name_lower.startswith("mcp__zai__"):
+        return "glm"
+    if name_lower in _ANTHROPIC_CLIENT_TOOL_NAMES:
+        return "anthropic"
+    return None
+
+def backend_from_final(final: str) -> str | None:
+    """
+    Deduce il backend esecutore dalla stringa ``final`` della telemetria del relay.
+    Restituisce 'minimax', 'glm' o 'anthropic' a seconda del contenuto della stringa,
+    oppure None se non è classificabile; in tal caso la guardia si astiene.
+    """
+    if not final or not isinstance(final, str):
+        return None
+    final_lower = final.lower()
+    if "minimax" in final_lower:
+        return "minimax"
+    if final_lower.startswith("glm") or "glm-mode" in final_lower or "glm:" in final_lower:
+        return "glm"
+    if "claude" in final_lower or "anthropic" in final_lower:
+        return "anthropic"
+    return None
+
+def detect_foreign_tool_use(text: str, backend: str) -> list[str]:
+    """
+    Rileva, nella risposta in formato testo, i nomi dei ``tool_use`` che appartengono
+    a un provider diverso da ``backend``. La rilevazione è **osservativa** e non
+    modifica la risposta; serve a cogliere il caso in cui il modello, usando la
+    cronologia, imiti il nome di un tool di un altro provider, cosa che il filtro
+    request‑side sulle *definizioni* dei tool non può intercettare.
+
+    """
+    if backend not in ("anthropic", "minimax", "glm") or not text:
+        return []
+    # Estrai tutti i match mantenendo l'ordine di apparizione
+    matches = []
+    for regex in (_TOOL_USE_NAME_AFTER, _TOOL_USE_NAME_BEFORE):
+        for m in regex.finditer(text):
+            matches.append((m.start(), m.group(1)))
+    # Ordina per posizione nel testo
+    matches.sort(key=lambda x: x[0])
+    seen = set()
+    result = []
+    for _, name in matches:
+        if name not in seen:
+            seen.add(name)
+            result.append(name)
+    # Filtra solo i tool con brand diverso da backend
+    foreign = [name for name in result if brand_of_tool_name(name) and brand_of_tool_name(name) != backend]
+    return foreign
