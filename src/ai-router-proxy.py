@@ -328,17 +328,23 @@ async def handle(request):
     # shrink inutile su richieste THINK (es. mix-am con Claude Opus inoltrato
     # ad Anthropic). Il provider dipende dal modello richiesto, non dalla modalità.
     _early_provider = None
+    _early_override = None
+    _early_model = ""
     try:
         from role_routing import resolve_route as _resolve_route
         _early_model = (json.loads(body).get("model") or "").strip()
         if _early_model:
-            _early_provider, _ = _resolve_route(mode, _early_model)
+            _early_provider, _early_override = _resolve_route(mode, _early_model)
     except Exception:
         pass
 
     # CTX PRE-CHECK (AQ-REF3): azione proattiva su compact/error
     # Il limite del gate e del rewrite devono essere lo stesso, misurato sul
-    # provider che ricevera davvero il body (fix 2026-07-26).
+    # modello destinatario reale, non su un modello generico per provider
+    # (fix 2026-07-26, esteso F8). Esempio del bug risolto: verso anthropic
+    # con claude-haiku-4-5-20251001 (limite 200k) il gate usava ctx_model
+    # claude-opus-4-8 (limite 1M), lasciando passare corpi da 208k token che
+    # Anthropic rifiuta con 400 "prompt is too long".
     _ctx_model_map = {
         "anthropic": "claude-opus-4-8", "minimax": "MiniMax-M2.7",
         "glm": "glm-5.2", "mix-am": "MiniMax-M2.7",
@@ -349,7 +355,9 @@ async def handle(request):
         "minimax": "MiniMax-M2.7",
         "glm": "glm-5.2",
     }
-    if _early_provider and _early_provider in _provider_ctx_model_map:
+    if _early_model:
+        ctx_model = _early_override or _early_model
+    elif _early_provider and _early_provider in _provider_ctx_model_map:
         ctx_model = _provider_ctx_model_map[_early_provider]
     else:
         ctx_model = _ctx_model_map.get(mode, "MiniMax-M2.7")
