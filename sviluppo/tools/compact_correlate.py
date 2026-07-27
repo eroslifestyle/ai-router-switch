@@ -5,6 +5,11 @@ Sola lettura: incrocia i `compact_boundary` dei transcript locali con le righe
 compattazione sia mai stata riscritta (mutilata) dal router.
 
 Scritto per la voce G4 del TODO. Uso: python3 sviluppo/tools/compact_correlate.py
+
+Limite noto: ~/.claude/logs/router-usage.jsonl NON e utilizzabile come seconda
+fonte, perche il suo campo `chat` vale sempre "default" (mai un "sid:<uuid>").
+Serve solo a stabilire dove andava il traffico in un dato momento, mai a chi
+appartenesse la singola richiesta.
 """
 import os
 import sys
