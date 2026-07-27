@@ -44,19 +44,25 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
     budget = safe_limit * 3 // 4
     summary = build_shrink_summary(msgs, budget)
 
-    # Normalizza system (list o str) in stringa
-    system_raw = data.get("system", "")
-    if isinstance(system_raw, list):
-        system_str = "\n\n".join(
-            json.dumps(item, ensure_ascii=False) if isinstance(item, dict) else str(item)
-            for item in system_raw
-        )
-    elif isinstance(system_raw, str):
-        system_str = system_raw
-    else:
-        system_str = ""
+    # Helper per costruire il system preservando liste e cache_control
+    def _build_system(system_raw, summary):
+        # system_raw può essere lista (formato Claude Code), stringa, o assente/None/altro
+        if isinstance(system_raw, list):
+            # Preserva i blocchi originali invariati (con cache_control etc.)
+            result = list(system_raw)  # shallow copy
+            if summary:
+                result.append({"type": "text", "text": summary})
+            return result
+        elif isinstance(system_raw, str):
+            # Comportamento invariato per stringhe
+            if system_raw:
+                return (system_raw + "\n\n" + summary) if summary else system_raw
+            return summary if summary else None
+        else:
+            # Assente, None o altro tipo
+            return summary if summary else None
 
-    system_content = (system_str + "\n\n" + summary) if system_str else summary
+    system_content = _build_system(data.get("system"), summary)
 
     new = dict(data)
     new["messages"] = tail_msgs
@@ -79,8 +85,9 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
 
     new2 = dict(data)
     new2["messages"] = tail2
-    if system_str:
-        new2["system"] = system_str
+    system_original = _build_system(data.get("system"), "")
+    if system_original:
+        new2["system"] = system_original
     new2.pop("thinking", None)
 
     new2_bytes = json.dumps(new2).encode()
