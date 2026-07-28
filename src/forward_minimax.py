@@ -19,7 +19,7 @@ from router_utils import (
     MINIMAX_LIMITER, _MINIMAX_SEM, RateLimitExhausted,
     _classify_429, _analyze_body_structure, SENT_ANALYSIS,
     _DEBUG_LAST_SENT, _minimax_alert, log,
-    _request_orig_model,
+    _request_orig_model, upstream_timeout_for,
 )
 from router_mode import _resolve_chat_fingerprint
 from router_auth import get_minimax_key
@@ -176,6 +176,12 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
                     timeout=act_timeout_sec,
                 )
             else:
+                # Passthrough: se la richiesta non e' streaming il sock_read=120
+                # della sessione taglierebbe la generazione a meta' (502). Vedi
+                # upstream_timeout_for.
+                _to = upstream_timeout_for(new_body)
+                if _to is not None:
+                    req_kwargs["timeout"] = _to
                 up = await session.request(
                     request.method, url, **req_kwargs
                 )
@@ -250,9 +256,13 @@ async def _forward_minimax_generative(request, body: bytes, session,
         except RateLimitExhausted as e:
             return _synthetic_429(f"MiniMax generative rate limited (pacing): {e}")
         async with _MINIMAX_SEM:
-            up = await session.request(
-                request.method, url, data=body, headers=headers, allow_redirects=False
-            )
+            # Immagini/video/musica sono non-streaming e per natura lenti: qui il
+            # tetto di 120s della sessione e' ancora meno appropriato che altrove.
+            _kw = dict(data=body, headers=headers, allow_redirects=False)
+            _to = upstream_timeout_for(body)
+            if _to is not None:
+                _kw["timeout"] = _to
+            up = await session.request(request.method, url, **_kw)
         if up.status != 429:
             MINIMAX_LIMITER.record(entry, est_tokens, success=True)
             MINIMAX_LIMITER.on_success()

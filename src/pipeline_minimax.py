@@ -10,7 +10,7 @@ from router_constants import (
     MINIMAX_MODEL, MINIMAX_ORCHESTRATOR_MODEL, MINIMAX_EXECUTORS,
     MINIMAX_CONTEXT_BYTE_LIMIT,
 )
-from router_utils import log
+from router_utils import log, log_router_usage, _request_orig_model
 import debug_catalog
 
 # Dead code rimosso 2026-07-22 (audit): 5 funzioni THINK/ACT legacy MiniMax
@@ -99,6 +99,13 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
         log(f"minimax passthrough EXC: {e} fp={chat_fp}")
         debug_catalog.record_event(severity="error", category="minimax",
                                     kind="forward_exception", chat_fp=chat_fp, snippet=str(e))
+        # Il 502 finiva SOLO in ai-router.log: nel sidecar non compariva (59 casi
+        # fra il 26 e il 28/07, zero tracce). Un fallimento invisibile alla
+        # telemetria non e' misurabile, quindi non e' correggibile con prove.
+        log_router_usage(chat_id=chat_fp, orig=_request_orig_model.get(chat_fp, "?"),
+                         final=model_override or MINIMAX_MODEL, usage={},
+                         mode="minimax", client=request.headers.get("user-agent", "?"),
+                         status=502, path=request.path)
         return web.json_response({"type": "error", "error": {"type": "router_error",
                                   "message": str(e)}}, status=502)
     log(f"minimax passthrough {up.status} {request.path} fp={chat_fp}")

@@ -67,6 +67,16 @@ THINK_MAX_TOKENS = int(os.environ.get("AIROUTER_THINK_MAX_TOKENS", "512"))
 # (il modello scelto dalla config globale del client). La gerarchia THINK/exec/escalation
 # vive SOLO nella config globale ~/.claude/CLAUDE.md, mai nel router (tubo trasparente).
 THINK_TIMEOUT_SEC = float(os.environ.get("AIROUTER_THINK_TIMEOUT_SEC", "12"))
+# Timeout di lettura per le richieste NON-streaming (2026-07-28).
+# La sessione condivisa usa sock_read=120: su una risposta non-streaming l'upstream
+# non manda un solo byte finche' la generazione non e' conclusa, quindi quei 120s
+# smettono di proteggere dagli stall e diventano un tetto sulla DURATA della
+# generazione -> 502 "Timeout on reading data from socket" (59 casi nei log fra il
+# 26 e il 28/07). Misura di riferimento: una generazione MiniMax da 32.000 max_tokens
+# impiega 144s, quindi 600s lascia ~4x di margine. Lo streaming NON usa questo valore:
+# li' i chunk arrivano di continuo e sock_read=120 fa il suo mestiere.
+NON_STREAM_SOCK_READ_SEC = float(
+    os.environ.get("AIROUTER_NON_STREAM_SOCK_READ_SEC", "600"))
 TRIM_TARGET_BYTES = MINIMAX_CONTEXT_BYTE_LIMIT // 2
 TRIM_MIN_MESSAGES = 4
 SUMMARY_BUDGET = MINIMAX_CONTEXT_BYTE_LIMIT * 3 // 4

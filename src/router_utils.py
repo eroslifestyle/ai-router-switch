@@ -10,13 +10,39 @@ import traceback
 from collections import deque
 from pathlib import Path
 
-from aiohttp import web
+from aiohttp import web, ClientTimeout
 
 from router_constants import (
     MINIMAX_RATE_LIMITS, MINIMAX_RATE_LIMITS_DEFAULT, MINIMAX_SAFETY,
     MINIMAX_BACKOFF_STEPS, MINIMAX_ALERTS_LOG,
-    MINIMAX_RETRY_CAP_SEC, USAGE_SIDECAR,
+    MINIMAX_RETRY_CAP_SEC, USAGE_SIDECAR, NON_STREAM_SOCK_READ_SEC,
 )
+
+
+def upstream_timeout_for(body):
+    """Timeout di lettura da applicare alla singola richiesta upstream.
+
+    Su una risposta NON-streaming l'upstream non invia alcun byte finche' la
+    generazione non e' conclusa: il `sock_read` della sessione smette di essere
+    una protezione contro gli stall e diventa un tetto sulla durata della
+    generazione, che si manifesta al client come 502 "Timeout on reading data
+    from socket". Lo streaming non ha il problema — i chunk arrivano di continuo
+    — e li' il valore stretto della sessione serve davvero a rilevare gli stall.
+
+    Ritorna None quando va ereditato il timeout di sessione.
+    """
+    if body is None:
+        return None
+    try:
+        data = json.loads(body)
+    except Exception:
+        return None  # body non JSON (es. multipart): prudenza, nessun override
+    if not isinstance(data, dict):
+        return None
+    if data.get("stream") is True:
+        return None
+    return ClientTimeout(connect=30, sock_connect=15,
+                         sock_read=NON_STREAM_SOCK_READ_SEC)
 
 # ── Analysis & tracking ──────────────────────────────────────────────────────────
 SENT_ANALYSIS: deque = deque(maxlen=50)

@@ -13,6 +13,7 @@ from router_constants import (
 )
 from router_utils import (
     _analyze_body_structure, SENT_ANALYSIS, _DEBUG_LAST_SENT, log,
+    upstream_timeout_for,
 )
 from router_auth import _load_oauth_token, _reload_oauth_token
 from router_debug import dl
@@ -245,10 +246,12 @@ async def forward_anthropic(request, body, session):
         _emit_deep_debug("forward_anthropic", request, safe_body)
 
     # Context window retry: 400 context -> strip images and retry
+    _kw = dict(data=safe_body, headers=headers, allow_redirects=False)
+    _to = upstream_timeout_for(safe_body)
+    if _to is not None:
+        _kw["timeout"] = _to  # non-streaming: vedi upstream_timeout_for
     try:
-        up = await session.request(
-            request.method, url, data=safe_body, headers=headers, allow_redirects=False
-        )
+        up = await session.request(request.method, url, **_kw)
         if up.status == 400:
             err_headers = dict(up.headers)
             try:
@@ -266,10 +269,12 @@ async def forward_anthropic(request, body, session):
                 stripped = strip_images_body(safe_body)
                 if stripped != safe_body:
                     log(f"[forward_anthropic] ctx-exceed 400 -> retry with images stripped")
-                    up = await session.request(
-                        request.method, url, data=stripped, headers=headers,
-                        allow_redirects=False
-                    )
+                    _kw_s = dict(data=stripped, headers=headers,
+                                 allow_redirects=False)
+                    _to_s = upstream_timeout_for(stripped)
+                    if _to_s is not None:
+                        _kw_s["timeout"] = _to_s
+                    up = await session.request(request.method, url, **_kw_s)
                     if up.status < 400:
                         return up
                     dl.capture(kind="forward_anthropic_ctx_exceed_retry_fail",
@@ -344,6 +349,8 @@ async def forward_anthropic_direct(request, body, session):
     if _DEEP_DEBUG:
         _emit_deep_debug("forward_anthropic_direct", request, safe_body)
 
-    return await session.request(
-        request.method, url, data=safe_body, headers=headers, allow_redirects=False
-    )
+    _kw_d = dict(data=safe_body, headers=headers, allow_redirects=False)
+    _to_d = upstream_timeout_for(safe_body)
+    if _to_d is not None:
+        _kw_d["timeout"] = _to_d  # non-streaming: vedi upstream_timeout_for
+    return await session.request(request.method, url, **_kw_d)

@@ -50,6 +50,19 @@ def _log_usage(**kw):
     except Exception:
         pass
 
+
+def _non_stream_timeout():
+    """Timeout di lettura per le richieste NON-streaming.
+
+    Import LAZY per lo stesso ciclo descritto in `_log_usage`. Qui NON si
+    intercetta l'ImportError: a runtime `router_constants` e' gia' caricato, e
+    un except silenzioso reintrodurrebbe la classe di regressione del 2026-07-25
+    (fallback muto invece di un errore visibile). Il valore vive in un posto solo.
+    """
+    from router_constants import NON_STREAM_SOCK_READ_SEC
+    return ClientTimeout(total=None, sock_connect=15,
+                         sock_read=NON_STREAM_SOCK_READ_SEC)
+
 # Z.ai Anthropic-compatible endpoint
 # GLM_API_BASE (env da glm.env) ha priorità; fallback su hardcoded
 GLM_UPSTREAM = os.environ.get(
@@ -725,7 +738,10 @@ async def forward_glm(request, body: bytes, session, model: str,
             if passthrough:
                 timeout = ClientTimeout(total=None, sock_connect=15, sock_read=120)
             else:
-                timeout = ClientTimeout(total=120)
+                # 2026-07-28: era total=120, il piu' stretto dei tre provider. Una
+                # generazione non-streaming lunga non manda byte fino alla fine e
+                # veniva troncata a 120s (stesso difetto dei 502 su MiniMax).
+                timeout = _non_stream_timeout()
             async with _GLM_SEM:
                 # FIX: NIENTE `async with session.request(...) as resp` — se la
                 # funzione ritorna `resp` da dentro un async with, __aexit__
