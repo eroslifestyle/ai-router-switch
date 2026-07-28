@@ -5,6 +5,12 @@ con un passthrough il primo byte arriva molto prima della fine della generazione
 """
 import asyncio, importlib.util, os, pathlib, sys, time
 
+import pytest
+
+# pytest-asyncio gira in modalita strict: senza questo marker il test async del
+# modulo verrebbe raccolto ma non eseguito.
+pytestmark = pytest.mark.asyncio
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 SRC = REPO / "src"
 sys.path.insert(0, str(SRC))

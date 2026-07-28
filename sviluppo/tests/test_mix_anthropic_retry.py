@@ -36,7 +36,12 @@ def make_forward(statuses, headers_seq=None):
 
 
 def run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # `asyncio.run` e non `get_event_loop()`: quest'ultimo esplode con
+    # "There is no current event loop" appena un test asyncio gira nella stessa
+    # sessione pytest (il plugin azzera il loop globale in teardown), ed e
+    # rimosso da Python 3.14. Ogni chiamata qui e indipendente: nessuno stato
+    # condiviso fra un loop e il successivo.
+    return asyncio.run(coro)
 
 
 def test_parse_retry_after():

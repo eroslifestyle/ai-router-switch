@@ -19,6 +19,13 @@ import pathlib
 import sys
 import tempfile
 
+import pytest
+
+# pytest-asyncio gira in modalita strict: senza questo marker i test async del
+# modulo verrebbero raccolti ma non eseguiti. Il marker va dichiarato qui, non
+# aggiunto da un hook di collection: a quel punto il plugin ha gia deciso.
+pytestmark = pytest.mark.asyncio
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 SRC = REPO / "src"
 sys.path.insert(0, str(SRC))
