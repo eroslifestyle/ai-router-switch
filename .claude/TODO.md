@@ -1,10 +1,15 @@
 # ai-router-switch — TODO unico
 
-**Aggiornato:** 2026-07-28 07:55 · **HEAD di riferimento:** `a935a00` · **Stato:** 4 voci aperte. Il 27–28/07 campagna di 6 fix sul context rate (F1, F8–F11): vedi `.claude/checkpoints/CP_20260728_0736.md`.
+**Aggiornato:** 2026-07-28 16:52 · **HEAD di riferimento:** `0d2c834` · **Stato:** 5 voci aperte. Il 27–28/07 campagna di 6 fix sul context rate (F1, F8–F11): vedi `.claude/checkpoints/CP_20260728_0736.md`.
 
 Questo file unifica il vecchio `TODO.md` (32 sezioni, 5 blocchi «Attivo» sparsi), `PROJECT-TOD.md` (fermo al 2026-07-18, backlog AQ nel frattempo chiuso) e le voci residue dei 97 checkpoint di sessione. Contesto completo: `.claude/checkpoints/CP_20260727_1600.md`. Il dettaglio verboso dei completati resta recuperabile con `git show fc3fbe8:.claude/TODO.md`.
 
 ## Aperti
+
+- [ ] **4 test non vengono mai eseguiti, e la suite dice comunque «106 passed».** `ERROR ... fixture 'h' not found` su `sviluppo/tests/test_gate_e2e.py` (3 test) e `sviluppo/tests/test_mixgm_stream_ttfb.py` (1 test) — coprono il gate di contesto end-to-end e il TTFB di `mix-gm`, cioè proprio l'area della campagna context rate. Preesistenti, non causati dai fix.
+  **Diagnosi già fatta (28/07), non rifarla:** nel repo **non esiste alcun `conftest.py`** (`find . -name conftest.py`); entrambi i file definiscono una classe `Harness` con `start()`/`stop()`, dichiarano i test come `async def test_x(h)` e in fondo hanno un runner che chiama `await h.start()`/`await h.stop()` (righe ~124 e ~192): **nascono come script standalone** e pytest li raccoglie solo per il prefisso `test_`. `pytest-asyncio` è installato.
+  **Prossimo step:** scegliere **una** strada e dichiararla — (a) `conftest.py` o `@pytest_asyncio.fixture` che costruisce l'`Harness` con teardown garantito (preferibile: i test entrano davvero in suite); (b) rinominare i 2 file fuori dal pattern `test_*` e documentarli come script manuali (onesto, ma non aumenta la copertura).
+  **Expected outcome:** `python3 -m pytest -q` → **110 passed, 0 errors** (a) oppure **106 passed, 0 errors** (b). Nota: `python3 -m pytest -q` dalla root raccoglie `sviluppo/tests` + `./tests` (106); `python3 -m pytest sviluppo/tests/ -q` ne raccoglie 58.
 
 - [x] **Misurare l'effetto reale dei fix sul context rate (F1, F8–F11). CHIUSA il 2026-07-28: la baseline era un artefatto di misura, non una perdita di token.**
   **Misura richiesta:** 4.779 richieste ≥20k senza cache / 187.348.464 token sui 7 giorni, contro la baseline di 5.215 / 201.283.024. Calo grezzo −8,4%, ma **il confronto non ha significato**: 5 dei 7 giorni sono ancora traffico misurato con la telemetria rotta.
