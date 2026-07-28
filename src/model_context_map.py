@@ -9,11 +9,21 @@ MODEL_CONTEXT_MAP = {
     "sonnet-4-7": 1_000_000,  "claude-sonnet-4-7": 1_000_000,
     "sonnet-4-8": 1_000_000,  "claude-sonnet-4-8": 1_000_000,
     "haiku": 200_000,          "claude-haiku-4-5": 200_000,
-    # Anthropic Gen 5
-    "claude-opus-5": 1_000_000,      # VERIFICATO 2026-07-27 sul traffico reale, richiesta da 449783 token con status 200
-    "claude-sonnet-5": 1_000_000,    # NON verificato, valore che preserva il comportamento precedente del gate (usava opus-4-8 a 1M per tutto il provider anthropic). Da confermare
-    "claude-fable-5": 1_000_000,     # NON verificato, come sopra
-    "claude-haiku-4-5-20251001": 200_000,  # VERIFICATO dall'errore upstream 400 "prompt is too long: 208904 tokens > 200000 maximum"
+    # Anthropic Gen 5 + legacy 4.6/4.7 — valori dalla DOC UFFICIALE, verificati
+    # 2026-07-27 su platform.claude.com/docs/en/about-claude/models/overview
+    # ("Latest models comparison") e .../build-with-claude/context-windows.
+    # Per ogni modello con finestra da 1M, 1M e' il DEFAULT: nessun beta header.
+    "claude-opus-5": 1_000_000,      # doc ufficiale; coerente col traffico reale (449.783 token con status 200)
+    "claude-sonnet-5": 1_000_000,    # doc ufficiale
+    "claude-fable-5": 1_000_000,     # doc ufficiale (tokenizer di Opus 4.7: ~30% token in piu' a parita' di testo)
+    "claude-mythos-5": 1_000_000,    # doc ufficiale (stesse specifiche di Fable 5)
+    "claude-mythos-preview": 1_000_000,   # doc ufficiale
+    "claude-haiku-4-5-20251001": 200_000,  # doc ufficiale; confermato dall'errore upstream 400 "prompt is too long: 208904 tokens > 200000 maximum"
+    # Legacy che MANCAVANO: senza queste voci cadevano sul default 200k pur
+    # avendo 1M, e il gate le avrebbe riscritte a 160k senza motivo.
+    "claude-opus-4-7": 1_000_000,    # doc ufficiale (tabella Legacy models)
+    "claude-opus-4-6": 1_000_000,    # doc ufficiale (tabella Legacy models)
+    "claude-opus-4-1": 200_000,      # doc ufficiale; deprecato, ritiro 2026-08-05
     # MiniMax (SPEC: M2.5)
     "MiniMax-M2": 200_000,    "MiniMax-M2.5": 200_000,
     "MiniMax-M2.7": 200_000,  "MiniMax-M3": 200_000,
