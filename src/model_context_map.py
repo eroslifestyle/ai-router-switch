@@ -4,7 +4,12 @@ MODEL_CONTEXT_MAP = {
     # Anthropic (SPEC: opus-4-8, sonnet-4-6/4-7/4-8, haiku-4-5)
     "opus": 1_000_000,          "claude-opus-4-5": 200_000,
     "claude-opus-4-8": 1_000_000,
-    "sonnet": 200_000,         "claude-sonnet-4-5": 200_000,
+    "sonnet": 200_000,
+    # VERIFICATO 2026-07-28 dalla Models API (/v1/models, max_input_tokens):
+    # l'id di catalogo claude-sonnet-4-5-20250929 riporta 1.000.000, non 200.000.
+    # Il vecchio valore veniva dalla sezione SPEC non verificata e sottostimava
+    # la finestra di 5 volte. Rilevato da sviluppo/tools/check_model_context.py.
+    "claude-sonnet-4-5": 1_000_000,
     "sonnet-4-6": 1_000_000,  "claude-sonnet-4-6": 1_000_000,
     "sonnet-4-7": 1_000_000,  "claude-sonnet-4-7": 1_000_000,
     "sonnet-4-8": 1_000_000,  "claude-sonnet-4-8": 1_000_000,
