@@ -24,16 +24,24 @@ MODEL_CONTEXT_MAP = {
     "claude-opus-4-7": 1_000_000,    # doc ufficiale (tabella Legacy models)
     "claude-opus-4-6": 1_000_000,    # doc ufficiale (tabella Legacy models)
     "claude-opus-4-1": 200_000,      # doc ufficiale; deprecato, ritiro 2026-08-05
-    # MiniMax (SPEC: M2.5)
-    "MiniMax-M2": 200_000,    "MiniMax-M2.5": 200_000,
-    "MiniMax-M2.7": 200_000,  "MiniMax-M3": 200_000,
-    "MiniMax-M3.5": 200_000,  "MiniMax-Haiku": 200_000,
-    # GLM (SPEC: glm-4.6V, glm-5V-Turbo, glm-5.2)
-    "glm-4.6v": 131_000,      "glm-4.7": 128_000,
-    "glm-4v": 131_000,       "glm-4": 128_000,
-    "glm-5-turbo": 200_000,
-    "glm-5.2": 1_000_000,
-    "glm-5V-Turbo": 200_000,
+    # MiniMax — doc ufficiale platform.minimax.io/docs/guides/text-generation
+    # (verificata 2026-07-27). ATTENZIONE: M3 ha 1M, non 200k: il valore
+    # precedente lo sottostimava di 5 volte e il gate lo comprimeva a 160k,
+    # buttando via contesto utile in modalita' minimax e mix-*m.
+    "MiniMax-M3": 1_000_000,   # doc ufficiale: 1.000.000 (max output 512k)
+    "MiniMax-M2.7": 204_800,   # doc ufficiale: 204.800
+    "MiniMax-M2.5": 204_800,   # doc ufficiale: 204.800
+    "MiniMax-M2": 204_800,     # doc ufficiale: 204.800
+    "MiniMax-M3.5": 204_800,   # NON documentato (modello non ancora pubblico): valore prudente
+    "MiniMax-Haiku": 204_800,  # NON documentato: valore prudente
+    # GLM — doc ufficiale docs.z.ai/guides/llm/<modello> (verificata 2026-07-27)
+    "glm-5.2": 1_000_000,     # doc ufficiale: 1M di default, nessuna variante [1m] separata (max output 128k)
+    "glm-5-turbo": 200_000,   # doc ufficiale: 200K (max output 128k)
+    "glm-4.7": 200_000,       # doc ufficiale: 200K — prima era 128_000, sottostima del 36%
+    "glm-4.6v": 131_000,      # NON verificato sulla doc: valore storico
+    "glm-4v": 131_000,        # NON verificato sulla doc: valore storico
+    "glm-4": 128_000,         # modello vecchio, valore storico
+    "glm-5V-Turbo": 200_000,  # allineato a glm-5-turbo
 }
 
 BUFFER_PERCENT = 20  # 20% libero per output

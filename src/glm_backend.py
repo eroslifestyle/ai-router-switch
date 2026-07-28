@@ -88,15 +88,26 @@ GLM_MODEL_FOR_TIER = {
 GLM_THINK_VERIFY_MODEL = "glm-5.2"
 GLM_THINK_TIMEOUT_SEC = 60
 
-# Context limit sicuri per ogni modello (input tokens, con headroom)
-# Source: piano verificato con contesto reale
-_GLM_CONTEXT_LIMITS = {
-    "glm-5.2": 900_000,     # 1M ctx, 100K headroom
-    "glm-5-turbo": 180_000,  # 200K ctx, 20K headroom
-    "glm-4.7": 115_000,      # 128K ctx, 13K headroom
-    "glm-4.6V": 120_000,    # 131K ctx, ~11K headroom
-    "glm-5V-Turbo": 180_000, # ~200K ctx, ~20K headroom
-}
+# Context limit sicuri per ogni modello (input tokens, con headroom).
+#
+# FONTE UNICA (2026-07-27): derivati da model_context_map, che ora contiene i
+# valori della doc ufficiale docs.z.ai. Prima questa era una SECONDA tabella
+# scritta a mano e divergente: diceva glm-4.7 = 115_000 mentre model_context_map
+# diceva 128_000, e la doc ufficiale dice 200_000. Due tabelle per la stessa
+# grandezza sono due verita' che divergono: ora ce n'e' una sola, e l'headroom
+# e' l'unico BUFFER_PERCENT del sistema.
+try:
+    from model_context_map import get_safe_input_limit as _safe_limit
+
+    _GLM_CONTEXT_LIMITS = {
+        m: _safe_limit(m)
+        for m in ("glm-5.2", "glm-5-turbo", "glm-4.7", "glm-4.6V", "glm-5V-Turbo")
+    }
+except Exception:  # pragma: no cover - fail-safe: il backend non deve morire per questo
+    _GLM_CONTEXT_LIMITS = {
+        "glm-5.2": 800_000, "glm-5-turbo": 160_000, "glm-4.7": 160_000,
+        "glm-4.6V": 104_800, "glm-5V-Turbo": 160_000,
+    }
 
 KEY_FILE = Path.home() / ".claude" / "secrets" / "secrets.sh"
 ALERT_LOG = Path.home() / ".claude" / "logs" / "glm-peak-alerts.log"

@@ -60,9 +60,11 @@ def test_g2_limit_per_provider():
         assert r1["limit"] == 1_000_000, f"Limite Claude {r1['limit']} != 1_000_000"
         assert r1["action"] == "ok", f"Action Claude {r1['action']} != 'ok'"
         
-        # Provider con limite 200k
+        # Provider con limite ~200k. Valore ufficiale MiniMax: 204.800, non 200.000
+        # (doc platform.minimax.io, verificata 2026-07-27). Il test asseriva il
+        # vecchio valore approssimato della mappa.
         r2 = cm.pre_check("fp-a", "mix-am", len(body), model="MiniMax-M2.7", body=body)
-        assert r2["limit"] == 200_000, f"Limite MiniMax {r2['limit']} != 200_000"
+        assert r2["limit"] == 204_800, f"Limite MiniMax {r2['limit']} != 204_800"
         assert r2["action"] == "error", f"Action MiniMax {r2['action']} != 'error'"
         
         # Retrocompatibilita senza parametri nuovi
