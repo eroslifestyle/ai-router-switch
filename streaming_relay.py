@@ -8,6 +8,7 @@ import re as re_module
 
 from aiohttp import web
 from router_debug import dl
+from router_utils import collect_tools_stats
 import tool_isolation
 
 
@@ -369,6 +370,10 @@ class StreamingRelay:
                     client=self.request.headers.get("User-Agent", "?")[:40] or "?",
                     status=upstream.status,
                     path=self.request.path,
+                    # Peso del blocco `tools` della richiesta: None quando la
+                    # telemetria e' spenta (default), cosi' l'entry del sidecar
+                    # resta identica a prima.
+                    tools=collect_tools_stats(self.body),
                 )
             except Exception:
                 pass

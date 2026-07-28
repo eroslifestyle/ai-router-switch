@@ -270,8 +270,86 @@ def log_exc(msg: str):
     log(f"{msg}\n{traceback.format_exc()}")
 
 
+# Telemetria del blocco `tools`. Default SPENTO: il riavvio che introduce questa
+# funzione non deve cambiare nulla di osservabile, ne' nel comportamento ne' nel
+# formato del sidecar. Si accende solo per una campagna di misura.
+TOOLS_TELEMETRY_ENABLED: bool = os.environ.get("AIROUTER_TOOLS_TELEMETRY", "") == "1"
+
+# I tool esposti da un server MCP si riconoscono dal nome: mcp__<server>__<tool>.
+MCP_TOOL_PREFIX = "mcp__"
+MCP_NAME_SEPARATOR = "__"
+MCP_SERVER_UNKNOWN = "sconosciuto"
+
+
+def _serialized_size(value) -> int:
+    """Byte della serializzazione JSON compatta, non caratteri.
+
+    `len()` su una stringa conta caratteri: coincide coi byte solo finche'
+    l'output resta ASCII. Encodare esplicitamente toglie di mezzo l'assunzione.
+    """
+    return len(json.dumps(value, separators=(",", ":")).encode("utf-8"))
+
+
+def collect_tools_stats(body: bytes) -> dict | None:
+    """Misura quanto pesa il blocco `tools` di una richiesta.
+
+    Perche' esiste: il peso dei tool non e' mai stato misurato da nessuna parte
+    (il sidecar non lo registra, router_debug tiene solo un booleano
+    `has_tools`), quindi la stima esterna di 315M token in 30 giorni attribuita
+    ai server MCP non e' verificabile sul traffico reale. Il router e' l'unico
+    punto che vede il blocco `tools` di ogni richiesta.
+
+    Ritorna None quando non c'e' niente da misurare: flag spento, body vuoto,
+    oppure richiesta senza tool. L'assenza di `tools` e' il caso NORMALE (health
+    check, chiamate interne, m3-web) e non va loggata, altrimenti a flag acceso
+    si riempie il log di produzione di righe innocue.
+    """
+    if not TOOLS_TELEMETRY_ENABLED:
+        return None  # a flag spento il costo dev'essere zero: nessun parsing
+    if not body:
+        return None
+
+    try:
+        data = json.loads(body.decode("utf-8"))
+    except (ValueError, TypeError, UnicodeDecodeError) as e:
+        log(f"tools telemetry: parsing del body fallito - {type(e).__name__}: {e}")
+        return None
+
+    if not isinstance(data, dict):
+        return None
+    tools = data.get("tools")
+    if not isinstance(tools, list) or not tools:
+        return None
+
+    mcp_tools = []
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        name = tool.get("name")
+        # Il nome puo' mancare o non essere una stringa in body malformati:
+        # startswith() su None solleverebbe, e questa funzione non deve mai farlo.
+        if isinstance(name, str) and name.startswith(MCP_TOOL_PREFIX):
+            mcp_tools.append(tool)
+
+    servers_bytes: dict[str, int] = {}
+    for tool in mcp_tools:
+        resto = tool["name"][len(MCP_TOOL_PREFIX):]
+        separatore = resto.find(MCP_NAME_SEPARATOR)
+        server = resto[:separatore] if separatore != -1 else MCP_SERVER_UNKNOWN
+        servers_bytes[server] = servers_bytes.get(server, 0) + _serialized_size(tool)
+
+    return {
+        "tools_count": len(tools),
+        "tools_bytes": _serialized_size(tools),
+        "tools_mcp_count": len(mcp_tools),
+        "tools_mcp_bytes": _serialized_size(mcp_tools),
+        "tools_mcp_servers": servers_bytes,
+    }
+
+
 def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
-                     mode: str, client: str = "?", status: int = 200, path: str = ""):
+                     mode: str, client: str = "?", status: int = 200, path: str = "",
+                     tools: dict | None = None):
     if not final or final == "?":
         final = "router-internal"
     try:
@@ -284,6 +362,11 @@ def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
             "cache_read": int(usage.get("cache_read_input_tokens", 0) or 0),
             "cache_creation": int(usage.get("cache_creation_input_tokens", 0) or 0),
         }
+        # Campi aggiunti SOLO quando la telemetria dei tool e' accesa e ha
+        # prodotto qualcosa: a flag spento l'entry resta identica a prima, e i
+        # consumatori esistenti del sidecar non vedono nulla di nuovo.
+        if tools:
+            entry.update(tools)
         with open(USAGE_SIDECAR, "a") as f:
             f.write(json.dumps(entry) + "\n")
     except Exception:
