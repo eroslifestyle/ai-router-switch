@@ -2,7 +2,7 @@
 
 Stai riprendendo **ai-router-switch**, il proxy LLM su `:8787` (6 modalità: `anthropic`, `minimax`, `glm`, `mix-am`, `mix-ag`, `mix-gm`). Sei l'orchestratore: pianifichi e verifichi, deleghi l'esecuzione all'ACT della catena attiva. **NON scrivi codice di progetto direttamente.**
 
-**INIZIA COSÌ:** leggi `.claude/TODO.md` (voce 1 chiusa il 28/07, contiene l'esito della misura), poi `git status` e `git log --oneline -3` per verificare il drift rispetto a **HEAD `29ba9db`**, poi procedi col prossimo passo.
+**INIZIA COSÌ:** leggi `.claude/checkpoints/CP_20260728_1652.md` e `.claude/TODO.md` (voce 1 chiusa il 28/07 con l'esito della misura; la voce in cima è il prossimo passo), poi `git status` e `git log --oneline -3` per verificare il drift rispetto a **HEAD `847d3b4`**, poi procedi.
 
 ## Obiettivo
 
@@ -71,13 +71,13 @@ python3 -m pytest sviluppo/tests/ -q    # solo sviluppo/tests → oggi 58 passed
 ## Risorse
 
 - **TODO:** `.claude/TODO.md` — voce 1 chiusa con l'esito completo della misura; 4 voci aperte.
-- **Checkpoint:** `.claude/checkpoints/CP_20260728_0736.md` (la sua voce «Misurare l'effetto reale dei fix» è **superata** dall'esito nel TODO).
+- **Checkpoint:** `.claude/checkpoints/CP_20260728_1652.md` (corrente). Il precedente `CP_20260728_0736.md` ha la voce «Misurare l'effetto reale dei fix» ormai **superata** dall'esito nel TODO.
 - **Vault:** `/home/mrxxx/Obsidian/Memoria/progetti/ai-router-switch/context-rate-revisione-completa-20260728.md` — sezione finale «Esito della misura sul traffico reale».
 - **Sidecar:** `/home/mrxxx/.claude/logs/router-usage.jsonl`. Campi: `ts, status, input_tokens, output_tokens, cache_read, cache_creation, mode, orig, final, client, chat`. **Il modello sta in `final`/`orig`, NON in `model`.**
 - **Log router:** `/home/mrxxx/.claude/logs/ai-router.log`, timestamp nel formato `[2026-07-28T07:48:03]` (parentesi quadra iniziale: i regex ancorati a `^[0-9]` falliscono). Marker utili: `ctx: proactive rewrite`, `ctx: WARN`, `ctx: ERROR`, `ctx: backend-bottleneck shrink`, `FOREIGN-TOOLUSE`.
 - **File chiave:** `src/context_rewrite.py`, `src/model_context_map.py`, `src/token_counter.py`, `src/context_manager.py`, `src/ai-router-proxy.py` (gate ~riga 379, heartbeat riga 146), `src/glm_backend.py`. Nota: `streaming_relay.py` e `fail_tracker.py` stanno in **root**, non in `src/`.
 - **Regole di delega:** `/home/mrxxx/.claude/docs/delega-verifica-contratti.md`.
-- **HEAD:** `29ba9db` · branch `main` · modalità attiva `mix-am`.
+- **HEAD:** `847d3b4` · branch `main` · modalità attiva `mix-am`.
 
 ## Fatto quando
 
