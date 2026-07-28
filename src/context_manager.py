@@ -79,7 +79,12 @@ class ContextManager:
             if body is not None:
                 try:
                     from token_counter import estimate_tokens_body
-                    est = estimate_tokens_body(body)
+                    # Il divisore byte/token dipende dal tokenizer del modello:
+                    # 2.5 per Anthropic >= Opus 4.7, 3.5 per i Claude precedenti,
+                    # 3.8 MiniMax, 4.0 GLM (misurati 2026-07-27). Senza il modello
+                    # la stima cadrebbe sul legacy 4.0, che sottostima del 36% i
+                    # modelli con il tokenizer nuovo.
+                    est = estimate_tokens_body(body, limit_model)
                 except ImportError:
                     est = max(1, body_bytes // 4)
             else:

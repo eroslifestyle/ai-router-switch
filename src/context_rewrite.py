@@ -33,7 +33,7 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
     if not msgs:
         return (body, False)
 
-    token_est = estimate_tokens_body(body)
+    token_est = estimate_tokens_body(body, model)
     safe_limit = get_safe_input_limit(model)
 
     if token_est <= safe_limit:
@@ -71,13 +71,13 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
     new.pop("thinking", None)
 
     new_bytes = json.dumps(new).encode()
-    if estimate_tokens_body(new_bytes) <= safe_limit:
+    if estimate_tokens_body(new_bytes, model) <= safe_limit:
         return (new_bytes, True)
 
     # ATTEMPT 1b: degradazione progressiva - rimuove immagini vecchie e tronca tool_result
     new_1b = _degrade_images_and_tools(data, msgs, KEEP_RECENT_IMAGES, TOOL_RESULT_MAX_CHARS)
     new_1b_bytes = json.dumps(new_1b).encode()
-    if estimate_tokens_body(new_1b_bytes) <= safe_limit:
+    if estimate_tokens_body(new_1b_bytes, model) <= safe_limit:
         return (new_1b_bytes, True)
 
     # ATTEMPT 2: piu' aggressivo, solo ultimi 2 messaggi senza summary
@@ -91,7 +91,7 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
     new2.pop("thinking", None)
 
     new2_bytes = json.dumps(new2).encode()
-    if estimate_tokens_body(new2_bytes) <= safe_limit:
+    if estimate_tokens_body(new2_bytes, model) <= safe_limit:
         return (new2_bytes, True)
 
     # ATTEMPT 3: troncamento hard - un singolo messaggio piu' grande del limite non e' riducibile dai tentativi precedenti (tail, degradazione e ultimi-2 lo contengono comunque)
@@ -105,7 +105,7 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
         MIN_TEXT_CHARS = 500  # soglia sotto la quale un blocco non viene toccato
         try:
             result = json.loads(json.dumps(candidate))
-            if estimate_tokens_body(json.dumps(result).encode()) <= target_tokens:
+            if estimate_tokens_body(json.dumps(result).encode(), model) <= target_tokens:
                 return result
 
             def _get_text_size(msg):
@@ -173,7 +173,7 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
                                         sub["text"] = _truncate_text(sub.get("text", ""), MIN_TEXT_CHARS)
 
                 # Verifica se siamo rientrati nel limite
-                if estimate_tokens_body(json.dumps(result).encode()) <= target_tokens:
+                if estimate_tokens_body(json.dumps(result).encode(), model) <= target_tokens:
                     return result
 
             return result
@@ -182,7 +182,7 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
 
     new3 = _hard_truncate_messages(new2, safe_limit)
     new3_bytes = json.dumps(new3).encode()
-    if estimate_tokens_body(new3_bytes) <= safe_limit:
+    if estimate_tokens_body(new3_bytes, model) <= safe_limit:
         return (new3_bytes, True)
 
     # Fallback: ritorna il piu' piccolo fra tutti i candidati
