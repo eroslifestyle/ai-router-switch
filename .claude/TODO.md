@@ -44,5 +44,5 @@ Una riga per fase; il dettaglio sta nei commit e nel checkpoint consolidato.
 ## Note di manutenzione
 
 - `PROJECT-TOD.md` è superato da questo file: il suo backlog AQ risulta chiuso e la sezione «Done» duplica commit già consolidati qui.
-- `PROMPT_CONTINUA_20260726.md` è il prompt di ripresa della sessione del 26/07: superato dal checkpoint consolidato.
+- `.claude/PROMPT_CONTINUA_20260728.md` è il prompt di ripresa corrente (prossimo passo: i 4 `fixture 'h' not found`). I precedenti sono eliminati mano a mano: la storia resta in git.
 - I 97 checkpoint di sessione in `.claude/checkpoints/` sono sostituiti da `CP_20260727_1600.md`. La cartella è in `.gitignore:17`, quindi vive solo sul filesystem.
