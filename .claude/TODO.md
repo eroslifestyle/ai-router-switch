@@ -1,10 +1,17 @@
 # ai-router-switch — TODO unico
 
-**Aggiornato:** 2026-07-28 · **HEAD di riferimento:** `d61d549` · **Stato:** 4 voci aperte. Suite: **110 passed, 0 errors** dalla root (62 su `sviluppo/tests`). Il 27–28/07 campagna di 6 fix sul context rate (F1, F8–F11): vedi `.claude/checkpoints/CP_20260728_0736.md`.
+**Aggiornato:** 2026-07-28 · **HEAD di riferimento:** `7c84535` · **Stato:** 4 voci aperte. Suite: **120 passed, 0 errors** dalla root (72 su `sviluppo/tests`). Il 27–28/07 campagna di 6 fix sul context rate (F1, F8–F11): vedi `.claude/checkpoints/CP_20260728_0736.md`.
 
 Questo file unifica il vecchio `TODO.md` (32 sezioni, 5 blocchi «Attivo» sparsi), `PROJECT-TOD.md` (fermo al 2026-07-18, backlog AQ nel frattempo chiuso) e le voci residue dei 97 checkpoint di sessione. Contesto completo: `.claude/checkpoints/CP_20260727_1600.md`. Il dettaglio verboso dei completati resta recuperabile con `git show fc3fbe8:.claude/TODO.md`.
 
 ## Aperti
+
+- [x] **502 «Timeout on reading data from socket» sulle richieste non-streaming lunghe. CHIUSA il 2026-07-28, verificata sul live.**
+  **Causa:** la sessione condivisa ([`src/ai-router-proxy.py:891`](../src/ai-router-proxy.py#L891)) impone `sock_read=120` a ogni richiesta. Su una risposta **non-streaming** l'upstream non manda un byte finché la generazione non è conclusa: quei 120 s smettono di proteggere dagli stall e diventano **un tetto sulla durata della generazione**. 59 casi in `ai-router.log` fra il 26 e il 28/07, tutti su `minimax passthrough`, ~43 su traffico reale (fasce serali del 26–27, mattina del 28).
+  **Non era un difetto di MiniMax:** `forward_anthropic` non passava alcun timeout per-request e `glm_backend` usava `total=120`, il più stretto dei tre. Non si manifestava perché quei client usano sempre lo streaming. Il fix `4a256ce` del 19/07 aveva coperto solo il ramo `act_timeout_sec`, non il passthrough.
+  **Fix (`7c84535`):** `NON_STREAM_SOCK_READ_SEC` (env `AIROUTER_NON_STREAM_SOCK_READ_SEC`, default 600 s) + helper `upstream_timeout_for(body)`, applicato a MiniMax (passthrough + endpoint generativi), Anthropic (3 call site) e GLM (ramo non-passthrough). Lo streaming continua a ereditare i 120 s, dove servono davvero. In `glm_backend` l'import è **lazy e senza `except`**: un fallback muto lì ha già causato la regressione del 2026-07-25.
+  **Telemetria:** il 502 del passthrough finiva solo in `ai-router.log`, mai nel sidecar (59 contro 0) — ora registrato, altrimenti il fix non sarebbe verificabile sul traffico reale.
+  **Verifica live (dopo restart, procedura completa):** la richiesta non-streaming con `max_tokens=32000` che prima moriva a 120,4 s ora ritorna **HTTP 200 in 126,9 s**, `end_turn`, `thinking` + `text` completi. Suite **110 → 120**. Controprova eseguita: disattivando l'override il test e2e fallisce, quindi è discriminante.
 
 - [x] **4 test non venivano mai eseguiti, e la suite diceva comunque «106 passed». CHIUSA il 2026-07-28 con la strada (a): i test sono entrati in suite.**
   **Strada scelta e perché:** (a), non (b). I 4 test si sono rivelati **verdi già come script standalone**, quindi la (b) — rinominarli fuori dal pattern `test_*` — avrebbe congelato fuori dalla copertura proprio il gate di contesto e il TTFB di `mix-gm`, cioè l'area della campagna context rate appena chiusa. Farli entrare in suite costa tre file toccati e restituisce quattro test veri.
