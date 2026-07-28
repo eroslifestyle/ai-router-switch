@@ -376,9 +376,18 @@ async def handle(request):
                 ctx_check["action"],
             )
 
-        # Nuovo: calcola safe_limit e determina se serve rewrite
+        # Nuovo: calcola safe_limit e determina se serve rewrite.
+        # Lo spazio da riservare all'output e' il max_tokens che il client ha
+        # chiesto davvero, non una percentuale fissa: il 20% sprecava 72k di
+        # contesto sui modelli da 1M e non bastava (mancavano 88k) su glm-4.7
+        # e glm-5-turbo, che hanno 200k di finestra e 128k di output massimo.
         try:
-            _safe_limit = get_safe_input_limit(ctx_model)
+            _req_max_tokens = None
+            try:
+                _req_max_tokens = json.loads(body).get("max_tokens")
+            except Exception:
+                pass
+            _safe_limit = get_safe_input_limit(ctx_model, _req_max_tokens)
         except Exception:
             _safe_limit = 0
 

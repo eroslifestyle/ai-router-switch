@@ -34,7 +34,10 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
         return (body, False)
 
     token_est = estimate_tokens_body(body, model)
-    safe_limit = get_safe_input_limit(model)
+    # Riserva all'output esattamente il max_tokens chiesto dal client invece di
+    # una percentuale fissa: su un modello da 1M con max_tokens=32k questo
+    # restituisce ~168k token di contesto in piu' rispetto al buffer del 20%.
+    safe_limit = get_safe_input_limit(model, data.get("max_tokens"))
 
     if token_est <= safe_limit:
         return (body, False)

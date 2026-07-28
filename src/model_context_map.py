@@ -91,11 +91,42 @@ def get_context_limit(model: str) -> int:
         return best_match
     return 200_000
 
-def get_safe_input_limit(model: str) -> int:
-    """Restituisce il limite sicuro per input: context - buffer%."""
+MIN_OUTPUT_HEADROOM = 8_192  # spazio minimo garantito all'output
+
+
+def get_safe_input_limit(model: str, max_output: int | None = None) -> int:
+    """Limite sicuro per l'input: context window meno lo spazio per l'output.
+
+    Se `max_output` e' noto (il campo `max_tokens` della richiesta) si riserva
+    esattamente quello, con un minimo di MIN_OUTPUT_HEADROOM. Altrimenti si
+    ricade sul vecchio BUFFER_PERCENT fisso.
+
+    Perche' la percentuale fissa non va bene (misurato 2026-07-28 sulle doc
+    ufficiali): il 20%% e' scollegato dall'output reale del modello, e sbaglia
+    in entrambe le direzioni.
+      - glm-4.7 e glm-5-turbo: 200k di contesto, 128k di output massimo.
+        Il buffer da 40k ne copre meno di un terzo: input + output potevano
+        sforare la finestra.
+      - claude-haiku-4-5: 200k / 64k output → buffer 40k, mancano 24k.
+      - opus-5 / sonnet-5 / fable-5: 1M / 128k output → il buffer da 200k ne
+        spreca 72k di contesto utile a ogni richiesta.
+    Riservare il `max_tokens` effettivo risolve entrambi i lati: chi genera
+    poco tiene piu' contesto, chi genera molto e' davvero protetto.
+
+    Effetto collaterale voluto: la soglia di riscrittura si sposta piu' in
+    alto (per una richiesta tipica con max_tokens=32k su un modello da 1M si
+    passa dall'80%% al 96,8%%), e cosi' gli alert a 80%%/88%% tornano ad
+    arrivare PRIMA della compressione, come il loro commento dichiara.
+    """
     ctx = get_context_limit(model)
-    buf = int(ctx * BUFFER_PERCENT / 100)
-    return ctx - buf
+    if max_output is None:
+        buf = int(ctx * BUFFER_PERCENT / 100)
+    else:
+        try:
+            buf = max(int(max_output), MIN_OUTPUT_HEADROOM)
+        except (TypeError, ValueError):
+            buf = int(ctx * BUFFER_PERCENT / 100)
+    return max(1, ctx - buf)
 
 # Dimensione riassunto per modello
 SUMMARY_BUDGET_MAP = {
