@@ -1,14 +1,17 @@
 # ai-router-switch — TODO unico
 
-**Aggiornato:** 2026-07-28 07:40 · **HEAD di riferimento:** `49c26a3` · **Stato:** 5 voci aperte. Il 27–28/07 campagna di 6 fix sul context rate (F1, F8–F11): vedi `.claude/checkpoints/CP_20260728_0736.md`.
+**Aggiornato:** 2026-07-28 07:55 · **HEAD di riferimento:** `a935a00` · **Stato:** 4 voci aperte. Il 27–28/07 campagna di 6 fix sul context rate (F1, F8–F11): vedi `.claude/checkpoints/CP_20260728_0736.md`.
 
 Questo file unifica il vecchio `TODO.md` (32 sezioni, 5 blocchi «Attivo» sparsi), `PROJECT-TOD.md` (fermo al 2026-07-18, backlog AQ nel frattempo chiuso) e le voci residue dei 97 checkpoint di sessione. Contesto completo: `.claude/checkpoints/CP_20260727_1600.md`. Il dettaglio verboso dei completati resta recuperabile con `git show fc3fbe8:.claude/TODO.md`.
 
 ## Aperti
 
-- [ ] **Misurare l'effetto reale dei fix sul context rate (F1, F8–F11).** I 6 fix del 27–28/07 sono deployati e verificati in laboratorio, ma il beneficio sul traffico vero non è ancora misurato.
-  **Prossimo step:** fra qualche giorno rieseguire il conteggio delle richieste con input ≥20k token e cache a zero (erano **5.215 in 7 giorni**, pari a 201.283.024 token di input pagati pieni) e confrontare il cache hit rate col **46,7%** attuale.
-  **Expected outcome:** il conteggio scende in modo netto. Se non scende, F1 non era la causa principale della perdita di cache e va cercata l'altra.
+- [x] **Misurare l'effetto reale dei fix sul context rate (F1, F8–F11). CHIUSA il 2026-07-28: la baseline era un artefatto di misura, non una perdita di token.**
+  **Misura richiesta:** 4.779 richieste ≥20k senza cache / 187.348.464 token sui 7 giorni, contro la baseline di 5.215 / 201.283.024. Calo grezzo −8,4%, ma **il confronto non ha significato**: 5 dei 7 giorni sono ancora traffico misurato con la telemetria rotta.
+  **Root cause della baseline:** `9fdde3f` (26/07 **10:10**) — «decomprimi il buffer prima di estrarre usage e cache tokens». Con `auto_decompress=False` il relay leggeva byte gzip come utf-8, non trovava mai `message_start`, quindi loggava `cache_read`/`cache_creation` **sempre a 0** e stimava `input_tokens` con `chars//4`. Il commit lo dichiara: «solo telemetria, nessun impatto sulle risposte». **La baseline è stata scritta il 27/07 su dati già invalidati il 26/07.**
+  **Prova (taglio al minuto del fix):** prima di `9fdde3f` 5.213/5.312 big senza cache = **98,1%**; dopo, 2/387 = **0,5%**. Il 5.213 pre-fix coincide col 5.215 della baseline. Correlazione oraria: restart 26/07 10:09:01, il nocache passa da 100% (ore 06–09) a 54,3% (ore 10) a 0% (dalle 11 in poi, per due giorni). Il 28/07: 38 richieste big, **0 senza cache**, hit rate 80,2%.
+  **Effetto dei 6 fix su questa metrica: non misurabile** — era già a zero 36 ore prima che F1 (`f05ea98`, 27/07 23:05) fosse deployato. Non significa che F1 fosse inutile: il bersaglio era reale ma di **due ordini di grandezza più piccolo**, cioè i **121 `ctx: proactive rewrite`** loggati il 23/24/26 luglio, ognuno dei quali distruggeva i `cache_control`. Il 28/07, dopo `49c26a3`, i rewrite sono **0**.
+  **Nessuna causa da cercare altrove**, e nessuna estensione della diagnostica del relay: la perdita apparente è spiegata e chiusa. Da non ripetere: citare 5.215 / 201M come token persi.
 
 - [x] **G4 — non mutilare le richieste di compattazione. CHIUSA il 2026-07-27: nessuna azione sul proxy.**
   **Marker trovato** (dal binario `~/.local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe`, non dai log): il messaggio user del turno di compattazione inizia sempre con `CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.` — funzioni `WAo` (compact pieno, costante `MPy`) e `Usd` (varianti `up_to`/`from`, `$Py`/`OPy`), coda `Bsd`, costruito via `zr({content})` come messaggio user. È version-dependent: cambia col bundle del CLI.
