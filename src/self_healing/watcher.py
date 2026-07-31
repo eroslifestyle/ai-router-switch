@@ -182,6 +182,23 @@ def _write_int(path, value) -> None:
         pass
 
 
+def emit_policy(learner, policy_path, threshold=0.5):
+    # Fase 3 ACTUATOR: scrive router-policy.json con i modelli degradati (ewma>=threshold).
+    # Il proxy e l'orchestratore consultano questo file (hot-reload) per deviare il routing.
+    try:
+        deg = {}
+        for k, st in learner._stats.items():
+            if st["ewma"] >= threshold and st["total"] >= 3:
+                m, _, tc = k.partition("|")
+                deg[m] = {"task_class": tc or "*", "ewma": round(st["ewma"], 3),
+                          "fails": st["fails"], "total": st["total"], "since": st["last_ts"]}
+        tmp = Path(policy_path).with_suffix(".tmp")
+        tmp.write_text(json.dumps({"updated": time.time(), "degraded": deg}, indent=2))
+        tmp.replace(policy_path)
+    except Exception:
+        pass
+
+
 def process_file(jsonl_path: Path, learner: OutcomeLearner, offset: int) -> int:
     """
     Process new entries from JSONL log file.
@@ -272,6 +289,7 @@ def main() -> int:
         except Exception:
             pass
         save_state(args.state, learner, offset)
+        emit_policy(learner, Path.home() / ".claude" / "router-policy.json")
         snapshot = learner.snapshot()
         print(f"Processed entries: {sum(e['total'] for e in snapshot['stats'].values())}")
         print(f"Unique keys: {len(snapshot['stats'])}")

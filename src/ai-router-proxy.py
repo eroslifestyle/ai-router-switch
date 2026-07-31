@@ -713,6 +713,19 @@ async def handle(request):
         log(f"routing: {e} -> fallback anthropic")
         _provider, _model_override = "anthropic", None
 
+    # Fase 3 ACTUATOR: consulta router-policy.json (hot-reload). Se il modello target e'
+    # degradato per questo task, logga (telemetria); la deviazione effettiva avviene
+    # nell'orchestratore lato agente (chain fallback). Best-effort, mai blocca il dispatch.
+    try:
+        from router_policy import is_degraded
+        from self_healing.sensor import classify_task
+        _tc = classify_task(body)
+        _tgt = _model_override or _req_model
+        if _tgt and is_degraded(_tgt, _tc):
+            log(f"policy: model={_tgt} DEGRADATO per task_class={_tc} mode={mode} (consulta fallback chain)")
+    except Exception:
+        pass
+
     log(f"tunnel {mode}: model={_req_model or '?'} -> provider={_provider} override={_model_override or '-'}")
 
     # Smistamento per provider
