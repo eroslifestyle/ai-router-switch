@@ -157,8 +157,8 @@ def save_state(path: Path, learner: OutcomeLearner, offset: int) -> None:
         data["offset"] = offset
         data["updated"] = time.time()
 
-        # Atomic write: write to temp file then replace
-        tmp_path = path.with_suffix(".tmp")
+        # Atomic write: write to temp file then replace (Path(path) accetta str e Path)
+        tmp_path = Path(path).with_suffix(".tmp")
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(data, f)
         os.replace(tmp_path, path)
