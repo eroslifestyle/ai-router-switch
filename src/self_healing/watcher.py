@@ -166,6 +166,22 @@ def save_state(path: Path, learner: OutcomeLearner, offset: int) -> None:
         pass
 
 
+def _read_int(path) -> int:
+    """Offset int da file di stato secondario (sorgenti aggiuntive)."""
+    try:
+        return int(Path(path).read_text().strip())
+    except Exception:
+        return 0
+
+
+def _write_int(path, value) -> None:
+    """Scrive offset int in file di stato secondario (fail-safe)."""
+    try:
+        Path(path).write_text(str(int(value)))
+    except Exception:
+        pass
+
+
 def process_file(jsonl_path: Path, learner: OutcomeLearner, offset: int) -> int:
     """
     Process new entries from JSONL log file.
@@ -245,6 +261,16 @@ def main() -> int:
     if args.once:
         learner, offset = load_state(args.state)
         offset = process_file(args.jsonl, learner, offset)
+        # Fase 2.5: processa anche la telemetria m3-code (coding MiniMax OUT-OF-BAND,
+        # invisibile a router-usage.jsonl). Offset m3 tenuto in file affiancato allo state.
+        try:
+            from self_healing.m3_source import process_m3_usage, DEFAULT_M3_USAGE
+            m3_off_path = args.state.with_suffix(args.state.suffix + ".m3off")
+            off_m3 = _read_int(m3_off_path)
+            off_m3 = process_m3_usage(DEFAULT_M3_USAGE, learner, off_m3)
+            _write_int(m3_off_path, off_m3)
+        except Exception:
+            pass
         save_state(args.state, learner, offset)
         snapshot = learner.snapshot()
         print(f"Processed entries: {sum(e['total'] for e in snapshot['stats'].values())}")
