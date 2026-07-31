@@ -349,7 +349,7 @@ def collect_tools_stats(body: bytes) -> dict | None:
 
 def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
                      mode: str, client: str = "?", status: int = 200, path: str = "",
-                     tools: dict | None = None):
+                     tools: dict | None = None, body=None):
     if not final or final == "?":
         final = "router-internal"
     try:
@@ -361,10 +361,23 @@ def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
             "output_tokens": int(usage.get("output_tokens", 0) or 0),
             "cache_read": int(usage.get("cache_read_input_tokens", 0) or 0),
             "cache_creation": int(usage.get("cache_creation_input_tokens", 0) or 0),
+            "stop_reason": usage.get("stop_reason") or "",
+            "text_blocks": int(usage.get("text_blocks", 0) or 0),
+            "thinking_blocks": int(usage.get("thinking_blocks", 0) or 0),
+            "tool_use_blocks": int(usage.get("tool_use_blocks", 0) or 0),
         }
-        # Campi aggiunti SOLO quando la telemetria dei tool e' accesa e ha
-        # prodotto qualcosa: a flag spento l'entry resta identica a prima, e i
-        # consumatori esistenti del sidecar non vedono nulla di nuovo.
+        # Self-healing (Fase 1): outcome reale (ok|empty|truncated|tool_only|error) + task_class.
+        # Best-effort: se self_healing.sensor non importa, outcome/task_class restano assenti.
+        try:
+            from self_healing.sensor import classify_outcome, classify_task
+            entry["outcome"] = classify_outcome(
+                status, entry.get("stop_reason", ""),
+                entry.get("text_blocks", 0), entry.get("tool_use_blocks", 0),
+                entry.get("output_tokens", 0))
+            entry["task_class"] = usage.get("task_class") or (classify_task(body) if body else "")
+        except Exception:
+            pass
+        # Telemetria tool: campi aggiunti SOLO quando accesa (flag spento -> entry identica a prima).
         if tools:
             entry.update(tools)
         with open(USAGE_SIDECAR, "a") as f:

@@ -160,14 +160,20 @@ def test_sidecar_invariato_senza_tools(tmp_path):
         content = sidecar_file.read_text()
         line = json.loads(content.strip())
 
-        chiavi_attese = {
+        # Chiavi originali (backward-compat) + chiavi self-healing Fase 1 (sempre presenti).
+        # La telemetria self-healing (outcome/stop_reason/blocks/task_class) e' attiva di
+        # default: rileva i "valori zero" (200 con 0 text blocks). I campi tools_* restano
+        # invece gated dal flag AIROUTER_TOOLS_TELEMETRY (qui non devono apparire).
+        chiavi_originali = {
             "ts", "chat", "orig", "final", "mode", "client",
             "status", "input_tokens", "output_tokens", "cache_read", "cache_creation"
         }
-        assert set(line.keys()) == chiavi_attese, \
-            f"Chiavi devono essere esattamente {chiavi_attese}, ottenuto {set(line.keys())}"
-        assert "tools_count" not in line, "Non deve contenere tools_count"
-        assert "tools_bytes" not in line, "Non deve contenere tools_bytes"
+        chiavi_self_healing = {"stop_reason", "text_blocks", "thinking_blocks",
+                               "tool_use_blocks", "outcome", "task_class"}
+        for k in chiavi_originali | chiavi_self_healing:
+            assert k in line, f"Chiave {k} mancante: {set(line.keys())}"
+        assert "tools_count" not in line, "Senza tools non deve contenere tools_count"
+        assert "tools_bytes" not in line, "Senza tools non deve contenere tools_bytes"
     finally:
         ru.USAGE_SIDECAR = original_sidecar
 

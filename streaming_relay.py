@@ -232,6 +232,17 @@ class StreamingRelay:
                             elif _ev.get("type") == "message_delta":
                                 _u = _ev.get("usage") or {}
                                 _usage["output_tokens"] = int(_u.get("output_tokens", 0) or 0)
+                                _sr = (_ev.get("delta") or {}).get("stop_reason")
+                                if _sr:
+                                    _usage["stop_reason"] = _sr
+                            elif _ev.get("type") == "content_block_start":
+                                _bt = (_ev.get("content_block") or {}).get("type")
+                                if _bt == "text":
+                                    _usage["text_blocks"] = _usage.get("text_blocks", 0) + 1
+                                elif _bt == "thinking":
+                                    _usage["thinking_blocks"] = _usage.get("thinking_blocks", 0) + 1
+                                elif _bt == "tool_use":
+                                    _usage["tool_use_blocks"] = _usage.get("tool_use_blocks", 0) + 1
                         except Exception:
                             pass
                     if _usage["output_tokens"] == 0:
@@ -374,6 +385,7 @@ class StreamingRelay:
                     # telemetria e' spenta (default), cosi' l'entry del sidecar
                     # resta identica a prima.
                     tools=collect_tools_stats(self.body),
+                    body=self.body,
                 )
             except Exception:
                 pass
