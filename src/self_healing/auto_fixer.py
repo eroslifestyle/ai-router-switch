@@ -1,0 +1,302 @@
+import json
+import re
+import pathlib
+import argparse
+import hashlib
+
+DEFAULT_BUG_CATALOG = pathlib.Path.home() / ".claude" / "logs" / "BUG-CATALOG.jsonl"
+
+
+def load_bug_catalog(path=DEFAULT_BUG_CATALOG):
+    """Load bug catalog from a JSONL file.
+
+    Returns a list of dicts. Tolerates missing files and malformed lines.
+    """
+    if not path.exists():
+        return []
+    entries = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                # Skip lines that are not valid JSON
+                continue
+    return entries
+
+
+def _normalize(snippet):
+    """Normalize an error snippet to create a stable grouping key.
+
+    Lowercases, replaces sequences of digits with a placeholder '#',
+    and collapses whitespace.
+    """
+    s = snippet.lower()
+    s = re.sub(r'\d+', '#', s)
+    s = re.sub(r'\s+', ' ', s)
+    return s.strip()
+
+
+def recurring_bugs(catalog, min_count=3):
+    """Find groups of recurring bugs in the catalog.
+
+    Groups by (kind, normalized snippet). Returns list of dicts with
+    kind, signature, count, sample (first entry), and last_ts,
+    sorted by count descending.
+    """
+    groups = {}
+    for entry in catalog:
+        kind = entry.get("kind")
+        snippet = entry.get("snippet") or entry.get("error") or ""
+        signature = _normalize(snippet)
+        key = (kind, signature)
+        if key not in groups:
+            groups[key] = {"entries": [], "last_ts": ""}
+        groups[key]["entries"].append(entry)
+        ts = entry.get("ts", "")
+        if ts > groups[key]["last_ts"]:
+            groups[key]["last_ts"] = ts
+
+    result = []
+    for (kind, signature), group in groups.items():
+        count = len(group["entries"])
+        if count >= min_count:
+            result.append({
+                "kind": kind,
+                "signature": signature,
+                "count": count,
+                "sample": group["entries"][0],
+                "last_ts": group["last_ts"],
+            })
+    result.sort(key=lambda x: x["count"], reverse=True)
+    return result
+
+
+def _suspected_files(sample):
+    """Heuristically extract suspected source files from a bug sample.
+
+    Looks for file paths with common code extensions in snippet, error,
+    and traceback fields. Falls back to typical modules based on the
+    sample's mode if no paths are found.
+    Returns up to five unique file paths.
+    """
+    # Combine relevant text fields
+    text = " ".join(
+        sample.get(field, "")
+        for field in ("snippet", "error", "traceback")
+    )
+    # Regex for file paths with code extensions
+    pattern = re.compile(r'[\w\-./]+\.(?:py|js|ts|go|rs|sql)\b')
+    matches = pattern.findall(text)
+    # Preserve order and remove duplicates
+    unique = list(dict.fromkeys(matches))
+    if unique:
+        return unique[:5]
+
+    # Fallback: typical files based on mode
+    mode = sample.get("mode")
+    typical_by_mode = {
+        "python": ["src/main.py", "src/module.py", "tests/test.py"],
+        "javascript": ["src/index.js", "src/app.js"],
+        "typescript": ["src/index.ts", "src/app.ts"],
+        "go": ["cmd/main.go", "pkg/foo.go"],
+        "rust": ["src/main.rs", "src/lib.rs"],
+        "sql": ["queries.sql", "schema.sql"],
+    }
+    return typical_by_mode.get(mode, [])[:5]
+
+
+def make_ticket(bug):
+    """Generate a structured fix ticket for a recurring bug.
+
+    The ticket contains an id, kind, symptom, occurrence count, mode,
+    suspected files, reproduction hint, suggested branch, and status.
+    """
+    signature = bug["signature"]
+    hash8 = hashlib.md5(signature.encode()).hexdigest()[:8]
+    kind = bug["kind"]
+    ticket_id = f"{kind}-{hash8}"
+    branch = f"fix/{kind}-{hash8}"
+    ticket = {
+        "id": ticket_id,
+        "kind": kind,
+        "symptom": bug["sample"].get("snippet") or bug["sample"].get("error") or "",
+        "count": bug["count"],
+        "mode": bug["sample"].get("mode"),
+        "suspected_files": _suspected_files(bug["sample"]),
+        "reproduction": (
+            "Cerca nel log la signature; riproduci con un fake upstream "
+            "che emette l'errore"
+        ),
+        "branch": branch,
+        "status": "open",
+    }
+    return ticket
+
+
+def main():
+    """Command-line interface for the auto-fixer."""
+    parser = argparse.ArgumentParser(
+        description="Offline auto-fixer analysis tool. Generates fix tickets "
+        "for recurring bugs without performing any merges or automatic execution."
+    )
+    parser.add_argument(
+        "--catalog",
+        type=pathlib.Path,
+        default=DEFAULT_BUG_CATALOG,
+        help="Path to the bug catalog JSONL file.",
+    )
+    parser.add_argument(
+        "--min-count",
+        type=int,
+        default=3,
+        help="Minimum number of occurrences to consider a bug recurring.",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List top recurring bugs (kind | count | signature | suspected files).",
+    )
+    parser.add_argument(
+        "--ticket",
+        metavar="KIND_OR_ID",
+        help="Generate and print a fix ticket for the first matching bug.",
+    )
+    parser.add_argument(
+        "--plan",
+        metavar="KIND_OR_ID",
+        help="Print a fix plan (ticket + branch + suspected files + suggested commands). "
+        "No automatic execution is performed.",
+    )
+    args = parser.parse_args()
+
+    # Load catalog
+    catalog = load_bug_catalog(args.catalog)
+
+    if args.list:
+        bugs = recurring_bugs(catalog, min_count=args.min_count)
+        if not bugs:
+            print("No recurring bugs found.")
+            return
+        for bug in bugs:
+            sig = bug["signature"]
+            sig80 = sig[:80] + ("..." if len(sig) > 80 else "")
+            files = _suspected_files(bug["sample"])
+            print(f"{bug['kind']} | {bug['count']} | {sig80} | {', '.join(files)}")
+
+    elif args.ticket:
+        # Try to find a matching bug among recurring ones (allow any count)
+        bugs = recurring_bugs(catalog, min_count=1)
+        ticket = None
+        for bug in bugs:
+            t = make_ticket(bug)
+            if bug["kind"] == args.ticket or t["id"] == args.ticket:
+                ticket = t
+                break
+        # Fallback: search directly by kind in the raw catalog
+        if ticket is None:
+            for entry in catalog:
+                if entry.get("kind") == args.ticket:
+                    sig = _normalize(entry.get("snippet") or entry.get("error") or "")
+                    bug = {
+                        "kind": entry.get("kind"),
+                        "signature": sig,
+                        "count": 1,
+                        "sample": entry,
+                        "last_ts": entry.get("ts", ""),
+                    }
+                    ticket = make_ticket(bug)
+                    break
+        if ticket is None:
+            print(f"No bug found for '{args.ticket}'.")
+            return
+        print(json.dumps(ticket, indent=2))
+
+    elif args.plan:
+        bugs = recurring_bugs(catalog, min_count=1)
+        target_bug = None
+        for bug in bugs:
+            t = make_ticket(bug)
+            if bug["kind"] == args.plan or t["id"] == args.plan:
+                target_bug = bug
+                break
+        # Fallback: search directly by kind in the raw catalog
+        if target_bug is None:
+            for entry in catalog:
+                if entry.get("kind") == args.plan:
+                    sig = _normalize(entry.get("snippet") or entry.get("error") or "")
+                    target_bug = {
+                        "kind": entry.get("kind"),
+                        "signature": sig,
+                        "count": 1,
+                        "sample": entry,
+                        "last_ts": entry.get("ts", ""),
+                    }
+                    break
+        if target_bug is None:
+            print(f"No bug found for '{args.plan}'.")
+            return
+
+        ticket = make_ticket(target_bug)
+        print("=== FIX PLAN (GATED) ===")
+        print("Ticket:")
+        print(json.dumps(ticket, indent=2))
+        print(f"Branch: {ticket['branch']}")
+        print(f"Suspected files: {', '.join(ticket['suspected_files'])}")
+        print("Suggested commands (apply manually after review + test):")
+        print(f"  # Create a new worktree (optional):")
+        print(f"  # git worktree add ../fix-wt-{ticket['id']} -b {ticket['branch']}")
+        print(f"  # Edit suspected files, run tests, then merge via PR after review.")
+        print(
+            "GATED: nessuna esecuzione automatica. "
+            "Applica manualmente in worktree dopo review + test."
+        )
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    # Self-test: create a fake in-memory catalog and verify core functions.
+    fake_catalog = [
+        {
+            "ts": "2023-01-01T10:00:00",
+            "kind": "ValueError",
+            "mode": "python",
+            "snippet": "division by zero",
+            "status": "fixed",
+        },
+        {
+            "ts": "2023-01-01T11:00:00",
+            "kind": "ValueError",
+            "mode": "python",
+            "snippet": "division by zero",
+            "status": "fixed",
+        },
+        {
+            "ts": "2023-01-01T12:00:00",
+            "kind": "ValueError",
+            "mode": "python",
+            "snippet": "division by zero",
+            "status": "fixed",
+        },
+        {
+            "ts": "2023-01-01T13:00:00",
+            "kind": "TypeError",
+            "mode": "python",
+            "snippet": "can't concat str to int",
+            "status": "open",
+        },
+    ]
+
+    bugs = recurring_bugs(fake_catalog, min_count=3)
+    assert len(bugs) == 1, f"Expected 1 bug group, got {len(bugs)}"
+    bug = bugs[0]
+    ticket = make_ticket(bug)
+    assert "id" in ticket
+    assert "branch" in ticket
+    assert "suspected_files" in ticket
+    assert ticket["id"].startswith(bug["kind"] + "-")
+    print("OK")
