@@ -4,7 +4,8 @@ import pathlib
 import argparse
 import hashlib
 
-DEFAULT_BUG_CATALOG = pathlib.Path.home() / ".claude" / "logs" / "BUG-CATALOG.jsonl"
+# Fonte reale dei bug: debug-errors.jsonl (240+ entry). BUG-CATALOG.jsonl non viene generato.
+DEFAULT_BUG_CATALOG = pathlib.Path.home() / ".claude" / "logs" / "debug-errors.jsonl"
 
 
 def load_bug_catalog(path=DEFAULT_BUG_CATALOG):
