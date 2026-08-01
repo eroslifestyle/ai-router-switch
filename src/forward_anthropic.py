@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import tool_isolation
+import cache_optimizer
 
 from router_constants import (
     ANTHROPIC_UPSTREAM, ANTHROPIC_DIRECT_URL, HOP_HEADERS,
@@ -238,6 +239,10 @@ async def forward_anthropic(request, body, session):
     # finiscono nella history). Fast path interno: se il body non contiene
     # "server_tool_use" non viene nemmeno parsato.
     safe_body, _n_srv = sanitize_server_tool_ids(safe_body)
+    # Copre la coda della conversazione con il breakpoint di cache rimasto libero:
+    # senza, un contesto lungo viene riprocessato a ogni turno (creation=0) e lo
+    # stream rallenta fino a farsi chiudere dal client. No-op se i 4 slot sono pieni.
+    safe_body = cache_optimizer.ensure_tail_cache_breakpoint(safe_body)
     if _n_srv:
         log(f"anthropic: sanificati {_n_srv} id server_tool_use non conformi")
 
@@ -342,6 +347,10 @@ async def forward_anthropic_direct(request, body, session):
     # rescue chain delle modalità miste, dove la history contiene proprio i
     # blocchi prodotti dall'esecutore non-Anthropic.
     safe_body, _n_srv = sanitize_server_tool_ids(safe_body)
+    # Copre la coda della conversazione con il breakpoint di cache rimasto libero:
+    # senza, un contesto lungo viene riprocessato a ogni turno (creation=0) e lo
+    # stream rallenta fino a farsi chiudere dal client. No-op se i 4 slot sono pieni.
+    safe_body = cache_optimizer.ensure_tail_cache_breakpoint(safe_body)
     if _n_srv:
         log(f"anthropic-direct: sanificati {_n_srv} id server_tool_use non conformi")
 
