@@ -131,44 +131,77 @@ class TestResolveRouteValidModes:
 
 
 class TestResolveRouteUnknownRole:
-    """Test resolve_route() with unknown model role (uses mode default)."""
+    """Test resolve_route() with unknown model role (uses mode default).
+
+    For unknown roles, the provider defaults to the mode's default provider.
+    If the model name belongs to a foreign provider, it is rewritten (nativized)
+    to the corresponding native executor to avoid 404 responses.
+    """
 
     def test_anthropic_unknown_defaults_to_anthropic(self):
-        """anthropic mode + unknown role -> anthropic provider, no override."""
+        """anthropic mode + unknown role -> anthropic provider, nativizzato sull'esecutore claude-haiku-4-5-20251001."""
         provider, model_override = rr.resolve_route("anthropic", "MiniMax-M3")
         assert provider == "anthropic"
-        assert model_override is None
+        assert model_override == "claude-haiku-4-5-20251001"
 
     def test_minimax_unknown_defaults_to_minimax(self):
-        """minimax mode + unknown role -> minimax provider, no override."""
+        """minimax mode + unknown role -> minimax provider, nativizzato sull'esecutore MiniMax-M2.7."""
         provider, model_override = rr.resolve_route("minimax", "glm-4.7")
         assert provider == "minimax"
-        assert model_override is None
+        assert model_override == "MiniMax-M2.7"
 
     def test_glm_unknown_defaults_to_glm(self):
-        """glm mode + unknown role -> glm provider, no override."""
+        """glm mode + unknown role -> glm provider, nativizzato sull'esecutore glm-4.7."""
         provider, model_override = rr.resolve_route("glm", "MiniMax-M3")
         assert provider == "glm"
-        assert model_override is None
+        assert model_override == "glm-4.7"
 
     def test_mix_am_unknown_defaults_to_minimax(self):
-        """mix-am mode + unknown role -> minimax provider (mode default), no override."""
+        """mix-am + MiniMax-M3: gia' nativo per il provider minimax -> nessuna riscrittura.
+
+        M3 non e' straniero qui: e' la richiesta out-of-band legittima di m3-web/m3-code,
+        che chiede M3 esplicitamente. Nativizzarlo a M2.7 la degraderebbe."""
         provider, model_override = rr.resolve_route("mix-am", "MiniMax-M3")
         assert provider == "minimax"
         assert model_override is None
 
     def test_mix_ag_unknown_defaults_to_glm(self):
-        """mix-ag mode + unknown role -> glm provider (mode default), no override."""
+        """mix-ag mode + unknown role -> glm provider (mode default), nativizzato sull'esecutore glm-4.7."""
         provider, model_override = rr.resolve_route("mix-ag", "MiniMax-M3")
         assert provider == "glm"
-        assert model_override is None
+        assert model_override == "glm-4.7"
 
     def test_mix_gm_unknown_defaults_to_minimax(self):
-        """mix-gm mode + unknown role -> minimax provider (mode default), no override."""
+        """mix-gm mode + unknown role -> minimax provider (mode default), nativizzato sull'esecutore MiniMax-M2.7."""
         provider, model_override = rr.resolve_route("mix-gm", "glm-4.7")
         assert provider == "minimax"
+        assert model_override == "MiniMax-M2.7"
+
+    # Regression tests: models that should NOT be rewritten
+
+    def test_anthropic_legacy_claude_name_not_rewritten(self):
+        """Anthropic provider with its own legacy model name stays unchanged."""
+        provider, model_override = rr.resolve_route("anthropic", "claude-3-5-sonnet-20241022")
+        assert provider == "anthropic"
         assert model_override is None
 
+    def test_anthropic_unclassified_name_not_rewritten(self):
+        """Anthropic provider with a name not recognized as foreign stays unchanged."""
+        provider, model_override = rr.resolve_route("anthropic", "health")
+        assert provider == "anthropic"
+        assert model_override is None
+
+    def test_anthropic_none_model_not_rewritten(self):
+        """Anthropic provider with None model stays unchanged."""
+        provider, model_override = rr.resolve_route("anthropic", None)
+        assert provider == "anthropic"
+        assert model_override is None
+
+    def test_minimax_native_model_not_rewritten(self):
+        """Minimax provider with its own native model stays unchanged."""
+        provider, model_override = rr.resolve_route("minimax", "MiniMax-M2.7")
+        assert provider == "minimax"
+        assert model_override is None
 
 class TestResolveRouteInvalidMode:
     """Test resolve_route() with invalid mode."""

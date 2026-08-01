@@ -70,6 +70,16 @@ _MODE_DEFAULT_PROVIDER = {
 VALID_MODES = ("anthropic", "minimax", "glm", "mix-am", "mix-ag", "mix-gm")
 
 
+# ── Native executor per provider ─────────────────────────────────────────────
+# It's the NATIVE EXECUTOR of the provider, never the THINK (the THINK is
+# chosen manually by the user, it should never be decided by code).
+_NATIVE_EXECUTOR = {
+    "anthropic": "claude-haiku-4-5-20251001",
+    "minimax": MINIMAX_ACT,
+    "glm": GLM_ACT,
+}
+
+
 def model_role(model_name: str | None) -> str:
     """Determine the role of a model based on its name.
 
@@ -97,6 +107,50 @@ def model_role(model_name: str | None) -> str:
     return ROLE_UNKNOWN
 
 
+
+def model_provider(model_name: str | None) -> str | None:
+    """Distinguish a FOREIGN model from an unclassified name.
+
+    A foreign model is one that clearly belongs to a different provider
+    (e.g., "MiniMax-M3" belongs to minimax, "claude-opus-5" belongs to anthropic).
+
+    An unclassified name should NEVER be rewritten: this is the case of
+    legacy Claude names like "claude-3-5-sonnet-20241022", which Anthropic
+    also knows even if they don't match the role prefixes.
+
+    Args:
+        model_name: The model name to classify.
+
+    Returns:
+        "anthropic", "minimax", "glm" or None if the model is unclassified.
+    """
+    if not model_name:
+        return None
+
+    model_lower = model_name.lower()
+
+    if model_lower.startswith("claude"):
+        return "anthropic"
+    if "minimax" in model_lower:
+        return "minimax"
+    if model_lower.startswith("glm"):
+        return "glm"
+
+    return None
+
+
+def _nativize(provider: str, override: str | None, model_name: str | None) -> str | None:
+    """Apply nativization: replace foreign model with provider's native executor if needed."""
+    if override is not None:
+        return override
+
+    foreign = model_provider(model_name)
+    if foreign is not None and foreign != provider:
+        return _NATIVE_EXECUTOR[provider]
+
+    return override
+
+
 def resolve_route(mode: str, model_name: str | None) -> tuple[str, str | None]:
     """Resolve the routing for a given mode and model.
 
@@ -111,6 +165,11 @@ def resolve_route(mode: str, model_name: str | None) -> tuple[str, str | None]:
 
     Raises:
         ValueError: if mode is not in VALID_MODES.
+
+    Note:
+        A pure mode should never call a model from another provider (user rule 2026-08-01).
+        If the resolved model is foreign to the provider, it will be replaced with the
+        provider's native executor model.
     """
     if mode not in VALID_MODES:
         raise ValueError(
@@ -121,12 +180,13 @@ def resolve_route(mode: str, model_name: str | None) -> tuple[str, str | None]:
 
     # First try to lookup (mode, role) in the table
     if (mode, role) in ROUTING_TABLE:
-        return ROUTING_TABLE[(mode, role)]
+        provider, override = ROUTING_TABLE[(mode, role)]
+        return (provider, _nativize(provider, override, model_name))
 
     # If role is unknown, use the mode's default provider with model=None
     if role == ROLE_UNKNOWN:
-        default_provider = _MODE_DEFAULT_PROVIDER[mode]
-        return (default_provider, None)
+        provider = _MODE_DEFAULT_PROVIDER[mode]
+        return (provider, _nativize(provider, None, model_name))
 
     # Should never reach here if ROUTING_TABLE and _MODE_DEFAULT_PROVIDER are complete
     raise RuntimeError(
