@@ -188,7 +188,17 @@ class StreamingRelay:
                     await resp.drain()
         except Exception as e:
             # FIX #3: log esplicito eccezioni nel loop streaming
-            self.log_fn(f"relay loop ERROR after {chunk_count} chunks ({total_bytes}B): {e}")
+            # DIAG stall 2026-08-01: distingue "client sparito" (effetto) da rottura
+            # lato server (causa). Il calcolo e' difensivo: qualunque suo fallimento
+            # non deve impedire il log originale ne' il raise (vedi regressione detector).
+            try:
+                _tr = getattr(self.request, "transport", None)
+                _diag = (f" [client_closing={_tr is None or _tr.is_closing()}"
+                         f" upstream_eof={upstream.content.at_eof()}"
+                         f" exc={type(e).__name__} sse={is_sse}]")
+            except Exception:
+                _diag = " [diag=NA]"
+            self.log_fn(f"relay loop ERROR after {chunk_count} chunks ({total_bytes}B): {e}{_diag}")
             raise
         finally:
             # FIX B2.3: garantisce chiusura upstream su client disconnect/cancel/exception
