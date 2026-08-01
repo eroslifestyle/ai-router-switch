@@ -730,6 +730,17 @@ async def handle(request):
 
     # Smistamento per provider
     if _provider == "anthropic":
+        # Anthropic valida il nome del modello e risponde 404 se non lo riconosce:
+        # l'override calcolato da resolve_route va SCRITTO nel body, altrimenti resta
+        # decorativo (i rami minimax/glm lo applicano gia', questo no — bug 2026-08-01).
+        if _model_override:
+            try:
+                _ab = json.loads(body)
+                _ab["model"] = _model_override
+                body = json.dumps(_ab).encode()
+                log(f"tunnel {mode}: body model riscritto {_req_model or '?'} -> {_model_override} (nativizzazione)")
+            except Exception as _e:
+                log(f"tunnel {mode}: rewrite model FALLITO ({_e}) — inoltro body originale")
         # Case 1: mode == "anthropic" (pure)
         #   Lascia cadere nel codice sottostante (ramo "ANTHROPIC PURA" esistente).
         # Case 2: mode != "anthropic" (mix-am, mix-ag, mix-gm con THINK su Anthropic)
