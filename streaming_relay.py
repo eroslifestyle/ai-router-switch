@@ -5,8 +5,6 @@ Byte-for-byte identical relay logic, no behavioral changes.
 """
 import json
 import re as re_module
-import time
-import zlib
 
 from aiohttp import web
 from router_debug import dl
@@ -150,49 +148,12 @@ class StreamingRelay:
         _acc_limit = 16384  # massimo 16KB per evitare OOM su risposte enormi
         # Precompila pattern per SSE message_start rewrite
         sse_model_pat = re_module.compile(rb'"model":"[^"]*"')
-        # FIX G: rilevamento stream SSE troncato (missing message_stop)
-        # La sessione usa auto_decompress=False: i chunk arrivano COMPRESSI (Anthropic
-        # risponde Content-Encoding: gzip anche su text/event-stream). Cercare il marker
-        # nei byte grezzi non matcha MAI -> falso positivo su ogni stream (bug del
-        # detector stesso, 2026-08-01). Serve un decompressore incrementale; sugli
-        # encoding non gestiti (br) ci si astiene invece di allarmare a vuoto.
-        _saw_message_stop = False
-        _relay_enc = (upstream.headers.get("content-encoding", "") or "").lower().strip()
-        _stop_dec = None          # None = nessuna compressione, False = astensione
-        if is_sse and _relay_enc:
-            if "gzip" in _relay_enc:
-                _stop_dec = zlib.decompressobj(16 + zlib.MAX_WBITS)
-            elif "deflate" in _relay_enc:
-                _stop_dec = zlib.decompressobj()
-            else:
-                _stop_dec = False
-        _stop_tail = b''          # coda dell'ultimo chunk, per eventi spezzati a cavallo di due chunk
-        _last_chunk_ts = time.monotonic()   # istante dell'ultimo chunk ricevuto
-        _max_gap_sec = 0.0        # pausa massima osservata tra due chunk consecutivi
         try:
             async for chunk in iterator:
                 if not chunk:
                     continue
                 chunk_count += 1
                 total_bytes += len(chunk)
-                # FIX G: rileva gap tra chunk
-                _now = time.monotonic()
-                if chunk_count > 1:
-                    _gap = _now - _last_chunk_ts
-                    if _gap > _max_gap_sec:
-                        _max_gap_sec = _gap
-                _last_chunk_ts = _now
-                # FIX G: cerca message_stop (evento finale SSE obbligatorio) sul
-                # payload DECOMPRESSO, altrimenti il marker non compare mai.
-                if is_sse and not _saw_message_stop and _stop_dec is not False:
-                    try:
-                        _plain = chunk if _stop_dec is None else _stop_dec.decompress(chunk)
-                        if _plain:
-                            if b'message_stop' in (_stop_tail + _plain):
-                                _saw_message_stop = True
-                            _stop_tail = _plain[-32:]  # coda per eventi spezzati fra chunk
-                    except Exception:
-                        _stop_dec = False   # flusso non decomprimibile: astieniti, niente allarme
                 # FIX #4: log primo chunk per debug
                 if chunk_count == 1:
                     self.log_fn(f"relay first chunk {len(chunk)}B (SSE={is_sse})")
@@ -477,13 +438,6 @@ class StreamingRelay:
                         orig=self.orig, mode=self.mode,
                         note=f"foreign={_foreign} backend={_bk}",
                     )
-        except Exception:
-            pass
-        # FIX #X: allarme per stream SSE troncato – e' l'unica traccia lato server dell'errore client 'Response stalled mid-stream'; senza di essa l'episodio spariva perche' il loop termina senza eccezione e 'relay done' sembrava un successo.
-        try:
-            if is_sse and not _saw_message_stop and chunk_count > 0 and _stop_dec is not False:
-                self.log_fn(f"SSE-TRUNCATED stream chiuso senza message_stop mode={self.mode} fp={chat_fp_for_rewrite} model={orig_model or '?'} chunks={chunk_count} bytes={total_bytes} max_gap={_max_gap_sec:.1f}s upstream_status={upstream.status} — il client vedra' Response stalled mid-stream")
-                dl.capture(kind='sse_truncated', request=self.request, fp=chat_fp_for_rewrite, client_model=orig_model or '', status=upstream.status, stage='relay', upstream_status=upstream.status, upstream_raw=bytes(_acc_buf[:2048]), upstream_encoding=upstream.headers.get('Content-Encoding',''), orig=self.orig, mode=self.mode, note=f'chunks={chunk_count} bytes={total_bytes} max_gap={_max_gap_sec:.1f}s')
         except Exception:
             pass
         # FIX #4: log bytes totali inoltrati
