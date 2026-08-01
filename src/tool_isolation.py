@@ -115,6 +115,16 @@ def filter_tools_for_backend(body: bytes, backend: str) -> bytes:
         snippet=f"stripped={stripped_names[:10]} kept={len(kept)}/{len(tools)}",
     )
     if kept:
+        # Il cache_control del tool rimosso va TRASFERITO all'ultimo tool rimasto.
+        # Claude Code chiude il blocco `tools` con un breakpoint sull'ultimo elemento:
+        # rimuovere quel tool cancellava il breakpoint, il prompt caching non si
+        # estendeva piu' (creation=0) e ogni turno riprocessava l'intera conversazione
+        # -> stream sempre piu' lento -> il client chiude con "Response stalled
+        # mid-stream". Colpiva le sole modalita' pure: le miste non fanno strip.
+        _cc = next((t.get("cache_control") for t in reversed(tools)
+                    if isinstance(t, dict) and t not in kept and t.get("cache_control")), None)
+        if _cc and not any(isinstance(t, dict) and t.get("cache_control") for t in kept):
+            kept[-1] = {**kept[-1], "cache_control": _cc}
         data["tools"] = kept
     else:
         data.pop("tools", None)
