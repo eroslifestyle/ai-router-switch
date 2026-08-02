@@ -4,7 +4,7 @@ from typing import Tuple
 
 from trim_smart import build_shrink_summary, SHRINK_KEEP_TAIL
 from router_utils import _repair_message_sequence
-from token_counter import estimate_tokens_body
+from token_counter import estimate_tokens_body, bytes_per_token
 from model_context_map import get_safe_input_limit
 
 log = logging.getLogger(__name__)
@@ -44,7 +44,12 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
 
     # ATTEMPT 1: tail + summary nel system per preservare contesto recente
     tail_msgs = _repair_message_sequence(msgs[-SHRINK_KEEP_TAIL:])
-    budget = safe_limit * 3 // 4
+    # build_shrink_summary vuole il budget in CARATTERI, safe_limit e' in TOKEN:
+    # passarlo senza convertire produceva un riassunto ~4x piu' piccolo del dovuto
+    # e sprecava tre quarti della finestra (misurato 2026-08-02: un body da 1135KB
+    # arrivava a 52k token invece dei ~196k consentiti a MiniMax).
+    budget_chars = int(safe_limit * bytes_per_token(model))
+    budget = budget_chars * 3 // 4
     summary = build_shrink_summary(msgs, budget)
 
     # Helper per costruire il system preservando liste e cache_control
@@ -84,7 +89,7 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
         return (new_1b_bytes, True)
 
     # ATTEMPT 2: degradazione progressiva del riassunto, mai la sua rimozione
-    for budget in [safe_limit // 2, safe_limit // 4, safe_limit // 8, safe_limit // 16]:
+    for budget in [budget_chars // 2, budget_chars // 4, budget_chars // 8, budget_chars // 16]:
         summary_b = build_shrink_summary(msgs, budget)
         tail_b = _repair_message_sequence(msgs[-SHRINK_KEEP_TAIL:])
 
@@ -101,7 +106,7 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
 
     # Ultimo tentativo: coda ridotta a 2 messaggi ma conservando il riassunto compresso
     tail2 = _repair_message_sequence(msgs[-2:] if len(msgs) >= 2 else msgs)
-    summary2 = build_shrink_summary(msgs, safe_limit // 16)
+    summary2 = build_shrink_summary(msgs, budget_chars // 16)
 
     new2 = dict(data)
     new2["messages"] = tail2

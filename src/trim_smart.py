@@ -4,6 +4,9 @@ import os
 
 SHRINK_KEEP_HEAD = int(os.environ.get("AIROUTER_SHRINK_KEEP_HEAD", "6"))
 SHRINK_KEEP_TAIL = int(os.environ.get("AIROUTER_SHRINK_KEEP_TAIL", "6"))
+# Tetto di troncamento per singolo messaggio nel summary. E' anche l'unita' con cui
+# si stima il costo di un messaggio quando si applica il budget: vedi _smart_sample_middle.
+TRUNCATE_MAX_LEN = 1800
 
 
 def build_shrink_summary(messages: list, budget: int) -> str:
@@ -63,10 +66,39 @@ def build_shrink_summary(messages: list, budget: int) -> str:
     # / "=== MESSAGGI RECENTI ===" — il modello capisce la struttura senza che
     # glielo si dica esplicitamente.
     PREAMBLE = ""
-    return PREAMBLE + "\n\n".join(parts)
+    out = PREAMBLE + "\n\n".join(parts)
+
+    # Fase 2: garantisci budget
+    # Il budget e' una garanzia hard perche' i chiamanti iterano riducendolo per far
+    # entrare il body nel limite del provider: un budget non rispettato impedirebbe la
+    # convergenza (misurato 2026-08-02).
+    if len(out) <= budget:
+        return out
+
+    # Fase 3: riduci sezione intermedia
+    # Si accorcia prima la sezione intermedia perche' e' la meno critica delle tre.
+    marker = "… [sezione intermedia troncata]"
+    for i, part in enumerate(parts):
+        if part.startswith("=== FASE INTERMEDIA"):
+            excess = len(out) - budget
+            cut = excess + 20
+            if cut >= len(part) - len(marker):
+                parts.remove(part)
+            else:
+                parts[i] = part[:-cut].rstrip() + "\n" + marker
+            break
+
+    out = PREAMBLE + "\n\n".join(parts)
+    if len(out) <= budget:
+        return out
+
+    # Fase 4: troncamento duro
+    # Scatta quando il budget e' piu' piccolo del minimo strutturale di testa+coda.
+    hard = "… [contesto troncato]"
+    return out[:max(0, budget - len(hard) - 1)] + chr(10) + hard
 
 
-def _smart_truncate(msg: dict, max_len: int = 1800) -> str:
+def _smart_truncate(msg: dict, max_len: int = TRUNCATE_MAX_LEN) -> str:
     """Truncation intelligente: preserva tool_use integrali, tronca resto."""
     content = msg.get("content", "")
     tool_use = msg.get("tool_use", [])
@@ -92,9 +124,11 @@ def _smart_truncate(msg: dict, max_len: int = 1800) -> str:
 def _smart_sample_middle(messages: list, budget: int) -> list:
     """Campiona il mezzo in modo diversificato: copre l'intera finestra temporale
     prendendo messaggi distribuiti, non solo i primi. Priorità:
-    1. tool_use messages (sempre: contengono output reali)
+    1. tool_use messages (sempre: contengono output reali, ma ora limitati dal budget)
     2. Messaggi "svolta" (messaggi lunghi di assistant = ragionamento/decisioni)
-    3. Campionamento uniforme distribuito nel tempo"""
+    3. Campionamento uniforme distribuito nel tempo
+
+    Il budget e' espresso in CARATTERI ed e' ora vincolante anche per i messaggi prioritari."""
     if not messages:
         return []
 
@@ -102,20 +136,35 @@ def _smart_sample_middle(messages: list, budget: int) -> list:
     tool_msgs = []
     non_tool = []
 
-    for m in messages:
+    for idx, m in enumerate(messages):
         if m.get("tool_use") or (m.get("role") == "user" and len(str(m.get("content",""))) > 3000):
-            tool_msgs.append(m)
+            tool_msgs.append((idx, m))
         else:
-            non_tool.append(m)
+            non_tool.append((idx, m))
 
-    sampled.extend(tool_msgs)
+    # Budget vincolante anche per i messaggi prioritari
+    prio_budget = max(1, (budget * 2) // 3)
+    max_prio = max(1, prio_budget // TRUNCATE_MAX_LEN)
 
-    byte_per_msg = 500
-    max_items = max(3, (budget // 3) // byte_per_msg)
-    if non_tool:
-        total = len(non_tool)
-        step = max(1, total // max_items)
-        for i in range(0, total, step):
-            sampled.append(non_tool[i])
+    if len(tool_msgs) <= max_prio:
+        sampled.extend(tool_msgs)
+    else:
+        step = len(tool_msgs) / max_prio
+        for i in range(max_prio):
+            idx = int(i * step)
+            sampled.append(tool_msgs[idx])
 
-    return sampled
+    num_prio = len(sampled)
+    rest_budget = budget - (num_prio * TRUNCATE_MAX_LEN)
+
+    if rest_budget > 0:
+        max_items = max(3, rest_budget // TRUNCATE_MAX_LEN)
+        if non_tool:
+            total = len(non_tool)
+            step = max(1, total // max_items)
+            for i in range(0, total, step):
+                sampled.append(non_tool[i])
+
+    # Preserva l'ordine cronologico originale
+    sampled.sort(key=lambda x: x[0])
+    return [msg for _, msg in sampled]

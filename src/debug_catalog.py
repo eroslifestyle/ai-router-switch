@@ -28,6 +28,18 @@ def _dl():
     return dl
 
 
+def _sanitize_snippet(s: str) -> str:
+    """Toglie i byte non testuali: i chiamanti passano anche risposte grezze
+    decodificate con errors='replace' e, se lo stream era gzip, finivano NUL nel
+    catalogo (155 in BUG-CATALOG.md, che git classificava binario — 2026-08-02)."""
+    if not s:
+        return ""
+    unreadable = sum(1 for c in s if (ord(c) < 32 and c not in "\t\n") or ord(c) == 0xFFFD)
+    if unreadable > len(s) * 0.3:
+        return f"[binario non testuale, {len(s)} caratteri]"
+    return "".join(c for c in s if (ord(c) >= 32 or c in "\t\n") and ord(c) != 0xFFFD)
+
+
 def _signature(category: str, kind: str, mode: str, code, snippet: str) -> str:
     """Firma stabile per deduplicare occorrenze dello stesso tipo di bug/blocco/errore.
     Esclude cifre dallo snippet (id/timestamp variano tra occorrenze identiche)."""
@@ -97,7 +109,7 @@ def record_event(*, severity: str, category: str, kind: str, chat_fp: str = "",
     # catalogo confrontava orari falsi. Si usa %z invece di convertire in UTC per
     # non creare un salto all'indietro rispetto alle entry già scritte.
     ts = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    snippet = (snippet or "")[:SNIPPET_MAX_CHARS]
+    snippet = _sanitize_snippet((snippet or "")[:SNIPPET_MAX_CHARS])
     # Limite caratteri per il detail serializzato (1000)
     _detail_max = 1000
     _detail_safe = ""

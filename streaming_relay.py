@@ -286,16 +286,49 @@ class StreamingRelay:
                     if _usage["output_tokens"] == 0:
                         _usage["output_tokens"] = max(1, total_bytes // 4)
                 else:
-                    try:
-                        _j = json.loads(_buf_str)
-                        if isinstance(_j, dict):
+                    def _scan_json(txt):
+                        try:
+                            _j = json.loads(txt)
+                            if not isinstance(_j, dict):
+                                return False
                             _u = _j.get("usage") or {}
                             _usage["input_tokens"] = int(_u.get("input_tokens", 0) or 0)
                             _usage["output_tokens"] = int(_u.get("output_tokens", 0) or 0)
                             _usage["cache_read_input_tokens"] = int(_u.get("cache_read_input_tokens", 0) or 0)
                             _usage["cache_creation_input_tokens"] = int(_u.get("cache_creation_input_tokens", 0) or 0)
-                    except Exception:
-                        _usage["output_tokens"] = max(1, total_bytes // 4)
+                            _sr = _j.get("stop_reason")
+                            if _sr:
+                                _usage["stop_reason"] = _sr
+                            for _blk in (_j.get("content") or []):
+                                if isinstance(_blk, dict):
+                                    _btype = _blk.get("type")
+                                    if _btype == "text":
+                                        _usage["text_blocks"] = _usage.get("text_blocks", 0) + 1
+                                    elif _btype == "thinking":
+                                        _usage["thinking_blocks"] = _usage.get("thinking_blocks", 0) + 1
+                                    elif _btype == "tool_use":
+                                        _usage["tool_use_blocks"] = _usage.get("tool_use_blocks", 0) + 1
+                            return True
+                        except Exception:
+                            return False
+                    _ok = _scan_json(_buf_str)
+                    if not _ok:
+                        try:
+                            _compressed_nb = any(x in _enc for x in ('gzip', 'deflate', 'br'))
+                        except Exception:
+                            _compressed_nb = False
+                        if not _compressed_nb and _tail_buf:
+                            overlap = len(_acc_buf) + len(_tail_buf) - total_bytes
+                            if overlap >= 0:
+                                try:
+                                    full_txt = _buf_str + bytes(_tail_buf)[overlap:].decode('utf-8', errors='replace')
+                                    _ok = _scan_json(full_txt)
+                                except Exception:
+                                    pass
+                    if not _ok:
+                        _usage["measure_partial"] = True
+                        if _usage["output_tokens"] == 0:
+                            _usage["output_tokens"] = max(1, total_bytes // 4)
                 # Input: estrai dal body richiesta (non compresso) se non già noto.
                 # È una stima sicura perché il body request è sempre in chiaro.
                 if _usage["input_tokens"] == 0:

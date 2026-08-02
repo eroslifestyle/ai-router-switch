@@ -99,11 +99,15 @@ def remap_body_for_minimax(raw: bytes, request=None, *,
     try:
         data = json.loads(raw)
         orig = data.get("model", "")
-        # Match case-INsensitive: con startswith("MiniMax") il nome "minimax-m2.7-hs"
-        # (il modello CODING inviato da `ask-m3 --code`) non veniva riconosciuto come
-        # MiniMax e finiva riscritto al default MINIMAX_MODEL=MiniMax-M3, cioe' il
-        # modello di REASONING — l'esecutore del codice veniva sostituito a sua insaputa
-        # (276 richieste il 2026-07-29). Il confronto va fatto sul nome normalizzato.
+        # Match case-INsensitive: con startswith("MiniMax") gli alias minuscoli
+        # ("minimax-m2.7-hs", "minimax-m3", ...) non venivano riconosciuti come nomi
+        # MiniMax e finivano riscritti al default MINIMAX_MODEL. Il confronto va fatto
+        # sul nome normalizzato: non tocca a noi rinominare un modello del provider.
+        # Nota (misurato 2026-08-02): l'upstream /anthropic accetta quegli alias e li
+        # risolve DA SE' a MiniMax-M3 (`minimax-m2.7-hs` -> risposta model=MiniMax-M3),
+        # quindi qui non cambia il modello servito — toglie solo una riscrittura nostra
+        # che mascherava la scelta del client. Per ottenere davvero M2.7 va chiesto
+        # "MiniMax-M2.7", che e' cio' che ~/.claude/m3/config.env imposta dal 2026-07-14.
         if orig and not orig.lower().startswith("minimax"):
             if resolve_fp and request:
                 chat_id = resolve_fp(request)
