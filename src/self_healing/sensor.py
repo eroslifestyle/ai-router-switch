@@ -16,11 +16,13 @@ def classify_outcome(
     text_blocks: int = 0,
     tool_use_blocks: int = 0,
     output_tokens: int = 0,
+    measure_partial: bool = False,
 ) -> str:
     """
     Classify the actual outcome of a response.
 
-    Returns: str in {ok, empty, truncated, tool_only, error}
+    Returns: str in {ok, empty, truncated, tool_only, error, unknown}
+    'unknown' means incomplete measurement, not an empty response.
     """
     # Handle None values by treating them as defaults
     if status is None:
@@ -33,10 +35,14 @@ def classify_outcome(
         tool_use_blocks = 0
     if output_tokens is None:
         output_tokens = 0
+    if measure_partial is None:
+        measure_partial = False
 
     # Logic order - return at first match
     if status >= 400 or stop_reason == "error":
         return "error"
+    if measure_partial and text_blocks == 0 and tool_use_blocks == 0:
+        return "unknown"
     if text_blocks == 0 and tool_use_blocks == 0:
         return "empty"
     if text_blocks == 0 and tool_use_blocks > 0:

@@ -21,6 +21,23 @@ import debug_catalog
 # L'import _text_from_message serviva solo a queste funzioni.
 
 
+def _effective_minimax_model(orig, model_override):
+    """Restituisce il modello MiniMax effettivamente servito.
+
+    Prima i due call site usavano 'model_override or "MiniMax-M3"', quindi con
+    override None etichettavano MiniMax-M3 anche le richieste che il body
+    mandava a MiniMax-M2.7 (834 casi in 7 giorni), falsando ogni analisi per
+    modello. La regola vera è quella di remap_body_for_minimax: un nome già
+    MiniMax resta intatto e tutto il resto va sul default.
+    """
+    if model_override:
+        return model_override
+    name = str((orig or {}).get('model') or '')
+    if name.lower().startswith('minimax'):
+        return name
+    return MINIMAX_MODEL
+
+
 async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, relay, model_override: str | None = None):
     """mode=minimax: passthrough streaming diretto a MiniMax-M3.
 
@@ -58,7 +75,7 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
                 up_pre = await forward_minimax(request, shrunk, session, model_override=model_override)
                 if up_pre.status < 400:
                     log(f"minimax PRE shrunk OK {up_pre.status} fp={chat_fp}")
-                    return await relay(up_pre, extra_headers={"x-ai-verified": "minimax-m3-shrunk"}, final_override=model_override or "MiniMax-M3")
+                    return await relay(up_pre, extra_headers={"x-ai-verified": "minimax-m3-shrunk"}, final_override=_effective_minimax_model(orig, model_override))
                 try:
                     await up_pre.release()
                 except Exception:
@@ -109,46 +126,64 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
         return web.json_response({"type": "error", "error": {"type": "router_error",
                                   "message": str(e)}}, status=502)
     log(f"minimax passthrough {up.status} {request.path} fp={chat_fp}")
-    return await relay(up, extra_headers={"x-ai-verified": f"minimax-direct({MINIMAX_MODEL.lower()})"}, final_override=model_override or "MiniMax-M3")
+    return await relay(up, extra_headers={"x-ai-verified": f"minimax-direct({MINIMAX_MODEL.lower()})"}, final_override=_effective_minimax_model(orig, model_override))
 
 
 async def _try_shrink_body(orig: dict, target_bytes: int):
-    """Prova a shrinkare il body per farlo stare in target_bytes."""
+    """Prova a shrinkare il body per farlo stare in target_bytes, mantenendo sempre un riassunto."""
     from pipeline_anthropic import _repair_message_sequence, build_shrink_summary, SHRINK_KEEP_TAIL, _shrink_images_in_messages
     try:
         msgs = orig.get("messages", []) or []
         if not msgs:
             return None
         _shrink_images_in_messages(orig)
-        budget = 560_000  # SUMMARY_BUDGET equivalent
-        summary_content = build_shrink_summary(msgs, budget)
-        tail_msgs = msgs[-SHRINK_KEEP_TAIL:] if msgs else []
+
+        # Extract system content correctly (Bug 2 fix)
         system_val = orig.get("system", "")
         if isinstance(system_val, list):
-            system_str = "\n\n".join(json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else v for v in system_val)
+            parts = []
+            for v in system_val:
+                if isinstance(v, str):
+                    parts.append(v)
+                elif isinstance(v, dict):
+                    if v.get("type") == "text":
+                        parts.append(v.get("text", ""))
+            system_str = "\n\n".join(parts)
         else:
             system_str = system_val or ""
+
+        # Budget progression list
+        budgets = [560_000, 280_000, 140_000, 70_000, 35_000, 16_000, 8_000]
+
+        for budget in budgets:
+            summary_content = build_shrink_summary(msgs, budget)
+            tail_msgs = _repair_message_sequence(msgs[-SHRINK_KEEP_TAIL:])
+            system_content = system_str + "\n\n" + summary_content if system_str else summary_content
+            shrunk = dict(orig)
+            shrunk["messages"] = tail_msgs
+            if system_content:
+                shrunk["system"] = system_content
+            shrunk.pop("thinking", None)
+            shrunk_bytes = json.dumps(shrunk).encode()
+            if len(shrunk_bytes) <= target_bytes:
+                log(f"shrink: budget ridotto a {budget}b, tail={len(tail_msgs)} msg")
+                return shrunk_bytes
+
+        # Final fallback: reduce tail to last 2 messages, keep summary with smallest budget (8000)
+        final_budget = 8_000
+        summary_content = build_shrink_summary(msgs, final_budget)
+        tail_msgs = _repair_message_sequence(msgs[-2:] if len(msgs) >= 2 else msgs)
         system_content = system_str + "\n\n" + summary_content if system_str else summary_content
         shrunk = dict(orig)
-        shrunk["messages"] = tail_msgs
-        tail_msgs = _repair_message_sequence(tail_msgs)
         shrunk["messages"] = tail_msgs
         if system_content:
             shrunk["system"] = system_content
         shrunk.pop("thinking", None)
         shrunk_bytes = json.dumps(shrunk).encode()
         if len(shrunk_bytes) <= target_bytes:
+            log(f"shrink: budget ridotto a {final_budget}b, tail={len(tail_msgs)} msg")
             return shrunk_bytes
-        tail2 = msgs[-2:] if len(msgs) >= 2 else msgs
-        tail2 = _repair_message_sequence(tail2)
-        shrunk2 = dict(orig)
-        shrunk2["messages"] = tail2
-        if system_str:
-            shrunk2["system"] = system_str
-        shrunk2.pop("thinking", None)
-        shrunk2_bytes = json.dumps(shrunk2).encode()
-        if len(shrunk2_bytes) <= target_bytes:
-            return shrunk2_bytes
+
         return None
     except Exception as e:
         log(f"try_shrink_body EXC: {e}")

@@ -146,6 +146,9 @@ class StreamingRelay:
         _acc_buf = bytearray()
         _buf_str = ""
         _acc_limit = 16384  # massimo 16KB per evitare OOM su risposte enormi
+        # Il buffer di testa vede solo i primi 16KB; nelle risposte lunghe che iniziano con un blocco thinking il message_delta finale (stop_reason + output_tokens) non viene mai letto, quindi la richiesta risulta erroneamente 'empty' in telemetria. Il buffer di coda tiene gli ultimi 16KB per recuperarlo.
+        _tail_buf = bytearray()
+        _tail_limit = 16384
         # Precompila pattern per SSE message_start rewrite
         sse_model_pat = re_module.compile(rb'"model":"[^"]*"')
         try:
@@ -182,6 +185,9 @@ class StreamingRelay:
                 # FIX F: accumulazione parziale per usage extraction
                 if len(_acc_buf) < _acc_limit:
                     _acc_buf.extend(chunk[:(_acc_limit - len(_acc_buf))])
+                _tail_buf.extend(chunk)
+                if len(_tail_buf) > _tail_limit:
+                    del _tail_buf[:len(_tail_buf) - _tail_limit]
                 await resp.write(chunk)
                 if is_sse:
                     # FIX #5: drain senza try/except - se fallisce vogliamo saperlo
@@ -230,31 +236,53 @@ class StreamingRelay:
                     pass
                 _buf_str = _raw.decode("utf-8", errors="replace")
                 if is_sse:
-                    # Cerca message_start (input) e message_delta (output) nei chunk SSE
-                    for _data in re_module.findall(r"^data: (.+)$", _buf_str, re_module.MULTILINE):
+                    def _scan(text):
+                        for _data in re_module.findall(r"^data: (.+)$", text, re_module.MULTILINE):
+                            try:
+                                _ev = json.loads(_data)
+                                if _ev.get("type") == "message_start":
+                                    _u = (_ev.get("message") or {}).get("usage") or {}
+                                    _usage["input_tokens"] = int(_u.get("input_tokens", 0) or 0)
+                                    _usage["cache_read_input_tokens"] = int(_u.get("cache_read_input_tokens", 0) or 0)
+                                    _usage["cache_creation_input_tokens"] = int(_u.get("cache_creation_input_tokens", 0) or 0)
+                                elif _ev.get("type") == "message_delta":
+                                    _u = _ev.get("usage") or {}
+                                    _usage["output_tokens"] = int(_u.get("output_tokens", 0) or 0)
+                                    _sr = (_ev.get("delta") or {}).get("stop_reason")
+                                    if _sr:
+                                        _usage["stop_reason"] = _sr
+                                elif _ev.get("type") == "content_block_start":
+                                    _bt = (_ev.get("content_block") or {}).get("type")
+                                    if _bt == "text":
+                                        _usage["text_blocks"] = _usage.get("text_blocks", 0) + 1
+                                    elif _bt == "thinking":
+                                        _usage["thinking_blocks"] = _usage.get("thinking_blocks", 0) + 1
+                                    elif _bt == "tool_use":
+                                        _usage["tool_use_blocks"] = _usage.get("tool_use_blocks", 0) + 1
+                            except Exception:
+                                pass
+                    _scan(_buf_str)
+                    _compressed = any(x in _enc for x in ("gzip", "deflate", "br"))
+                    if not _compressed and total_bytes > _acc_limit and _tail_buf:
                         try:
-                            _ev = json.loads(_data)
-                            if _ev.get("type") == "message_start":
-                                _u = (_ev.get("message") or {}).get("usage") or {}
-                                _usage["input_tokens"] = int(_u.get("input_tokens", 0) or 0)
-                                _usage["cache_read_input_tokens"] = int(_u.get("cache_read_input_tokens", 0) or 0)
-                                _usage["cache_creation_input_tokens"] = int(_u.get("cache_creation_input_tokens", 0) or 0)
-                            elif _ev.get("type") == "message_delta":
-                                _u = _ev.get("usage") or {}
-                                _usage["output_tokens"] = int(_u.get("output_tokens", 0) or 0)
-                                _sr = (_ev.get("delta") or {}).get("stop_reason")
-                                if _sr:
-                                    _usage["stop_reason"] = _sr
-                            elif _ev.get("type") == "content_block_start":
-                                _bt = (_ev.get("content_block") or {}).get("type")
-                                if _bt == "text":
-                                    _usage["text_blocks"] = _usage.get("text_blocks", 0) + 1
-                                elif _bt == "thinking":
-                                    _usage["thinking_blocks"] = _usage.get("thinking_blocks", 0) + 1
-                                elif _bt == "tool_use":
-                                    _usage["tool_use_blocks"] = _usage.get("tool_use_blocks", 0) + 1
+                            overlap = len(_acc_buf) + len(_tail_buf) - total_bytes
+                            if overlap >= 0:
+                                _tail_bytes = bytes(_tail_buf)[overlap:]
+                                _tail_str = _tail_bytes.decode("utf-8", errors="replace")
+                                _scan(_tail_str)
+                            else:
+                                _tail_raw = bytes(_tail_buf)
+                                _nl = _tail_raw.find(b"\n")
+                                if _nl >= 0:
+                                    _tail_str = _tail_raw[_nl + 1:].decode("utf-8", errors="replace")
+                                else:
+                                    _tail_str = _tail_raw.decode("utf-8", errors="replace")
+                                _scan(_tail_str)
+                                _usage["measure_partial"] = True
                         except Exception:
                             pass
+                    elif _compressed and total_bytes > _acc_limit:
+                        _usage["measure_partial"] = True
                     if _usage["output_tokens"] == 0:
                         _usage["output_tokens"] = max(1, total_bytes // 4)
                 else:

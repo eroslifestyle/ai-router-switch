@@ -11,51 +11,15 @@ MINIMAX_UNSUPPORTED_FIELDS = ("context_management", "mcp_servers", "thinking")
 MINIMAX_MIN_MAX_TOKENS = int(os.environ.get("AIROUTER_MINIMAX_MIN_MAX_TOKENS", "1024"))
 
 
-def _system_to_text(system_val) -> str:
-    """Converte il campo system (str | list di blocchi | None) in stringa."""
-    if isinstance(system_val, list):
-        parts = []
-        for item in system_val:
-            if isinstance(item, dict):
-                t = item.get("type", "")
-                if t == "text":
-                    parts.append(item.get("text", ""))
-                elif t == "thinking":
-                    inner = item.get("thinking", "")
-                    if isinstance(inner, dict):
-                        parts.append(inner.get("thinking", ""))
-                    else:
-                        parts.append(str(inner))
-        return "\n".join(parts)
-    if isinstance(system_val, str):
-        return system_val
-    return ""
-
-
-def _inject_system_as_message(data: dict) -> None:
-    """MiniMax non supporta il campo top-level `system` — lo converte in un messaggio role=system.
-
-    Bug: quando il body arriva da Claude Code, `system` è spesso una lista di blocchi
-    (formato Anthropic). Senza questa conversione, MiniMax riceve solo i messaggi utente
-    senza istruzioni di sistema né piano — quindi non capisce cosa fare e non scrive file.
-    """
-    system_val = data.get("system", "")
-    if not system_val:
-        return
-    system_text = _system_to_text(system_val)
-    if not system_text:
-        return
-    # Rimuovi il campo top-level system
-    data.pop("system", None)
-    # Iniettalo come primo messaggio role=system
-    msgs = data.get("messages", [])
-    if not isinstance(msgs, list):
-        msgs = []
-        data["messages"] = msgs
-    # Inietta PRIMA di qualsiasi altro messaggio (priorità)
-    msgs.insert(0, {"role": "system", "content": system_text})
-
-
+# Le due funzioni _system_to_text e _inject_system_as_message sono state rimosse.
+# Motivo: _inject_system_as_message spostava il campo 'system' in messages come
+# role='system', ma oggi e' dannoso. Con AIROUTER_TRANSITION_FILTERS=1 (produzione),
+# _repair_message_sequence scarta tutti i messaggi role=='system', cancellando il
+# system prompt e il contesto da context_rewrite. Risultato: risposte vuote o
+# allucinate in mix-am. Misurato: con system 'rispondi SOLO BANANA', MiniMax diretto
+# risponde BANANA, via router si presentava (come senza system). Non serve alcuna
+# conversione: l'endpoint api.minimaxi.chat/anthropic onora il campo 'system'
+# top-level, anche come lista di blocchi con cache_control.
 _SERVER_TOOL_BLOCK_TYPES = (
     "server_tool_use",
     "web_search_tool_result",
@@ -135,7 +99,12 @@ def remap_body_for_minimax(raw: bytes, request=None, *,
     try:
         data = json.loads(raw)
         orig = data.get("model", "")
-        if orig and not orig.startswith("MiniMax"):
+        # Match case-INsensitive: con startswith("MiniMax") il nome "minimax-m2.7-hs"
+        # (il modello CODING inviato da `ask-m3 --code`) non veniva riconosciuto come
+        # MiniMax e finiva riscritto al default MINIMAX_MODEL=MiniMax-M3, cioe' il
+        # modello di REASONING — l'esecutore del codice veniva sostituito a sua insaputa
+        # (276 richieste il 2026-07-29). Il confronto va fatto sul nome normalizzato.
+        if orig and not orig.lower().startswith("minimax"):
             if resolve_fp and request:
                 chat_id = resolve_fp(request)
                 if log_model_fn:
@@ -154,10 +123,9 @@ def remap_body_for_minimax(raw: bytes, request=None, *,
         for f in MINIMAX_UNSUPPORTED_FIELDS:
             data.pop(f, None)
         strip_server_tools_for_minimax(data)
-        # MiniMax non supporta il campo top-level `system` — lo convertiamo in
-        # un messaggio role=system nell'array messages. Senza questo, l'esecutore
-        # non riceve il piano né le istruzioni di sistema → non scrive file.
-        _inject_system_as_message(data)
+        # Il campo `system` resta top-level: l'endpoint Anthropic-compatible di
+        # MiniMax lo onora. Convertirlo in un messaggio role=system lo faceva
+        # cancellare da _repair_message_sequence a valle (vedi commento in testa).
         try:
             _mt = int(data.get("max_tokens", 0) or 0)
             if 0 < _mt < MINIMAX_MIN_MAX_TOKENS:

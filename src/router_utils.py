@@ -370,10 +370,16 @@ def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
         # Best-effort: se self_healing.sensor non importa, outcome/task_class restano assenti.
         try:
             from self_healing.sensor import classify_outcome, classify_task
+            # measure_partial: il relay non ha letto tutta la risposta (stream
+            # compresso, o buco fra i primi e gli ultimi 16KB). Senza questo flag
+            # una risposta lunga che inizia con un blocco thinking risultava "empty".
+            _partial = bool(usage.get("measure_partial"))
+            if _partial:
+                entry["measure_partial"] = True
             entry["outcome"] = classify_outcome(
                 status, entry.get("stop_reason", ""),
                 entry.get("text_blocks", 0), entry.get("tool_use_blocks", 0),
-                entry.get("output_tokens", 0))
+                entry.get("output_tokens", 0), _partial)
             entry["task_class"] = usage.get("task_class") or (classify_task(body) if body else "")
         except Exception:
             pass
