@@ -83,14 +83,31 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
     if estimate_tokens_body(new_1b_bytes, model) <= safe_limit:
         return (new_1b_bytes, True)
 
-    # ATTEMPT 2: piu' aggressivo, solo ultimi 2 messaggi senza summary
+    # ATTEMPT 2: degradazione progressiva del riassunto, mai la sua rimozione
+    for budget in [safe_limit // 2, safe_limit // 4, safe_limit // 8, safe_limit // 16]:
+        summary_b = build_shrink_summary(msgs, budget)
+        tail_b = _repair_message_sequence(msgs[-SHRINK_KEEP_TAIL:])
+
+        cand = dict(data)
+        cand["messages"] = tail_b
+        sys_b = _build_system(data.get("system"), summary_b)
+        if sys_b:
+            cand["system"] = sys_b
+        cand.pop("thinking", None)
+
+        cand_bytes = json.dumps(cand).encode()
+        if estimate_tokens_body(cand_bytes, model) <= safe_limit:
+            return (cand_bytes, True)
+
+    # Ultimo tentativo: coda ridotta a 2 messaggi ma conservando il riassunto compresso
     tail2 = _repair_message_sequence(msgs[-2:] if len(msgs) >= 2 else msgs)
+    summary2 = build_shrink_summary(msgs, safe_limit // 16)
 
     new2 = dict(data)
     new2["messages"] = tail2
-    system_original = _build_system(data.get("system"), "")
-    if system_original:
-        new2["system"] = system_original
+    system2 = _build_system(data.get("system"), summary2)
+    if system2:
+        new2["system"] = system2
     new2.pop("thinking", None)
 
     new2_bytes = json.dumps(new2).encode()
@@ -188,7 +205,11 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
     if estimate_tokens_body(new3_bytes, model) <= safe_limit:
         return (new3_bytes, True)
 
-    # Fallback: ritorna il piu' piccolo fra tutti i candidati
+    # Nessun candidato rientra nel limite safe_limit. Si sceglie il piu' piccolo
+    # per massimizzare la probabilita' che l'upstream lo accetti. Da quando
+    # ATTEMPT 2 non azzera piu' il riassunto, ogni candidato lo porta con se',
+    # quindi "piu' piccolo" non significa piu' "senza contesto". Il caso era
+    # silenzioso e ora viene loggato perche' e' una degradazione che va vista.
     candidates = [
         (new_bytes, len(new_bytes)),
         (new_1b_bytes, len(new_1b_bytes)),
@@ -197,6 +218,7 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
     ]
     best_bytes, best_len = min(candidates, key=lambda x: x[1])
     if best_len < len(body):
+        log.warning('rewrite fallback: nessun candidato entro %d token, scelto il piu\' piccolo (%db da %db) fp=%s', safe_limit, best_len, len(body), fp)
         return (best_bytes, True)
 
     return (body, False)

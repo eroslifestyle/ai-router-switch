@@ -51,7 +51,6 @@ from token_counter import estimate_tokens, count_tokens
 from model_context_map import get_safe_input_limit, get_context_limit, get_summary_budget
 from context_rewrite import rewrite_for_context
 from context_alert import notify_context_threshold, maybe_prepend_banner
-from summarizer import summarize_old_messages
 from providers.base import (
     FALLBACK_STATUSES, MINIMAX_FALLBACK_STATUSES,
     extract_last_user_text, _text_from_message as _pmsg_text,

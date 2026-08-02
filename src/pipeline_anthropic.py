@@ -100,34 +100,52 @@ async def _try_shrink_body_haiku(orig: dict, target_bytes: int):
         if not msgs:
             return None
         # Immagini NON ridimensionate per shrink (fix 2026-07-22)
-        budget = SUMMARY_BUDGET
-        summary_content = build_shrink_summary(msgs, budget)
-        tail_msgs = msgs[-SHRINK_KEEP_TAIL:] if msgs else []
+
+        # BUG 2 fix: system serializzato correttamente (non come JSON grezzo)
         system_val = orig.get("system", "")
         if isinstance(system_val, list):
-            system_str = "\n\n".join(json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else v for v in system_val)
+            parts = []
+            for v in system_val:
+                if isinstance(v, str):
+                    parts.append(v)
+                elif isinstance(v, dict):
+                    if v.get("type") == "text":
+                        parts.append(v.get("text", ""))
+            system_str = "\n\n".join(parts)
+        elif isinstance(system_val, str):
+            system_str = system_val
         else:
-            system_str = system_val or ""
-        system_content = system_str + "\n\n" + summary_content if system_str else summary_content
-        shrunk = dict(orig)
-        shrunk["messages"] = tail_msgs
-        tail_msgs = _repair_message_sequence(tail_msgs)
-        if system_content:
-            shrunk["system"] = system_content
-        shrunk.pop("thinking", None)
-        shrunk_bytes = json.dumps(shrunk).encode()
-        if len(shrunk_bytes) <= target_bytes:
-            return shrunk_bytes
-        tail2 = msgs[-2:] if len(msgs) >= 2 else msgs
-        tail2 = _repair_message_sequence(tail2)
-        shrunk2 = dict(orig)
-        shrunk2["messages"] = tail2
-        if system_str:
-            shrunk2["system"] = system_str
-        shrunk2.pop("thinking", None)
-        shrunk2_bytes = json.dumps(shrunk2).encode()
-        if len(shrunk2_bytes) <= target_bytes:
-            return shrunk2_bytes
+            system_str = ""
+
+        # BUG 1 fix: scala di budget - il summary NON va MAI perso
+        BUDGETS = [SUMMARY_BUDGET, 280_000, 140_000, 70_000, 35_000, 16_000, 8_000]
+        for budget in BUDGETS:
+            # BUG 3 fix: riparazione PRIMA di assegnare
+            tail_msgs = _repair_message_sequence(msgs[-SHRINK_KEEP_TAIL:])
+            summary_content = build_shrink_summary(msgs, budget)
+            system_content = (system_str + "\n\n" + summary_content) if system_str else summary_content
+            shrunk = dict(orig)
+            shrunk["messages"] = tail_msgs
+            if system_content:
+                shrunk["system"] = system_content
+            shrunk.pop("thinking", None)
+            shrunk_bytes = json.dumps(shrunk).encode()
+            if len(shrunk_bytes) <= target_bytes:
+                return shrunk_bytes
+
+        # Ultimo tentativo: coda ridotta a 2 messaggi, budget 8000, summary mantenuto
+        tail_final = _repair_message_sequence(msgs[-2:] if len(msgs) >= 2 else msgs)
+        summary_final = build_shrink_summary(msgs, 8_000)
+        system_final = (system_str + "\n\n" + summary_final) if system_str else summary_final
+        shrunk_final = dict(orig)
+        shrunk_final["messages"] = tail_final
+        if system_final:
+            shrunk_final["system"] = system_final
+        shrunk_final.pop("thinking", None)
+        shrunk_final_bytes = json.dumps(shrunk_final).encode()
+        if len(shrunk_final_bytes) <= target_bytes:
+            return shrunk_final_bytes
+
         return None
     except Exception as e:
         log(f"try_shrink_body_haiku EXC: {e}")
@@ -384,5 +402,4 @@ async def _serve_minimax_vision(request, orig: dict, session, chat_fp: str, rela
     L'ACT (MiniMax) riceve solo testo+piano, mai immagini raw.
     Ritorna sempre None (nessun bypass diretto a M3)."""
     return None
-
 
