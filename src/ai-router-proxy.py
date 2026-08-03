@@ -813,6 +813,14 @@ async def handle(request):
         try:
             import glm_backend as _glm_mod
             _glm_model = _model_override or _glm_mod.resolve_glm_upstream_model(_glm_mod.GLM_TIER_MID)
+            # Dal 2026-07-25 il tiering dinamico non esiste piu: il modello GLM
+            # effettivo arriva da role_routing ed e' noto solo qui. In fascia
+            # peak (14-18 Asia/Shanghai) glm-5.2 e glm-5-turbo costano 3x e
+            # vengono declassati a glm-4.7 per evitare costi eccessivi.
+            _glm_model_pre = _glm_model
+            _glm_model, _peak_capped = _glm_mod.apply_peak_cap(_glm_model)
+            if _peak_capped:
+                log(f"tunnel {mode} GLM peak-cap: {_glm_model_pre} -> {_glm_model} (fascia peak 14-18 Asia/Shanghai, costo 3x)")
             # z.ai onora il campo "model" del BODY: senza set_body_model ignora
             # il modello scelto qui e usa il proprio default (vedi docstring di
             # set_body_model). forward_glm non riscrive il body: lo fa il caller.

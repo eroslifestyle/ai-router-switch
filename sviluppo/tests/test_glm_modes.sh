@@ -42,16 +42,23 @@ assert gb.heuristic_tier(piccolo) == gb.GLM_TIER_MID, "body piccolo deve dare MI
 assert gb.heuristic_tier(medio) == gb.GLM_TIER_TURBO, "body >150K deve dare TURBO"
 assert gb.heuristic_tier(grande) == gb.GLM_TIER_TOP, "body >800K deve dare TOP"
 
-# apply_peak_cap prende un TIER e consulta peak_scheduler con import lazy:
-# va patchato li', non su glm_backend.
+# apply_peak_cap accetta sia TIER KEY (TOP/TURBO/MID/VISION) sia NOME MODELLO reale (glm-5.2, glm-4.7, ecc.).
+# Dal 2026-07-25 il tiering dinamico non esiste piu: il proxy riceve il modello da role_routing
+# (glm-5.2 per THINK, glm-4.7 per ACT), e apply_peak_cap lo converte in tier prima di consultare peak_scheduler.
+# Il monkeypatch va fatto su peak_scheduler, non su glm_backend (import lazy).
 ps.should_block_glm_model = lambda tier, now=None: tier in (gb.GLM_TIER_TOP, gb.GLM_TIER_TURBO)
 assert gb.apply_peak_cap(gb.GLM_TIER_TOP) == (gb.GLM_TIER_MID, True), "TOP in peak -> MID"
 assert gb.apply_peak_cap(gb.GLM_TIER_TURBO) == (gb.GLM_TIER_MID, True), "TURBO in peak -> MID"
 assert gb.apply_peak_cap(gb.GLM_TIER_MID) == (gb.GLM_TIER_MID, False), "MID resta MID"
 assert gb.apply_peak_cap(gb.GLM_TIER_VISION) == (gb.GLM_TIER_VISION, False), "VISION esente"
+assert gb.apply_peak_cap("glm-5.2") == ("glm-4.7", True), "glm-5.2 in peak -> glm-4.7"
+assert gb.apply_peak_cap("glm-5-turbo") == ("glm-4.7", True), "glm-5-turbo in peak -> glm-4.7"
+assert gb.apply_peak_cap("glm-4.7") == ("glm-4.7", False), "glm-4.7 gia economico, nessun declassamento"
+assert gb.apply_peak_cap("glm-4.6V") == ("glm-4.6V", False), "VISION esente anche per nome modello"
+assert gb.apply_peak_cap("modello-ignoto") == ("modello-ignoto", False), "input sconosciuto invariato, fallback sicuro"
 print("ok")
 PY
-) >/dev/null 2>&1 && ok "tiering per dimensione + peak-cap corretti" || ko "unit tiering/peak fallito"
+) >/dev/null 2>&1 && ok "tiering per dimensione + peak-cap (tier key e nome modello)" || ko "unit tiering/peak fallito"
 
 # 3) Avvio istanza isolata
 echo "── [3] Avvio istanza isolata ──"

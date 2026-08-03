@@ -93,6 +93,10 @@ GLM_MODEL_FOR_TIER = {
     GLM_TIER_MULTIMODAL: "glm-5V-Turbo",
 }
 
+# Mappa inversa: da nome modello a tier key
+# Serve ad apply_peak_cap: dal 2026-07-25 il proxy riceve un nome modello reale da role_routing, non una tier key
+GLM_TIER_FOR_MODEL = {model: tier for tier, model in GLM_MODEL_FOR_TIER.items()}
+
 # ── THINK-ACT-VERIFY constants ──────────────────────────────────────────────────
 GLM_THINK_VERIFY_MODEL = "glm-5.2"
 GLM_THINK_TIMEOUT_SEC = 60
@@ -409,19 +413,30 @@ async def classify_tier(body: bytes, request, session, log_fn=print):
         return GLM_TIER_MID
 
 
-def apply_peak_cap(tier: str):
-    """Applica il cap peak: TURBO/TOP → MID se in fascia peak.
+def apply_peak_cap(tier_or_model: str):
+    """Applica il cap peak: TURBO/TOP → MID e model names equivalenti se in fascia peak.
 
     VISION e MULTIMODAL non sono mai bloccati (servono per feature specifiche).
+    Dal refactoring del 2026-07-25: accetta sia tier key che nome modello,
+    restituendo nel dominio dell'input.
     """
+    # Determina se l'input e' una tier key
+    is_tier = tier_or_model in GLM_MODEL_FOR_TIER
+    tier = tier_or_model if is_tier else GLM_TIER_FOR_MODEL.get(tier_or_model, tier_or_model)
+
     # VISION/MULTIMODAL esenti dal peak cap
     if tier in (GLM_TIER_VISION, GLM_TIER_MULTIMODAL):
-        return tier, False
+        return tier_or_model, False
+
     # Import lazy per evitare circular
     import peak_scheduler as _ps
     if _ps.should_block_glm_model(tier):
-        return GLM_TIER_MID, True
-    return tier, False
+        if is_tier:
+            return GLM_TIER_MID, True
+        else:
+            return GLM_MODEL_FOR_TIER[GLM_TIER_MID], True
+
+    return tier_or_model, False
 
 
 def resolve_glm_upstream_model(tier: str) -> str:

@@ -42,13 +42,14 @@ your model's settings, skills, agents, MCP, tools, or system prompt.
 
 | Mode | Behaviour |
 |---|---|
-| `glm` | GLM-5.2 classifies complexity → routes `glm-5-turbo` → `glm-4.7` → `glm-5.2` |
+| `glm` | Role-based: `glm-5.2` THINK → `glm-4.7` ACT |
 | `glm-minimax` | GLM-5.2 THINK → MiniMax ACT (streaming) → GLM verify on complex tasks |
 | `anthropic-glm` | Claude orchestrates → GLM tiered execution → Claude verifies T2 tasks |
 
 **GLM cost control:** peak window `14:00–18:00 Asia/Shanghai` (~08:00–12:00 Italy summer).
-`glm-5.2` / `glm-5-turbo` cost 3× in peak → blocked for complex tasks, simple ones
-use `glm-4.7`. Off-peak: full tiering, 1× promo pricing until 2026-09-30.
+In peak, `glm-5.2` / `glm-5-turbo` cost 3× → router automatically downgrades to `glm-4.7`
+(THINK runs on `glm-4.7` too). Off-peak: no downgrade, 1× promo pricing until 2026-09-30.
+
 Fallback chain on error/quota: GLM → MiniMax → Claude.
 
 ---

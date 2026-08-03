@@ -44,7 +44,7 @@ with automatic failover, per-chat isolation, and cross-model verification.
 - 8 ports (1 dynamic + 7 forced)
 - Automatic bidirectional failover on retryable errors
 - Per-chat isolation via conversation fingerprint
-- GLM tiering with peak-cost awareness (14:00–18:00 Shanghai)
+- GLM peak-cost downgrade to `glm-4.7` (14:00–18:00 Shanghai)
 - Triple defense: systemd + cron watchdog + SessionStart hook
 
 ---

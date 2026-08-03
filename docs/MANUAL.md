@@ -84,18 +84,19 @@ Accetta l'alias storico `mixed`.
 
 ### 4. `glm` — GLM/z.ai puro con tiering
 
-GLM-5.2 classifica la complessità del task → instrada al tier più appropriato:
+Il modello GLM lo decide il ruolo, non un classificatore di complessità:
 
-| Tier | Modello | Condizione |
-|------|---------|------------|
-| Alto | `glm-5-turbo` | Task complessi, peak-off |
-| Basso | `glm-4.7` | Task semplici |
-| Top | `glm-5.2` | Peak-off, task complessi non risolti |
+| Ruolo | Modello | Note |
+|-------|---------|------|
+| THINK | `glm-5.2` | Orchestrazione: classifica, pianifica, verifica |
+| ACT | `glm-4.7` | Esecuzione |
 
 **Cost control peak:** fascia `14:00–18:00 Asia/Shanghai` (~08:00–12:00 Italia estate).
-In peak `glm-5.2`/`glm-5-turbo` costano 3× e sono bloccati → task complessi
-ricadono su Claude, task semplici usano `glm-4.7`.
-Off-peak: tiering completo, prezzo 1× promo fino al 2026-09-30.
+In peak `glm-5.2`/`glm-5-turbo` costano 3× e vengono declassati automaticamente a
+`glm-4.7` dal router; in quella fascia quindi anche il THINK gira su `glm-4.7`.
+Il declassamento riguarda le modalità `glm` e `mix-gm`, le uniche che instradano
+`glm-5.2`. Viene registrato nel log con il prefisso `GLM peak-cap`.
+Off-peak: nessun declassamento, prezzo 1× promo fino al 2026-09-30.
 
 **Escalation:** resta sul ladder GLM. In questa modalità non intervengono né MiniMax
 né Anthropic.
