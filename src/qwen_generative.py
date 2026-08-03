@@ -12,6 +12,7 @@ e qwen3-tts-flash, help.aliyun.com/en dà qwen-image-3.0-pro e
 qwen-audio-3.0-tts-plus). Ogni nome è sovrascrivibile da variabile d'ambiente.
 """
 import json
+import os
 
 import aiohttp
 import aiohttp.web
@@ -27,11 +28,23 @@ from qwen_backend import (
     QWEN_MODEL_TTS,
     QWEN_MODEL_VIDEO,
     QWEN_MULTIMODAL_PATH,
+    _QWEN_SEM,
     _non_stream_timeout,
     get_qwen_key,
 )
 
-
+# ── Path DashScope ────────────────────────────────────────────────────────────
+# VERIFICATI sulla doc ufficiale: immagini e TTS passano entrambi dal path
+# 'multimodal-generation'. NON VERIFICATI: video (la doc lo descrive come task
+# asincrono con creazione + polling, forma non confermata), ASR e musica — le
+# pagine corrispondenti rispondono 404 sul mirror internazionale. Ogni path e'
+# sovrascrivibile da env, cosi' il probe live li corregge senza toccare il codice.
+QWEN_PATH_IMAGE = os.environ.get("QWEN_PATH_IMAGE", QWEN_MULTIMODAL_PATH)
+QWEN_PATH_TTS = os.environ.get("QWEN_PATH_TTS", QWEN_MULTIMODAL_PATH)
+QWEN_PATH_VIDEO = os.environ.get(  # NON VERIFICATO
+    "QWEN_PATH_VIDEO", "/api/v1/services/aigc/video-generation/video-synthesis")
+QWEN_PATH_ASR = os.environ.get("QWEN_PATH_ASR", QWEN_MULTIMODAL_PATH)      # NON VERIFICATO
+QWEN_PATH_MUSIC = os.environ.get("QWEN_PATH_MUSIC", QWEN_MULTIMODAL_PATH)  # NON VERIFICATO
 
 async def _forward_dashscope(request, payload: dict, session, path: str, log_fn=print,
                              sse: bool = False) -> aiohttp.web.Response:
@@ -74,17 +87,13 @@ async def _forward_dashscope(request, payload: dict, session, path: str, log_fn=
 
     except Exception as e:
         log_fn(f"DashScope error ({path}): {e}")
-        return aiohttp.web.Response(
-            status=502,
-            json={"error": str(e)},
-            content_type="application/json"
-        )
+        return aiohttp.web.json_response({"error": str(e)}, status=502)
 
 
 async def forward_qwen_image(request, body: bytes, session, log_fn=print):
     """Generazione immagini via DashScope.
 
-    Path: /api/v1/services/aigc/text2image/image-generation
+    Path: QWEN_PATH_IMAGE (doc ufficiale: multimodal-generation/generation)
     Modello: QWEN_MODEL_IMAGE (da verificare col probe live)
     """
     try:
@@ -121,7 +130,7 @@ async def forward_qwen_image(request, body: bytes, session, log_fn=print):
 
     return await _forward_dashscope(
         request, payload, session,
-        "/api/v1/services/aigc/text2image/image-generation",
+        QWEN_PATH_IMAGE,
         log_fn=log_fn
     )
 
@@ -129,7 +138,7 @@ async def forward_qwen_image(request, body: bytes, session, log_fn=print):
 async def forward_qwen_video(request, body: bytes, session, log_fn=print):
     """Generazione video via DashScope.
 
-    Path: /api/v1/services/aigc/video generation/text2video
+    Path: QWEN_PATH_VIDEO (NON VERIFICATO: la doc lo da' come task asincrono)
     Modello: QWEN_MODEL_VIDEO (da verificare col probe live)
     """
     try:
@@ -161,7 +170,7 @@ async def forward_qwen_video(request, body: bytes, session, log_fn=print):
 
     return await _forward_dashscope(
         request, payload, session,
-        "/api/v1/services/aigc/video-generation/text2video",
+        QWEN_PATH_VIDEO,
         log_fn=log_fn
     )
 
@@ -169,7 +178,7 @@ async def forward_qwen_video(request, body: bytes, session, log_fn=print):
 async def forward_qwen_tts(request, body: bytes, session, log_fn=print):
     """Sintesi vocale via DashScope.
 
-    Path: /api/v1/services/aigc/speech-generation/text2audio
+    Path: QWEN_PATH_TTS (doc ufficiale: multimodal-generation/generation)
     Modello: QWEN_MODEL_TTS (da verificare col probe live)
     """
     try:
@@ -200,7 +209,7 @@ async def forward_qwen_tts(request, body: bytes, session, log_fn=print):
 
     return await _forward_dashscope(
         request, payload, session,
-        "/api/v1/services/aigc/speech-generation/text2audio",
+        QWEN_PATH_TTS,
         log_fn=log_fn
     )
 
@@ -208,7 +217,7 @@ async def forward_qwen_tts(request, body: bytes, session, log_fn=print):
 async def forward_qwen_asr(request, body: bytes, session, log_fn=print):
     """Riconoscimento vocale via DashScope.
 
-    Path: /api/v1/services/aigc/speech2text/voice-generation
+    Path: QWEN_PATH_ASR (NON VERIFICATO)
     Modello: QWEN_MODEL_ASR (da verificare col probe live)
     """
     try:
@@ -235,7 +244,7 @@ async def forward_qwen_asr(request, body: bytes, session, log_fn=print):
 
     return await _forward_dashscope(
         request, payload, session,
-        "/api/v1/services/aigc/speech2text/voice-generation",
+        QWEN_PATH_ASR,
         log_fn=log_fn
     )
 
@@ -243,7 +252,7 @@ async def forward_qwen_asr(request, body: bytes, session, log_fn=print):
 async def forward_qwen_music(request, body: bytes, session, log_fn=print):
     """Generazione musica via DashScope.
 
-    Path: /api/v1/services/aigc/music-generation/music-creation
+    Path: QWEN_PATH_MUSIC (NON VERIFICATO)
     Modello: QWEN_MODEL_MUSIC (da verificare col probe live)
     """
     try:
@@ -272,7 +281,7 @@ async def forward_qwen_music(request, body: bytes, session, log_fn=print):
 
     return await _forward_dashscope(
         request, payload, session,
-        "/api/v1/services/aigc/music-generation/music-creation",
+        QWEN_PATH_MUSIC,
         log_fn=log_fn
     )
 
@@ -323,11 +332,7 @@ async def forward_qwen_embedding(request, body: bytes, session, log_fn=print):
 
     except Exception as e:
         log_fn(f"DashScope embedding error: {e}")
-        return aiohttp.web.Response(
-            status=502,
-            json={"error": str(e)},
-            content_type="application/json"
-        )
+        return aiohttp.web.json_response({"error": str(e)}, status=502)
 
 
 async def forward_qwen_rerank(request, body: bytes, session, log_fn=print):
@@ -375,8 +380,4 @@ async def forward_qwen_rerank(request, body: bytes, session, log_fn=print):
 
     except Exception as e:
         log_fn(f"DashScope rerank error: {e}")
-        return aiohttp.web.Response(
-            status=502,
-            json={"error": str(e)},
-            content_type="application/json"
-        )
+        return aiohttp.web.json_response({"error": str(e)}, status=502)

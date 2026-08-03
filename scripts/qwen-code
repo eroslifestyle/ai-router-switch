@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""qwen-code: esecutore di codice Qwen per la modalita' router `qwen`."""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def _get_key() -> str:
+    """Trova la API key nell'ordine: QWEN_API_KEY, DASHSCOPE_API_KEY, secrets.sh."""
+    for env_var in ("QWEN_API_KEY", "DASHSCOPE_API_KEY"):
+        key = os.environ.get(env_var)
+        if key:
+            return key
+    try:
+        result = subprocess.run(
+            ["bash", os.path.expanduser("~/.claude/secrets/secrets.sh"), "get", "qwen.api_key"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    print("ERRORE: API key mancante.", file=sys.stderr)
+    print("Configura qwen.api_key in ~/.claude/secrets/secrets.sh oppure esporta DASHSCOPE_API_KEY", file=sys.stderr)
+    sys.exit(2)
+
+
+def _get_workspace() -> str | None:
+    """Trova la workspace id nell'ordine: QWEN_WORKSPACE_ID, secrets.sh."""
+    ws = os.environ.get("QWEN_WORKSPACE_ID")
+    if ws:
+        return ws
+    try:
+        result = subprocess.run(
+            ["bash", os.path.expanduser("~/.claude/secrets/secrets.sh"), "get", "qwen.workspace_id"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _build_base_url() -> str:
+    """Costruisce l'URL base per l'endpoint OpenAI-compatible."""
+    base = os.environ.get("QWEN_OPENAI_BASE")
+    if base:
+        return base.rstrip("/")
+    ws = _get_workspace()
+    if ws:
+        region = os.environ.get("QWEN_REGION", "ap-southeast-1")
+        return f"https://{ws}.{region}.maas.aliyuncs.com/compatible-mode/v1"
+    return "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+
+
+def _strip_fence(text: str) -> str:
+    """Rimuove i fence markdown dalla risposta se presenti."""
+    lines = text.splitlines()
+    if not lines:
+        return text
+    if lines[0].strip().startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines)
+
+
+def _telemetry(model: str, usage: dict, elapsed: float) -> None:
+    """Registra la telemetria in ~/.claude/m3/usage.jsonl."""
+    try:
+        path = Path.home() / ".claude" / "m3" / "usage.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "tool": "qwen-code",
+            "model": model,
+            "prompt_tokens": usage.get("prompt_tokens", 0),
+            "completion_tokens": usage.get("completion_tokens", 0),
+            "elapsed_s": round(elapsed, 2)
+        }
+        with path.open("a") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception:
+        pass
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Generatore di codice Qwen")
+    parser.add_argument("prompt", nargs="*", help="Specifica opzionale")
+    parser.add_argument("-f", "--file", help="Leggi la spec da un file")
+    parser.add_argument("--model", default=os.environ.get("QWEN_CODE_MODEL", "qwen3-coder-plus"))
+    parser.add_argument("--max", type=int, default=8192, help="max_tokens (0 = nessun limite)")
+    parser.add_argument("--temp", type=float, default=0.2)
+    parser.add_argument("--raw", action="store_true", help="Non rimuovere i fence markdown")
+    parser.add_argument("--timeout", type=int, default=600)
+    args = parser.parse_args()
+
+    # Leggi la spec
+    if args.file:
+        try:
+            spec = Path(args.file).read_text()
+        except Exception as e:
+            print(f"ERRORE: impossibile leggere {args.file}: {e}", file=sys.stderr)
+            sys.exit(1)
+    elif not args.prompt or args.prompt == ["-"]:
+        spec = sys.stdin.read()
+    else:
+        spec = " ".join(args.prompt)
+
+    if not spec.strip():
+        print("ERRORE: specifica vuota", file=sys.stderr)
+        sys.exit(1)
+
+    key = _get_key()
+    base_url = _build_base_url()
+    url = f"{base_url}/chat/completions"
+
+    system_prompt = (
+        "You are a code generator. Return ONLY the requested code, no explanations, "
+        "no markdown fences, no preambles. Comments in the code should be in Italian."
+    )
+
+    body = {
+        "model": args.model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": spec}
+        ],
+        "temperature": args.temp
+    }
+    if args.max > 0:
+        body["max_tokens"] = args.max
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {key}"
+    }
+
+    start = time.time()
+    try:
+        req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=args.timeout) as resp:
+            data = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        body_err = e.read().decode("utf-8", errors="replace")[:500]
+        print(f"ERRORE HTTP {e.code}: {body_err}", file=sys.stderr)
+        sys.exit(1)
+    except urllib.error.URLError as e:
+        print(f"ERRORE di rete: {e.reason}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"ERRORE: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    elapsed = time.time() - start
+
+    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+    finish_reason = data.get("choices", [{}])[0].get("finish_reason", "unknown")
+
+    if not content:
+        raw_preview = json.dumps(data)[:300]
+        print(f"ERRORE: risposta vuota. finish_reason={finish_reason}. Risposta grezza: {raw_preview}", file=sys.stderr)
+        sys.exit(1)
+
+    if not args.raw:
+        content = _strip_fence(content)
+
+    print(content)
+
+    usage = data.get("usage", {})
+    _telemetry(args.model, usage, elapsed)
+
+    comp_tokens = usage.get("completion_tokens", 0)
+    print(f"[qwen-code] {args.model} · {comp_tokens}tok · {elapsed:.1f}s · {finish_reason}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

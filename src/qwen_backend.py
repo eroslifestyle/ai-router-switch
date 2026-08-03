@@ -53,7 +53,7 @@ def _non_stream_timeout():
     a runtime router_constants e' gia' caricato e un except silenzioso reintrodurrebbe
     la classe di regressione del fallback muto."""
     from router_constants import NON_STREAM_SOCK_READ_SEC
-    return ClientTimeout(total=None, sock_connect=15, sock_read=NON_STREAM_SOK_READ_SEC)
+    return ClientTimeout(total=None, sock_connect=15, sock_read=NON_STREAM_SOCK_READ_SEC)
 
 
 KEY_FILE = Path.home() / ".claude" / "secrets" / "secrets.sh"

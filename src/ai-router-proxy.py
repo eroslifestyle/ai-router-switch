@@ -600,15 +600,33 @@ async def handle(request):
             log(f"[models] ERRORE: {_e}\n{traceback.format_exc()}")
             return web.Response(status=500, text=f"internal error: {_e}")
 
-    # Generative stubs
-    if request.path == "/v1/images/generations":
-        return await _route_v1_images(request)
-    if request.path == "/v1/videos/generations":
-        return await _route_v1_videos(request)
-    if request.path == "/v1/music/generations":
-        return await _route_v1_music(request)
-    if request.path == "/v1/audio/speech":
-        return await _route_v1_audio_speech(request)
+    # Generative stubs. In modalita' qwen vanno su DashScope, in tutte le altre
+    # restano sul percorso MiniMax di sempre (nessuna regressione).
+    _GEN_ROUTES = {
+        "/v1/images/generations": (_route_v1_images, "forward_qwen_image"),
+        "/v1/videos/generations": (_route_v1_videos, "forward_qwen_video"),
+        "/v1/music/generations": (_route_v1_music, "forward_qwen_music"),
+        "/v1/audio/speech": (_route_v1_audio_speech, "forward_qwen_tts"),
+        "/v1/embeddings": (None, "forward_qwen_embedding"),
+        "/v1/rerank": (None, "forward_qwen_rerank"),
+    }
+    if request.path in _GEN_ROUTES:
+        _minimax_route, _qwen_fn_name = _GEN_ROUTES[request.path]
+        if mode == "qwen" and QWEN_AVAILABLE:
+            try:
+                import qwen_generative as _qgen
+                log(f"generative {mode}: {request.path} -> DashScope ({_qwen_fn_name})")
+                return await getattr(_qgen, _qwen_fn_name)(
+                    request, body, request.app["session"], log_fn=log)
+            except Exception as e:
+                log(f"generative qwen EXC su {request.path}: {e} -> 502")
+                debug_catalog.record_event(severity="error", category="qwen",
+                                           kind="generative_exception", snippet=str(e))
+                return web.json_response({"type": "error", "error": {
+                    "type": "qwen_unavailable", "message": str(e)}}, status=502)
+        if _minimax_route is not None:
+            return await _minimax_route(request)
+        return web.Response(status=404, text="not found")
 
     if not _path_allowed(request.path):
         log(f"path non consentito: {request.path}")
