@@ -27,7 +27,7 @@ EnvironmentFile=%h/.secrets/minimax.env
 EnvironmentFile=%h/.secrets/glm.env
 
 # Pre-start: libera tutte le porte da processi orfani (se restart precedente è fallito a chiudere)
-ExecStartPre=-/bin/sh -c "for p in 8787 8771 8772 8773 8775 8776 8777; do fuser -k -n tcp $p 2>/dev/null || true; done; sleep 1"
+ExecStartPre=-/bin/sh -c "for p in 8787 8771 8772 8773 8775 8776 8777 8778; do fuser -k -n tcp $p 2>/dev/null || true; done; sleep 1"
 
 ExecStart=/home/mrxxx/.claude/scripts/ai-router-proxy-wrapper.sh
 

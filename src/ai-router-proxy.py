@@ -840,6 +840,12 @@ async def handle(request):
             up = await _qwen_mod.forward_qwen(request, _qwen_body, session,
                                               _req_model or _qwen_model, log_fn=log,
                                               passthrough=True, upstream_model=_qwen_model)
+            # forward_qwen ritorna una web.Response gia' pronta sui suoi percorsi
+            # d'errore (chiave assente, rate-limit esaurito): il relay si aspetta
+            # una ClientResponse e chiamerebbe .release() su di essa, mascherando
+            # il messaggio utile dietro un AttributeError.
+            if isinstance(up, web.Response):
+                return up
             return await relay(up, extra_headers={"x-ai-verified": f"tunnel-{mode}-qwen({_qwen_model})"}, final_override=f"qwen:{_qwen_model}")
         except Exception as e:
             log(f"tunnel {mode} QWEN EXC: {e} -> 502")
