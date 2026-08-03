@@ -1,6 +1,10 @@
 # ai-router-switch — TODO unico
 
-**Aggiornato:** 2026-08-02 · **HEAD di riferimento:** `e757bf3` · **Stato:** 6 voci aperte. Suite: **168 passed, 0 errors** dalla root. Il 02/08 chiuso il bug «MiniMax allucina o risponde vuoto» in `mix-am`: il system prompt non arrivava mai all'esecutore, più 11 difetti misurati su shrink e telemetria (vedi `.claude/checkpoints/CP_20260802_1743.md`). Il 01/08 chiuso lo stall `Response stalled mid-stream` di `mode anthropic`: era prompt caching morto, due bug sui `cache_control` (vedi `.claude/checkpoints/CP_20260801_1300.md`). Il 27–28/07 campagna di 6 fix sul context rate (F1, F8–F11): vedi `.claude/checkpoints/CP_20260728_0736.md`.
+**Aggiornato:** 2026-08-03 · **HEAD di riferimento:** `6049d01` · **Stato:** 12 voci aperte, di cui 2 di sola osservazione e 2 opzionali. Suite: **168 passed, 0 errors** dalla root e **116** da `sviluppo/tests/` (misurate il 03/08). Servizio `active`, `/health` 200.
+
+Il 03/08 questo file è stato riallineato al merge di tutte le sessioni del periodo: chiusa la voce `mix-gm` con l'evidenza del log (il test dal vivo era già passato il 31/07 e veniva trascinata come aperta), e recuperate **sei voci** che vivevano solo nei checkpoint e non erano mai arrivate qui — i tre follow-up del self-healing, le due osservazioni aperte il 01/08 e la disconnessione dei connettori Google. La narrazione completa del periodo sta in **[`.claude/WIKI.md`](WIKI.md)**.
+
+Il 02/08 chiuso il bug «MiniMax allucina o risponde vuoto» in `mix-am`: il system prompt non arrivava mai all'esecutore, più 11 difetti misurati su shrink e telemetria (`.claude/checkpoints/CP_20260802_1743.md`). Il 01/08 chiuso lo stall `Response stalled mid-stream` di `mode anthropic`: era prompt caching morto, due bug sui `cache_control` (`.claude/checkpoints/CP_20260801_1300.md`). Il 27–28/07 campagna di 6 fix sul context rate, F1 e F8–F11 (`.claude/checkpoints/CP_20260728_0736.md`).
 
 Questo file unifica il vecchio `TODO.md` (32 sezioni, 5 blocchi «Attivo» sparsi), `PROJECT-TOD.md` (fermo al 2026-07-18, backlog AQ nel frattempo chiuso) e le voci residue dei 97 checkpoint di sessione. Contesto completo: `.claude/checkpoints/CP_20260727_1600.md`. Il dettaglio verboso dei completati resta recuperabile con `git show fc3fbe8:.claude/TODO.md`.
 
@@ -21,7 +25,10 @@ Questo file unifica il vecchio `TODO.md` (32 sezioni, 5 blocchi «Attivo» spars
   **Errore di analisi da non ripetere:** lo strip dei tool **non** è esclusivo delle modalità pure — `src/forward_anthropic.py` lo applica anche alla leg Anthropic delle miste (righe 221 e 327). La discriminante è se il tool rimosso *portava* il breakpoint, cioè l'ordine dei tool nel workspace: per questo colpiva una chat sola.
   **Residuo (solo osservazione):** la firma di salute è `input=2` nel log `cache: OK bp=...`; se ricompare `creation=0` con input a sei cifre il caching è di nuovo morto. `client_closing=True` = client sparito, `False` = colpa del router. Limite latente mai osservato scattare: `sock_read=120` sugli stream (le non-streaming sono a 600 s dal fix `7c84535`) — non toccato per assenza di evidenza.
 
-- [ ] **Massimizzare l'esecuzione su MiniMax in `mix-gm` — enforce_hierarchy deny mode-aware IMPLEMENTATO (2026-07-31), manca test dal vivo.**
+- [x] **Massimizzare l'esecuzione su MiniMax in `mix-gm` — enforce_hierarchy deny mode-aware. CHIUSA il 2026-08-03 con l'evidenza del log: il test dal vivo era già avvenuto il 31/07.**
+  **Chiusura (2026-08-03).** La voce risultava aperta per trascinamento: `CP_20260731_1238.md` dichiarava il test dal vivo passato, ma `CP_20260802_1743.md` la riportava fra i to-do «preesistenti» senza riverificarla. Conteggio su `~/.claude/m3/hierarchy-violations.jsonl` (13.480 entry totali): **13 deny `mix-gm-delegate-to-executor`**, dal 2026-07-31T08:11:04 al 2026-07-31T20:05:32; più **55 `mix-am-delegate-to-executor`** fino al 2026-08-02T21:46:59 e **2 `minimax-delegate-to-executor`**. L'estensione a `{mix-gm, mix-am, minimax}`, che la voce elencava come opzionale, risulta quindi applicata e attiva su tutte e tre le modalità.
+  **Variazione del 2026-08-02, su richiesta esplicita dell'utente:** l'intercettazione delle redirezioni Bash è stata declassata da blocco ad audit. `_check_bash_redirect` (`~/.claude/hooks/enforce_hierarchy.py:243`) registra e lascia passare — riga 275, reason `{mode}-bash-redirect-audit`. Il deny su Edit/Write/MultiEdit resta invariato (`DENY_CODING_MODES` alla riga 25).
+  **Da non ripetere:** riportare una voce come aperta perché la si trova aperta nel checkpoint precedente. Prima di trascinarla, controllare se il bersaglio esiste ancora — qui bastava contare le entry del log.
   **Diagnosi.** mix-gm delega all'esecutore solo nel 18% dei casi (GLM 82% / MiniMax 18% su 905 richieste in `ai-router.log`), contro il 36% di mix-am (Anthropic 64% / MiniMax 36% su 7.832). Nessun bug nel proxy: tabella `src/role_routing.py:55-56` e chain `~/.claude/lib/router_chain_dispatcher.py:242-253` erano corrette (`mix-gm` THINK=glm-5.2, ACT=MiniMax-M2.7). Il buco era l'enforcement: la Regola Assoluta 2026-07-02 vincolava solo Anthropic → GLM-5.2 come THINK scriveva codice direttamente; e `~/.claude/hooks/enforce_hierarchy.py` era audit-only (`permissionDecision: allow` fisso dal fix 2026-07-14).
   **Fix (verificato 5/5 test).** `enforce_hierarchy.py` ora è mode-aware: set `DENY_CODING_MODES = {"mix-gm"}` → Edit/Write/MultiEdit su codice di progetto (>15 righe, non `~/.claude`) restituiscono `permissionDecision: deny` con reason che ordina `m3-code "<spec>" > file`. Esenzioni invariate (micro-edit ≤15, `~/.claude`, `HIERARCHY_ALLOW=1`, marker 900s). `~/.claude/CLAUDE.md` regola estesa a GLM-5.2 come THINK in mix-gm. `deny` ≠ `exit 2`: non rompe il prompt di autorizzazione.
   **Dato cruciale.** `m3-code` chiama MiniMax DIRETTAMENTE (out-of-band, non via :8787): le deleghe NON appaiono nel log proxy. Indicatore di successo = riduzione Edit/Write di progetto in `~/.claude/m3/hierarchy-violations.jsonl` + invocazioni `m3-code`, NON i conteggi di `ai-router.log`.
@@ -91,12 +98,36 @@ Questo file unifica il vecchio `TODO.md` (32 sezioni, 5 blocchi «Attivo» spars
 - [ ] **(opzionale) Fascia peak GLM 14–18 Asia/Shanghai dal vivo.** La correttezza è già coperta in modo deterministico da `sviluppo/tests/test_peak_scheduler.py`: quattro bordi con ora iniettata, off-by-one catturato dalla prova del nove. Zero righe `peak-cap` nei log perché le modalità GLM sono poco usate.
   **Expected outcome:** nessuna garanzia aggiuntiva sulla correttezza; solo conferma su traffico reale.
 
-- [ ] **Taratura dell'heartbeat sul traffico vero.** `CTX_GATE_HEARTBEAT_PCT = 0.30` (`src/ai-router-proxy.py:146`, env `AIROUTER_CTX_HEARTBEAT_PCT`).
+- [ ] **Taratura dell'heartbeat sul traffico vero.** `CTX_GATE_HEARTBEAT_PCT = 0.30` (`src/ai-router-proxy.py:145`, env `AIROUTER_CTX_HEARTBEAT_PCT`).
   **Prossimo step:** se dopo una settimana il catalogo resta senza entry `ctx_gate`, abbassare la soglia. Costo nullo: il catalogo deduplica per (modalità, azione) e il throttle resta 300 s per chat.
 
 - [ ] **(opzionale) Alzare `TRUNCATE_MAX_LEN` per usare più del 43% della finestra.** Emersa il 2026-08-02. Dopo la conversione del budget da token a caratteri, un body da 1135KB consegna all'esecutore 86.944 token su un `safe_limit` di 196.608, cioè il **43%**. Il resto è vincolato da `TRUNCATE_MAX_LEN = 1800` (`src/trim_smart.py`), il tetto per singolo messaggio dentro il riassunto — che è anche l'unità con cui `_smart_sample_middle` stima il costo quando applica il budget.
   **Perché non è stato fatto ora:** alzarlo cambia la qualità del riassunto (messaggi più lunghi ma meno numerosi, oppure riassunti oltre il budget) in modi che non sono stati misurati. Non è un difetto aperto: è un margine documentato.
   **Prossimo step:** misurare la qualità del riassunto a `TRUNCATE_MAX_LEN` 1800 / 3000 / 5000 su una conversazione reale lunga, verificando che (a) il budget resti rispettato e monotono — proprietà da cui dipende la convergenza dei loop di shrink nei tre percorsi — e (b) l'informazione critica di inizio conversazione sopravviva. **Expected outcome:** una soglia scelta con il dato a supporto, oppure la conferma motivata di 1800.
+
+- [ ] **Far girare il watcher del self-healing come servizio, invece che a mano. Emersa il 2026-07-31.**
+  Il loop di self-healing è completo in tutte e quattro le fasi e deployato dal 2026-08-01, ma il watcher va lanciato manualmente con `python3 -m self_healing.watcher --once`. Finché non gira in continuo non produce `router-learnings.json` né `router-policy.json`, quindi l'actuator resta senza dati.
+  **Expected outcome:** watcher attivo come unità systemd utente o voce cron, con i due file prodotti e aggiornati.
+
+- [ ] **Formalizzare i test di `router_policy` e `auto_fixer`. Emersa il 2026-07-31.**
+  Le fasi 3 e 4 del self-healing sono coperte solo da self-test e prove manuali. Le altre fasi hanno test in suite: `test_sensor.py` 14/14 e `test_watcher.py` 7/7.
+  **Expected outcome:** `sviluppo/tests/test_router_policy.py` e `sviluppo/tests/test_auto_fixer.py` in suite, con il totale dalla root che sale sopra i 168 test attuali.
+
+- [ ] **Verificare il conteggio `text_blocks` su tutti e tre i provider. Emersa il 2026-07-31.**
+  Il parser SSE conta i `content_block_start` per tipo, ma il conteggio non è stato validato separatamente su Anthropic, MiniMax e GLM. La prima entry dopo il restart del 2026-08-01 mostrava `glm-5.2 + vision -> empty`: non è stato stabilito se fosse un vuoto reale o un falso positivo del conteggio. La stessa famiglia di difetti ha già colpito il ramo non-streaming, che non contava affatto i blocchi e faceva risultare `empty` ogni risposta JSON riuscita.
+  **Expected outcome:** per ciascun provider, una risposta non vuota nota che produca `text_blocks >= 1`, e il caso `glm-5.2 + vision` classificato come vuoto reale oppure come errore di conteggio.
+
+- [ ] **Osservare la salute del prompt caching nei prossimi giorni. Emersa il 2026-08-01.** (di sola osservazione)
+  Dopo il fix dei due bug sui `cache_control`, la firma di salute è la riga `cache: OK bp=...` nel log del router con `input=2`. La patologia da riconoscere è `creation=0` con `input` a sei cifre, che significa prompt caching di nuovo morto. Se ricompare, ispezionare prima la coda dei messaggi e poi l'output di `filter_tools_for_backend`: il conteggio `bp=s2/m1/t0` dice subito quale sezione ha perso il breakpoint.
+  **Expected outcome:** nessun intervento finché la firma resta sana; se ricompare la patologia, riaprire con il log a supporto.
+
+- [ ] **Tenere monitorato il limite latente `sock_read=120` sugli stream. Emersa il 2026-08-01.** (di sola osservazione)
+  Le richieste non-streaming sono passate a 600 secondi con il fix `7c84535`, mentre lo streaming eredita ancora i 120 secondi della sessione condivisa, dove quel valore protegge davvero dagli stall. Le 9 occorrenze storiche in modalità anthropic sono tutte `SSE=False` e precedenti al fix.
+  **Expected outcome:** nessun intervento finché non compare un caso con `SSE=True` posteriore al fix.
+
+- [ ] **Disconnettere dal browser i tre connettori Google. Emersa il 2026-07-29, riaperta dalla misura.**
+  Mettere `claude.ai Gmail`, `claude.ai Google Calendar` e `claude.ai Google Drive` in `disabledMcpServers` dentro `~/.claude/settings.json` non li disattiva: la misura dinamica lo ha smentito, i tool continuano a essere caricati. I tre insieme pesano 69.552 byte, circa 27.820 token, il 49,0% del blocco tools. Il costo in fattura è però quasi tutto assorbito dal prompt caching, quindi l'urgenza è bassa: quello che resta è occupazione di finestra, il 13,9% su un modello da 200.000 token come Haiku. L'unica strada verificata è disconnetterli manualmente da `https://claude.ai/customize/connectors`.
+  **Expected outcome:** dopo la disconnessione, `tools_mcp_servers` nel sidecar `router-usage.jsonl` elenca solo `zai`, e `tools_bytes` cala di circa 69.552 byte.
 
 ## Chiusi — indice per fase
 
@@ -111,5 +142,6 @@ Una riga per fase; il dettaglio sta nei commit e nel checkpoint consolidato.
 ## Note di manutenzione
 
 - `PROJECT-TOD.md` è superato da questo file: il suo backlog AQ risulta chiuso e la sezione «Done» duplica commit già consolidati qui.
-- `.claude/PROMPT_CONTINUA_20260728.md` è il prompt di ripresa corrente (prossimo passo: i 4 `fixture 'h' not found`). I precedenti sono eliminati mano a mano: la storia resta in git.
-- I 97 checkpoint di sessione in `.claude/checkpoints/` sono sostituiti da `CP_20260727_1600.md`. La cartella è in `.gitignore:17`, quindi vive solo sul filesystem.
+- `.claude/PROMPT_CONTINUA_20260728.md` è stato **eliminato il 2026-08-03**: puntava a HEAD `847d3b4` e al task dei 4 `fixture 'h' not found`, chiuso il 28/07 con `41a4ef8`. Come i precedenti, la storia resta in git. Il punto di ripresa è ora questo file più `.claude/WIKI.md`.
+- **`.claude/WIKI.md`** è la narrazione consolidata del periodo 27/07 → 03/08: architettura, otto campagne con i 49 commit, lezioni di metodo, divieti operativi e comandi di verifica. Questo TODO resta la lista operativa; il wiki è il contesto.
+- I 97 checkpoint di sessione in `.claude/checkpoints/` sono sostituiti da `CP_20260727_1600.md` e archiviati in `archivio-checkpoint-20260623-20260726.tar.gz`. I 10 checkpoint successivi (27/07 → 02/08) restano al loro posto e sono riassunti in `WIKI.md`. La cartella è in `.gitignore:17`, quindi vive solo sul filesystem.
