@@ -1,6 +1,6 @@
 # ai-router-switch — TODO unico
 
-**Aggiornato:** 2026-08-03 · **HEAD di riferimento:** `6049d01` · **Stato:** 12 voci aperte, di cui 2 di sola osservazione e 2 opzionali. Suite: **168 passed, 0 errors** dalla root e **116** da `sviluppo/tests/` (misurate il 03/08). Servizio `active`, `/health` 200.
+**Aggiornato:** 2026-08-03 · **HEAD di riferimento:** `ca9be80` · **Stato:** 13 voci aperte, di cui 2 di sola osservazione e 2 opzionali. Suite: **168 passed, 0 errors** dalla root e **116** da `sviluppo/tests/` (misurate il 03/08). Servizio `active`, `/health` 200.
 
 Il 03/08 questo file è stato riallineato al merge di tutte le sessioni del periodo: chiusa la voce `mix-gm` con l'evidenza del log (il test dal vivo era già passato il 31/07 e veniva trascinata come aperta), e recuperate **sei voci** che vivevano solo nei checkpoint e non erano mai arrivate qui — i tre follow-up del self-healing, le due osservazioni aperte il 01/08 e la disconnessione dei connettori Google. La narrazione completa del periodo sta in **[`.claude/WIKI.md`](WIKI.md)**.
 
@@ -128,6 +128,9 @@ Questo file unifica il vecchio `TODO.md` (32 sezioni, 5 blocchi «Attivo» spars
 - [ ] **Disconnettere dal browser i tre connettori Google. Emersa il 2026-07-29, riaperta dalla misura.**
   Mettere `claude.ai Gmail`, `claude.ai Google Calendar` e `claude.ai Google Drive` in `disabledMcpServers` dentro `~/.claude/settings.json` non li disattiva: la misura dinamica lo ha smentito, i tool continuano a essere caricati. I tre insieme pesano 69.552 byte, circa 27.820 token, il 49,0% del blocco tools. Il costo in fattura è però quasi tutto assorbito dal prompt caching, quindi l'urgenza è bassa: quello che resta è occupazione di finestra, il 13,9% su un modello da 200.000 token come Haiku. L'unica strada verificata è disconnetterli manualmente da `https://claude.ai/customize/connectors`.
   **Expected outcome:** dopo la disconnessione, `tools_mcp_servers` nel sidecar `router-usage.jsonl` elenca solo `zai`, e `tools_bytes` cala di circa 69.552 byte.
+
+- [ ] **Misurare l'effetto delle tre leve sull'enforcement. Applicate il 2026-08-03, effetto da verificare fra qualche giorno.** Diagnosi: in `mix-am` Anthropic consuma **9,3×** MiniMax sull'input equivalente (299,0M contro 32,1M, cache pesata al 10%) mentre l'output è rovesciato (MiniMax 13,0M contro 7,65M). Il 38,6% delle richieste Anthropic era `coding` (3.018 contro 168) e l'enforcement bloccava il 3% delle scritture (2.202 allowed contro 70 denied). Leve applicate a `~/.claude/hooks/enforce_hierarchy.py`: estensioni web/shell/config in `CODE_EXTENSIONS` (`.html` da solo valeva 657 eventi), soglia micro-edit 15→5 nelle mode deleganti, `.md` come codice solo dove si delega con deny verso `m3-wiki`. Test `~/.claude/scripts/test_enforce_hierarchy_leve.py` 16/16.
+  **Expected outcome:** su una nuova finestra di 7 giorni, la quota `task_class=coding` su Anthropic scende sotto il 38,6% e le `denied` in `hierarchy-violations.jsonl` salgono ben sopra le 70. Attenzione: la quota **strutturale** (~226k token di contesto per turno del main contro 61k dell'esecutore) **non** è aggredibile per questa via — se il rapporto non migliora abbastanza, la leva successiva è ridurre i round-trip del main, non aumentare le deleghe.
 
 ## Chiusi — indice per fase
 
