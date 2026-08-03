@@ -70,20 +70,27 @@ def _decomprimi(raw: bytes, encoding: str) -> bytes:
 # sovrascrivibile da env, cosi' il probe live li corregge senza toccare il codice.
 QWEN_PATH_IMAGE = os.environ.get("QWEN_PATH_IMAGE", QWEN_MULTIMODAL_PATH)
 QWEN_PATH_TTS = os.environ.get("QWEN_PATH_TTS", QWEN_MULTIMODAL_PATH)
-# sovrascrivibile da env, cosi' il probe live li corregge senza toccare il codice.
-QWEN_PATH_IMAGE = os.environ.get("QWEN_PATH_IMAGE", QWEN_MULTIMODAL_PATH)
-QWEN_PATH_TTS = os.environ.get("QWEN_PATH_TTS", QWEN_MULTIMODAL_PATH)
-QWEN_PATH_VIDEO = os.environ.get(  # NON VERIFICATO
+QWEN_PATH_VIDEO = os.environ.get(  # VERIFICATO: con model valido nel body e header X-DashScope-Async
     "QWEN_PATH_VIDEO", "/api/v1/services/aigc/video-generation/video-synthesis")
-QWEN_PATH_ASR = os.environ.get("QWEN_PATH_ASR", QWEN_MULTIMODAL_PATH)      # NON VERIFICATO
-QWEN_PATH_MUSIC = os.environ.get("QWEN_PATH_MUSIC", QWEN_MULTIMODAL_PATH)  # NON VERIFICATO
+QWEN_PATH_ASR = os.environ.get(  # CORRETTO /api/v1/services/audio/asr/transcription; era SBAGLIATO
+    # puntava a multimodal-generation che con fun-asr risponde "url error" come la controprova.
+    # video e ASR richiedono X-DashScope-Async: senza header 403 AccessDenied, con header 200 e task_id.
+    "QWEN_PATH_ASR", "/api/v1/services/audio/asr/transcription")
+QWEN_PATH_MUSIC = os.environ.get(  # NON DETERMINABILE: model fun-music-v1 non esiste su questo account,
+    "QWEN_PATH_MUSIC", QWEN_MULTIMODAL_PATH)  # risponde 404 "Model not exist" identico alla controprova.
+
 
 async def _forward_dashscope(request, payload: dict, session, path: str, log_fn=print,
-                             sse: bool = False) -> aiohttp.web.Response:
+                             sse: bool = False, async_task: bool = False) -> aiohttp.web.Response:
     """Helper comune per inoltrare richieste ai servizi nativi DashScope.
 
     URL: host DEDICATO del workspace + path (vedi qwen_dashscope_base)
     Auth: Authorization Bearer
+    Nota: i servizi video e ASR di questo gateway accettano SOLO chiamate asincrone.
+    Verificato il 2026-08-03, senza l'header rispondono 403 AccessDenied con messaggio
+    "current user api does not support synchronous calls", mentre con l'header rispondono
+    200 restituendo output.task_id e task_status PENDING. Il chiamante riceve quindi un
+    task da interrogare, non il risultato finale.
     """
     key = await get_qwen_key()
     if not key:
@@ -97,6 +104,9 @@ async def _forward_dashscope(request, payload: dict, session, path: str, log_fn=
 
     if sse:
         headers["X-DashScope-SSE"] = "enable"
+
+    if async_task:
+        headers["X-DashScope-Async"] = "enable"
 
     try:
         timeout = _non_stream_timeout()
@@ -171,8 +181,9 @@ async def forward_qwen_image(request, body: bytes, session, log_fn=print):
 async def forward_qwen_video(request, body: bytes, session, log_fn=print):
     """Generazione video via DashScope.
 
-    Path: QWEN_PATH_VIDEO (NON VERIFICATO: la doc lo da' come task asincrono)
-    Modello: QWEN_MODEL_VIDEO (da verificare col probe live)
+    Path: QWEN_PATH_VIDEO (VERIFICATO 2026-08-03; task ASINCRONO, vedi async_task)
+    Modello: QWEN_MODEL_VIDEO (VERIFICATO esistente sull'account)
+    Ritorna output.task_id con task_status PENDING, non il video finito.
     """
     try:
         data = json.loads(body)
@@ -204,7 +215,8 @@ async def forward_qwen_video(request, body: bytes, session, log_fn=print):
     return await _forward_dashscope(
         request, payload, session,
         QWEN_PATH_VIDEO,
-        log_fn=log_fn
+        log_fn=log_fn,
+        async_task=True  # il gateway rifiuta le chiamate sincrone con 403
     )
 
 
@@ -250,8 +262,9 @@ async def forward_qwen_tts(request, body: bytes, session, log_fn=print):
 async def forward_qwen_asr(request, body: bytes, session, log_fn=print):
     """Riconoscimento vocale via DashScope.
 
-    Path: QWEN_PATH_ASR (NON VERIFICATO)
-    Modello: QWEN_MODEL_ASR (da verificare col probe live)
+    Path: QWEN_PATH_ASR (CORRETTO 2026-08-03: era multimodal, sbagliato; task ASINCRONO)
+    Modello: QWEN_MODEL_ASR (VERIFICATO esistente sull'account)
+    Ritorna output.task_id con task_status PENDING, non la trascrizione finita.
     """
     try:
         data = json.loads(body)
@@ -278,15 +291,17 @@ async def forward_qwen_asr(request, body: bytes, session, log_fn=print):
     return await _forward_dashscope(
         request, payload, session,
         QWEN_PATH_ASR,
-        log_fn=log_fn
+        log_fn=log_fn,
+        async_task=True  # il gateway rifiuta le chiamate sincrone con 403
     )
 
 
 async def forward_qwen_music(request, body: bytes, session, log_fn=print):
     """Generazione musica via DashScope.
 
-    Path: QWEN_PATH_MUSIC (NON VERIFICATO)
-    Modello: QWEN_MODEL_MUSIC (da verificare col probe live)
+    Path: QWEN_PATH_MUSIC (NON DETERMINABILE finche' manca un modello valido)
+    Modello: QWEN_MODEL_MUSIC (fun-music-v1 NON ESISTE sull'account: 404 Model not exist)
+    Questa rotta non puo' funzionare oggi: il gateway valida il modello prima del path.
     """
     try:
         data = json.loads(body)

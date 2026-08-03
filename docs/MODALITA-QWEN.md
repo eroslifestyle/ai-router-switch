@@ -129,9 +129,17 @@ SMENTITO dalla misura (era scritto qui e non era vero):
 - la web search **non restituisce fonti** su `/compatible-mode/v1/chat/completions` (277 eventi
   ispezionati, zero occorrenze). Le fonti esistono solo su DashScope nativo in SSE
 
-ANCORA NON MISURATO:
-- limiti RPM/TPM: le pagine della doc rispondono 404, il rate limiter usa placeholder
-- path DashScope di video, ASR e musica
+VERIFICATO IL 2026-08-03, PATH DASHSCOPE
+- il metodo del POST minimale per distinguere un path valido da uno sbagliato **NON funziona** su questo gateway, perché con body vuoto ogni path risponde `400 BadRequest.EmptyModel`, incluso un path deliberatamente inventato usato come controprova
+- occorre mettere un model valido nel body: un path sbagliato risponde `InvalidParameter` con messaggio "url error, please check url", mentre quello giusto prosegue nella validazione
+- `QWEN_PATH_VIDEO` era corretto e resta invariato
+- `QWEN_PATH_ASR` era **SBAGLIATO** (puntava a `multimodal-generation`), corretto in `/api/v1/services/audio/asr/transcription`
+- video e ASR sono servizi a **TASK ASINCRONO**: senza l'header `X-DashScope-Async` rispondono `403 AccessDenied "current user api does not support synchronous calls"`; con quell'header rispondono `200` restituendo `output.task_id` e `task_status PENDING` → `_forward_dashscope` ha ora il parametro `async_task=True` che le due rotte passano
+- i model ID dei servizi nativi sono stati verificati uno per uno: `qwen-image-2.0-pro`, `happyhorse-1.1-t2v`, `qwen3-tts-flash`, `fun-asr`, `text-embedding-v4` e `qwen3-rerank` esistono tutti sull'account
+- `fun-music-v1` **NON ESISTE** (risponde `404 "Model not exist"` identico alla controprova con un modello inventato) → la rotta musica non può funzionare e il suo path resta non determinabile perché il gateway valida il modello prima del path
+
+ANCORA NON MISURATO
+- limiti **RPM** e **TPM**: le pagine della doc rispondono `404`, il rate limiter usa placeholder
 
 ## File toccati
 
