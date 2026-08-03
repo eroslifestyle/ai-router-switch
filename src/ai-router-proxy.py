@@ -47,7 +47,6 @@ CTX = ContextManager()
 from minimax_body import remap_body_for_minimax, strip_server_tools_for_minimax
 from trim_smart import (SHRINK_KEEP_HEAD, SHRINK_KEEP_TAIL,
                         build_shrink_summary, _smart_truncate, _smart_sample_middle)
-from token_counter import estimate_tokens, count_tokens
 from model_context_map import get_safe_input_limit, get_context_limit, get_summary_budget
 from context_rewrite import rewrite_for_context
 from context_alert import notify_context_threshold, maybe_prepend_banner

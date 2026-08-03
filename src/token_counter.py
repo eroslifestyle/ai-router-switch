@@ -1,11 +1,7 @@
-"""Token counter con cache per richieste Anthropic-compatibili."""
+"""Stima dei token per richieste Anthropic-compatibili."""
 
 import json
-import time
-from typing import Dict, Tuple, Optional
-
-_token_count_cache: Dict[str, Tuple[int, float]] = {}  # fingerprint → (count, timestamp)
-CACHE_TTL_SEC = 30
+from typing import Optional
 
 # Byte per token misurati il 2026-07-27 con /v1/messages/count_tokens
 # su payload rappresentativo di 50107 byte (codice Python + prosa italiana + JSON).
@@ -134,47 +130,10 @@ def estimate_tokens_body(body: bytes, model: Optional[str] = None) -> int:
     # il costo fisso per ogni immagine rilevata.
     return max(1, int((len(body) - b64_bytes) / divisor) + images_count * IMAGE_TOKEN_COST)
 
-def count_tokens(body: bytes, fp: str, upstream_url: str = None) -> int:
-    """Conta token reali. Prima controlla cache (30s), poi stima."""
-    cache_key = fp
-    now = time.time()
-
-    # Cache hit
-    if cache_key in _token_count_cache:
-        count, ts = _token_count_cache[cache_key]
-        if now - ts < CACHE_TTL_SEC:
-            return count
-
-    # Stima fallback
-    est = estimate_tokens(body.decode('utf-8', errors='replace'))
-    _token_count_cache[cache_key] = (est, now)
-    return est
-
-async def count_tokens_real(body: bytes, upstream_url: str, api_key: str = "") -> int | None:
-    """Chiama /v1/messages/count_tokens per token reali (campionamento 1/10).
-
-    AQ-8: campiona 1 su 10 richieste per calibrazione.
-    Ritorna None se non campionata (caller usa stima).
-    """
-    import aiohttp, random  # json è già importato a livello modulo
-    # Campionamento 1/10
-    if random.random() > 0.1:
-        return None
-    try:
-        async with aiohttp.ClientSession() as sess:
-            async with sess.post(
-                upstream_url.replace('/v1/messages', '/v1/messages/count_tokens'),
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json=json.loads(body),
-                timeout=aiohttp.ClientTimeout(total=5),
-            ) as resp:
-                if resp.status == 200:
-                    result = await resp.json()
-                    return result.get("usage", {}).get("input_tokens", 0)
-    except Exception:
-        pass
-    return None
+# Rimosse il 2026-08-04: count_tokens e count_tokens_real, il sotto-sistema del campionamento
+# token AQ-8, mai completato. count_tokens era importata da ai-router-proxy.py ma non veniva
+# chiamata da nessuno; la sua docstring prometteva "conta token reali" mentre restituiva solo
+# cache più stima, e il parametro upstream_url non veniva mai usato: esisteva solo per
+# count_tokens_real, che a sua volta non aveva chiamanti. La stima resta affidata a
+# estimate_tokens_body, viva e ampiamente usata da context_rewrite e context_manager. Con le
+# due funzioni cadono in cascata _token_count_cache e CACHE_TTL_SEC, che nessun altro leggeva.

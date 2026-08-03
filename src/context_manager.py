@@ -1,7 +1,7 @@
 """ContextManager — centralizzato context window + rate limit per chat e modo.
 
 Soglie: 80% warn / 90% compact / 100% error (AQ-3).
-Token counting: ibrido byte//4 + campionamento count_tokens (AQ-8).
+Token counting: stima byte//4 (il campionamento AQ-8 non è mai stato completato, rimosso il 2026-08-04).
 Storage: SQLite per-chat, isolato per chat_fp + modo.
 """
 import json
@@ -12,11 +12,10 @@ from pathlib import Path
 
 from model_context_map import get_context_limit, get_safe_input_limit
 
-# ponytail: copy-on-write stubs — replace with real when /v1/messages/count_tokens is available
-_TOKEN_STUB_AVAILABLE = False
-# _count_tokens_stub, stub che ritornava sempre None, rimossa il 2026-08-03 perche mai chiamata
-
 WARN_PCT    = 0.80
+WARN2_PCT   = 0.88   # secondo alert, urgente: compressione (90%) imminente
+COMPACT_PCT = 0.90
+ERROR_PCT   = 1.00
 WARN2_PCT   = 0.88   # secondo alert, urgente: compressione (90%) imminente
 COMPACT_PCT = 0.90
 ERROR_PCT   = 1.00
@@ -41,15 +40,13 @@ class ContextManager:
         """Stima: byte / 4 (≈1 token per 4 char)."""
         return max(1, body_bytes // 4)
 
-    async def _count_tokens_real(self, request, session, body: bytes) -> int | None:
-        """Chiama /v1/messages/count_tokens per campionamento (1 su 10 richieste)."""
-        if not _TOKEN_STUB_AVAILABLE:
-            return None
-        import random
-        if random.random() > 0.1:
-            return None
-        # TODO: chiama count_tokens endpoint quando disponibile
-        return None
+    # Rimosso il 2026-08-04: _count_tokens_real, stub del campionamento AQ-8
+    # mai chiamato da nessuno e comunque disattivato da _TOKEN_STUB_AVAILABLE
+    # = False, rimossa con lui. Nello stesso commit sono cadute anche
+    # count_tokens e count_tokens_real in token_counter: il campionamento
+    # non e mai stato completato. La stima in uso resta _estimate_tokens
+    # qui sopra, e estimate_tokens_body in token_counter per il conteggio
+    # per modello.
 
     # ── Pre-check (AQ-7) ──────────────────────────────────────────────────────
 
