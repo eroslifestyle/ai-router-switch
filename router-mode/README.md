@@ -2,10 +2,10 @@
 
 ## Overview
 
-Standalone control panel for the AI Router (`:8787`) with 5 orchestration modes. Provides both CLI and GUI interfaces to switch modes and monitor router health in real-time.
+Standalone control panel for the AI Router (`:8787`) with 7 orchestration modes. Provides both CLI and GUI interfaces to switch modes and monitor router health in real-time.
 
 **Location**: `~/.claude/router-mode/`  
-**Modes**: anthropic · minimax · mix-am · mix-ag · mix-gm · glm  
+**Modes**: anthropic · minimax · glm · qwen · mix-am · mix-gm · mix-ag  
 **Proxy**: `:9988` (CORS bypass for browser fetch)
 
 ---
@@ -19,7 +19,7 @@ Standalone Python script for mode management and status queries.
 **Commands**:
 ```bash
 routestats status              # Show current mode + health OK/OFFLINE
-routestats modes               # List all 5 modes with executors
+routestats modes               # List all 7 modes with executors
 routestats switch <mode>       # Switch mode via proxy POST /admin/mode/{mode}
 routestats card                # Launch card.py GUI
 routestats json                # Output state as JSON
@@ -39,7 +39,7 @@ PySide6 frameless card with 5 mode buttons, hero display, and system tray integr
 - **Hero**: large mode name + executor info + health badge (blinking dot when healthy)
 - **Grid**: 5 mode cards (icon + label + executor + ON/ATTIVO button)
 - **Titlebar**: minimize (─) · restart router (↻) · close (✕)
-- **Tray**: click to restore, context menu with 5 modes + restart
+- **Tray**: click to restore, context menu with 7 modes + restart
 - **Polling**: updates every 5 seconds via `http://localhost:9988/mode`
 
 **Theme** (dark, OKLCH-conscious):
@@ -61,7 +61,7 @@ Python HTTP server on `:9988` that proxies router control to `:8787` and handles
 
 **Routes**:
 - `GET /mode` — read current mode from `~/.claude/ai-router-mode` file
-- `POST /admin/mode/{mode}` — write mode file + return JSON `{"ok": true, "mode": "mixed", ...}`
+- `POST /admin/mode/{mode}` — write mode file + return JSON `{"ok": true, "mode": "mix-am", ...}`
 - `GET /health` — proxy to `:8787/health` for router liveness
 
 **Why**: Browser `fetch()` from `file://` protocol can't reach `localhost:8787` (sandbox). Proxy on `:9988` satisfies same-origin policy.
@@ -134,7 +134,7 @@ Appears in GNOME applications menu as "AI Router Mode Panel" with 🔀 icon.
 
 ### Token-Ledger Extension (future)
 
-Planned: badge in GNOME topbar showing `MODE: mixed` with quick-switch dropdown.
+Planned: badge in GNOME topbar showing `MODE: mix-am` with quick-switch dropdown.
 
 ---
 
@@ -152,8 +152,11 @@ Planned: badge in GNOME topbar showing `MODE: mixed` with quick-switch dropdown.
 The THINK model is always chosen manually by the user; it is never fixed in code and
 never escalates on its own. VERIFY has no separate route — it is performed by the same
 model that did the THINK. Only execution escalates, after 2 failures.
-Legacy names `mixed`/`glm-minimax`/`anthropic-glm` are aliases; `inverse` was removed
-on 2026-07-26.
+Legacy names `mixed`/`glm-minimax`/`anthropic-glm` are aliases **only for the per-chat
+override** (`_LEGACY_MODE_MAP`). `POST /admin/mode/{mode}` — the endpoint this panel uses —
+validates against `VALID_MODES` and **rejects them with 400**: that is why `routestats`
+kept its old ids for so long without anyone noticing that half its switches were broken.
+Always use the canonical names. `inverse` was removed on 2026-07-26.
 
 ---
 

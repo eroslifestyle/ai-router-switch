@@ -28,9 +28,15 @@ MODE_FILE = Path.home() / ".claude" / "ai-router-mode"
 ICON_PATH = Path.home() / ".claude" / "scripts" / "router-mode-icon.png"
 DESKTOP_NAME = "router-mode-panel"
 
-WINDOW_W, WINDOW_H = 480, 540
+# +98 (CARD_H 90 + SPACING 8): la sezione SOLO e' passata da una riga a due.
+# +16: l'hero e' cresciuto da 56 a 72 per non tagliare il sottotitolo.
+# +78: le card sono passate da 90 a 116 (3 righe di card in totale).
+WINDOW_W, WINDOW_H = 480, 732
 TITLE_H = 38
-HERO_H = 56
+# 56 non bastava: il titolo da 24pt piu' il sottotitolo che va a capo sforavano
+# il riquadro, e il testo dell'esecutore usciva tagliato sotto il nome della
+# modalita'. 72 = 32 (titolo) + 22 (due righe da 8pt) + 16 (margini 8+8).
+HERO_H = 72
 SPACING = 8
 
 MODES = [
@@ -38,6 +44,7 @@ MODES = [
     {"id": "minimax", "icon": "🟠", "label": "MiniMax", "exec": "M3 orch / M2.7 act"},
     {"id": "mix-am", "icon": "🔷", "label": "MixAM", "exec": "Anthropic THINK + MiniMax ACT"},
     {"id": "glm", "icon": "🟢", "label": "GLM", "exec": "GLM-5.2 orch / tiering"},
+    {"id": "qwen", "icon": "🟣", "label": "Qwen", "exec": "3.7-max / coder-plus"},
     {"id": "mix-gm", "icon": "🟢🟠", "label": "MixGM", "exec": "GLM-5.2 THINK + MiniMax ACT"},
     {"id": "mix-ag", "icon": "🔵🟢", "label": "MixAG", "exec": "Anthropic THINK + GLM ACT"},
 ]
@@ -189,7 +196,9 @@ class HeroWidget(QWidget):
 # ── Mode Card (148x90, pulsante 70x26 a destra) ──────────────────────────
 class ModeCard(QWidget):
     CARD_W = 140
-    CARD_H = 90
+    # 90 lasciava una sola riga al testo: "Anthropic THINK + MiniMax ACT"
+    # usciva tagliato a "Anthropic THINK +". 116 ne fa stare due per intero.
+    CARD_H = 116
     BTN_W = 70
     BTN_H = 26
 
@@ -329,7 +338,7 @@ class Card(QWidget):
         spacer_ctrl.setFixedHeight(8)
         body_layout.addWidget(spacer_ctrl)
 
-        # ── Sezione SOLO (3 colonne) ─────────────────────────────────
+        # ── Sezione SOLO (2x2, blocco centrato) ──────────────────────
         solo_lbl = QLabel("SOLO")
         solo_lbl.setFont(QFont("Sans", 9, QFont.Weight.Bold))
         solo_lbl.setStyleSheet("background:transparent;color:#5a6470")
@@ -337,21 +346,29 @@ class Card(QWidget):
 
         solo_grid = QGridLayout()
         solo_grid.setSpacing(SPACING)
-        solo_ids = ["anthropic", "minimax", "glm"]
+        solo_ids = ["anthropic", "minimax", "glm", "qwen"]
         self._cards = {}
         for i, mid in enumerate(solo_ids):
             m = next(x for x in MODES if x["id"] == mid)
             card = ModeCard(m, self._do_switch)
             self._cards[mid] = card
-            solo_grid.addWidget(card, 0, i)
-        body_layout.addLayout(solo_grid)
+            solo_grid.addWidget(card, i // 2, i % 2)
+        # Le card hanno larghezza fissa: due colonne coprono meno della riga
+        # MULTI da tre. Gli stretch ai lati centrano il blocco invece di
+        # lasciarlo incollato al bordo sinistro.
+        solo_row = QHBoxLayout()
+        solo_row.setContentsMargins(0, 0, 0, 0)
+        solo_row.addStretch()
+        solo_row.addLayout(solo_grid)
+        solo_row.addStretch()
+        body_layout.addLayout(solo_row)
 
         # Spacer 8px
         spacer1 = QWidget()
         spacer1.setFixedHeight(8)
         body_layout.addWidget(spacer1)
 
-        # ── Sezione MULTI (4 card su 2 righe: 3+1) ──────────────────
+        # ── Sezione MULTI (1x3) ──────────────────────────────────────
         multi_lbl = QLabel("MULTI")
         multi_lbl.setFont(QFont("Sans", 9, QFont.Weight.Bold))
         multi_lbl.setStyleSheet("background:transparent;color:#5a6470")
@@ -364,9 +381,7 @@ class Card(QWidget):
             m = next(x for x in MODES if x["id"] == mid)
             card = ModeCard(m, self._do_switch)
             self._cards[mid] = card
-            row = 0 if i < 3 else 1
-            col = i if i < 3 else 0
-            multi_grid.addWidget(card, row, col)
+            multi_grid.addWidget(card, 0, i)
         body_layout.addLayout(multi_grid)
 
         inner.addWidget(body)

@@ -28,21 +28,22 @@ MODES = [
     {"id": "minimax",   "icon": "🟠", "label": "MiniMax",
      "desc": "M3 pensa + sceglie esecutore (M2/M2.5/M2.7).",
      "exec": "M3 orch · M2.7 act"},
-    {"id": "mixed",     "icon": "🔷", "label": "Mixed",
-     "desc": "Anthropic orchestra + MiniMax esegue.",
-     "exec": "Anthropic orch · M2.7 act"},
-    {"id": "glm",           "icon": "🟢", "label": "GLM",
+    {"id": "glm",       "icon": "🟢", "label": "GLM",
      "desc": "GLM-5.2 classifica → tier (turbo/4.7/5.2). Peak-aware.",
      "exec": "GLM-5.2 orch · tiering"},
-    {"id": "glm-minimax",   "icon": "🟢", "label": "GLM+MiniMax",
-     "desc": "GLM-5.2 think → MiniMax act → GLM verify (task complessi).",
-     "exec": "GLM-5.2 think · M2.7 act · GLM verify"},
-    {"id": "anthropic-glm", "icon": "🟢", "label": "Anthropic+GLM",
-     "desc": "Anthropic(client) think → GLM tiered act → verify T2.",
+    {"id": "qwen",      "icon": "🟣", "label": "Qwen",
+     "desc": "Alibaba Model Studio puro. Serve la chiave DashScope.",
+     "exec": "qwen3.7-max orch · coder-plus act"},
+    {"id": "mix-am",    "icon": "🔷", "label": "MixAM",
+     "desc": "Anthropic orchestra + MiniMax esegue.",
+     "exec": "Anthropic orch · M2.7 act"},
+    {"id": "mix-gm",    "icon": "🟢🟠", "label": "MixGM",
+     "desc": "GLM-5.2 think → MiniMax act → GLM verify.",
+     "exec": "GLM-5.2 think · M2.7 act"},
+    {"id": "mix-ag",    "icon": "🔵🟢", "label": "MixAG",
+     "desc": "Anthropic think → GLM tiered act → Anthropic verify.",
      "exec": "Anthropic orch · GLM tiered act"},
 ]
-
-
 def http_get(url, timeout=5):
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
