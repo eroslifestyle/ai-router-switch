@@ -24,6 +24,8 @@ MINIMAX_THINK = "MiniMax-M3"
 MINIMAX_ACT = "MiniMax-M2.7"
 GLM_THINK = "glm-5.2"
 GLM_ACT = "glm-4.7"
+QWEN_THINK = "qwen3.7-max"
+QWEN_ACT = "qwen3-coder-plus"
 
 # ── Role constants ─────────────────────────────────────────────────────────────
 ROLE_THINK = "think"
@@ -48,6 +50,8 @@ ROUTING_TABLE = {
     ("minimax", ROLE_ACT): ("minimax", MINIMAX_ACT),
     ("glm", ROLE_THINK): ("glm", GLM_THINK),
     ("glm", ROLE_ACT): ("glm", GLM_ACT),
+    ("qwen", ROLE_THINK): ("qwen", QWEN_THINK),
+    ("qwen", ROLE_ACT): ("qwen", QWEN_ACT),
     ("mix-am", ROLE_THINK): ("anthropic", None),
     ("mix-am", ROLE_ACT): ("minimax", MINIMAX_ACT),
     ("mix-ag", ROLE_THINK): ("anthropic", None),
@@ -62,12 +66,13 @@ _MODE_DEFAULT_PROVIDER = {
     "anthropic": "anthropic",
     "minimax": "minimax",
     "glm": "glm",
+    "qwen": "qwen",
     "mix-am": "minimax",
     "mix-ag": "glm",
     "mix-gm": "minimax",
 }
 
-VALID_MODES = ("anthropic", "minimax", "glm", "mix-am", "mix-ag", "mix-gm")
+VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-ag", "mix-gm")
 
 
 # ── Native executor per provider ─────────────────────────────────────────────
@@ -77,6 +82,7 @@ _NATIVE_EXECUTOR = {
     "anthropic": "claude-haiku-4-5-20251001",
     "minimax": MINIMAX_ACT,
     "glm": GLM_ACT,
+    "qwen": QWEN_ACT,
 }
 
 
@@ -122,7 +128,7 @@ def model_provider(model_name: str | None) -> str | None:
         model_name: The model name to classify.
 
     Returns:
-        "anthropic", "minimax", "glm" or None if the model is unclassified.
+        "anthropic", "minimax", "glm", "qwen" or None if unclassified.
     """
     if not model_name:
         return None
@@ -135,6 +141,11 @@ def model_provider(model_name: str | None) -> str | None:
         return "minimax"
     if model_lower.startswith("glm"):
         return "glm"
+
+    # qwen* = LLM, qwq/qvq = legacy reasoning/visione, wan* = immagini,
+    # happyhorse* = video (modelli dei servizi nativi Model Studio).
+    if model_lower.startswith(("qwen", "qwq", "qvq", "wan", "happyhorse")):
+        return "qwen"
 
     return None
 

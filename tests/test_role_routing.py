@@ -336,8 +336,65 @@ class TestModeListCoherence:
         """Il ruolo sconosciuto non deve mai far esplodere resolve_route."""
         for mode in rr.VALID_MODES:
             provider, override = rr.resolve_route(mode, "un-modello-mai-visto")
-            assert provider in ("anthropic", "minimax", "glm")
+            assert provider in ("anthropic", "minimax", "glm", "qwen")
             assert override is None
+
+
+class TestQwenMode:
+    """Test routing per la modalita' qwen."""
+
+    def test_qwen_think(self):
+        """Qwen THINK nativizza modelli Anthropic."""
+        assert rr.resolve_route('qwen', 'claude-opus-5') == ('qwen', 'qwen3.7-max')
+        assert rr.resolve_route('qwen', 'claude-sonnet-5') == ('qwen', 'qwen3.7-max')
+        assert rr.resolve_route('qwen', 'claude-fable-5') == ('qwen', 'qwen3.7-max')
+
+    def test_qwen_act(self):
+        """Qwen ACT nativizza modelli non-Think."""
+        assert rr.resolve_route('qwen', 'claude-haiku-4-5-20251001') == ('qwen', 'qwen3-coder-plus')
+
+    def test_qwen_nativizza_modelli_stranieri(self):
+        """Bug 404: modelli di altri provider non restano tali."""
+        assert rr.resolve_route('qwen', 'MiniMax-M3') == ('qwen', 'qwen3-coder-plus')
+        assert rr.resolve_route('qwen', 'glm-5.2') == ('qwen', 'qwen3-coder-plus')
+
+    def test_qwen_modello_nativo_non_riscritto(self):
+        """Un modello gia' nativo non va riscritto."""
+        assert rr.resolve_route('qwen', 'qwen3.7-max') == ('qwen', None)
+
+    def test_model_provider_riconosce_qwen(self):
+        """Provider riconosce modelli nativi qwen e non tocca gli altri."""
+        for model in ('qwen3-coder-plus', 'qwq-32b', 'qvq-max', 'wan2.7-image-pro', 'happyhorse-1.1-t2v'):
+            assert rr.model_provider(model) == 'qwen'
+        assert rr.model_provider('glm-5.2') == 'glm'
+        assert rr.model_provider('MiniMax-M3') == 'minimax'
+        assert rr.model_provider('claude-opus-5') == 'anthropic'
+
+    def test_qwen_non_esce_mai_dalla_catena(self):
+        """In modalita' qwen il provider e' sempre qwen."""
+        foreign_models = [
+            'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001',
+            'MiniMax-M3', 'MiniMax-M2.7', 'glm-5.2', 'glm-4.7',
+        ]
+        for model in foreign_models:
+            provider, _ = rr.resolve_route('qwen', model)
+            assert provider == 'qwen'
+
+    def test_le_sei_modalita_preesistenti_sono_invariate(self):
+        """Non-regression: sei modalita' esistenti restano identiche."""
+        expected = {
+            'anthropic': (('anthropic', None), ('anthropic', None)),
+            'minimax': (('minimax', 'MiniMax-M3'), ('minimax', 'MiniMax-M2.7')),
+            'glm': (('glm', 'glm-5.2'), ('glm', 'glm-4.7')),
+            'mix-am': (('anthropic', None), ('minimax', 'MiniMax-M2.7')),
+            'mix-ag': (('anthropic', None), ('glm', 'glm-4.7')),
+            'mix-gm': (('glm', 'glm-5.2'), ('minimax', 'MiniMax-M2.7')),
+        }
+        think_model = 'claude-opus-5'
+        act_model = 'claude-haiku-4-5-20251001'
+        for mode, (think_res, act_res) in expected.items():
+            assert rr.resolve_route(mode, think_model) == think_res
+            assert rr.resolve_route(mode, act_model) == act_res
 
 
 def run_tests():

@@ -33,6 +33,14 @@ except Exception:
     _peak = None
     GLM_AVAILABLE = False
 
+# -- Qwen backend (Alibaba Model Studio, deferred import come GLM) --
+try:
+    import qwen_backend as _qwen
+    QWEN_AVAILABLE = True
+except Exception:
+    _qwen = None
+    QWEN_AVAILABLE = False
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 MODE_FILE = Path.home() / ".claude" / "ai-router-mode"
 KEY_FILE = Path.home() / ".claude" / "secrets" / "secrets.sh"
@@ -93,7 +101,7 @@ HOP_HEADERS = frozenset({
 })
 
 # ── Valid modes ────────────────────────────────────────────────────────────────
-VALID_MODES = ("anthropic", "minimax", "mix-am", "mix-ag", "mix-gm", "glm")
+VALID_MODES = ("anthropic", "minimax", "mix-am", "mix-ag", "mix-gm", "glm", "qwen")
 
 # ── Port mode map ─────────────────────────────────────────────────────────────
 PORT_MODE = {
@@ -103,6 +111,7 @@ PORT_MODE = {
     8775: "glm",
     8776: "mix-gm",
     8777: "mix-ag",
+    8778: "qwen",
 }
 _pm_override = os.environ.get("AIROUTER_PORT_MODE_JSON", "").strip()
 if _pm_override:
