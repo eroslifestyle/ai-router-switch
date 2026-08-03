@@ -138,8 +138,14 @@ VERIFICATO IL 2026-08-03, PATH DASHSCOPE
 - i model ID dei servizi nativi sono stati verificati uno per uno: `qwen-image-2.0-pro`, `happyhorse-1.1-t2v`, `qwen3-tts-flash`, `fun-asr`, `text-embedding-v4` e `qwen3-rerank` esistono tutti sull'account
 - `fun-music-v1` **NON ESISTE** (risponde `404 "Model not exist"` identico alla controprova con un modello inventato) → la rotta musica non può funzionare e il suo path resta non determinabile perché il gateway valida il modello prima del path
 
-ANCORA NON MISURATO
-- limiti **RPM** e **TPM**: le pagine della doc rispondono `404`, il rate limiter usa placeholder
+VERIFICATO IL 2026-08-03, RATE LIMITS
+- valori ufficiali letti da https://www.alibabacloud.com/help/en/model-studio/rate-limit, regione **ap-southeast-1** Singapore; i limiti **variano per regione**
+- i placeholder precedenti erano molto sotto il reale (es. `qwen3.7-flash`: 300 RPM → 15.000 reali; `qwen3.7-max`: 60 RPM → 600 reali)
+- modelli in uso: `qwen3.8-max` (THINK) ha **600 RPM** e **1.000.000 TPM**; `qwen3-coder-plus` (ACT) ha **2.400 RPM** e **2.000.000 TPM**
+- le versioni datate con suffisso di data hanno limiti molto più bassi (tipicamente **60 RPM**) → passare a un modello datato invalida questi valori
+- il rate limiting **non si applica** alle chiamate tramite **Batch API**
+- il gateway **NON espone header di quota**: ispezionate risposte sia dall'endpoint Anthropic-compatible sia da DashScope nativo, gli unici header presenti sono di tracciamento (`x-request-id` ecc.) → i limiti non sono osservabili a runtime, la tabella va tenuta allineata alla doc a mano
+- nessuna voce rimane dichiarata come **ANCORA NON MISURATO** per la modalità Qwen
 
 ## File toccati
 

@@ -104,15 +104,31 @@ QWEN_BACKOFF_STEPS = (5, 10, 20, 40, 60)
 QWEN_CONCURRENCY = int(os.environ.get("AIROUTER_QWEN_SEMAPHORE", "8"))
 _QWEN_SEM = asyncio.Semaphore(QWEN_CONCURRENCY)
 
-# Rate limits placeholder (da verificare con la doc ufficiale quando disponibile)
+# Valori ufficiali rate limits per regione ap-southeast-1 Singapore (2026-08-03).
+# Fonte: https://www.alibabacloud.com/help/en/model-studio/rate-limit
+# ATTENZIONE: i limiti VARIANO per regione e NON valgono per Pechino o Francoforte.
+# Le versioni datate con suffisso data hanno limiti molto piu bassi delle stabili,
+# tipicamente 60 RPM; se si passa a un modello datato questi valori non valgono.
+# Rate limiting NON si applica alle chiamate tramite Batch API.
+# Il gateway NON espone header di quota (verificato 2026-08-03 ispezionando le risposte),
+# per cui questi limiti non sono osservabili a runtime e vanno tenuti allineati alla doc a mano.
 QWEN_RATE_LIMITS = {
-    "qwen3.7-max": (60, 1_000_000),
-    "qwen3.7-plus": (120, 2_000_000),
-    "qwen3-coder-plus": (120, 2_000_000),
-    "qwen3.6-flash": (300, 5_000_000),
-    "qwen3-vl-plus": (60, 1_000_000),
+    "qwen3.8-max": (600, 1_000_000),
+    "qwen3.7-max": (600, 1_000_000),
+    "qwen3.7-plus": (15_000, 5_000_000),
+    "qwen3.6-plus": (15_000, 5_000_000),
+    "qwen3.7-flash": (15_000, 5_000_000),
+    "qwen3.6-flash": (15_000, 5_000_000),
+    "qwen3-max": (600, 1_000_000),
+    "qwen3-coder-plus": (2_400, 2_000_000),
+    "qwen3-coder-next": (600, 1_000_000),
+    "qwen3-coder-flash": (600, 5_000_000),
+    "qwen3-vl-plus": (1_200, 1_000_000),
+    "qwen-plus": (600, 1_000_000),
+    "qwen-flash": (600, 5_000_000),
+    "qwen-max": (600, 1_000_000),
 }
-QWEN_RATE_LIMITS_DEFAULT = (60, 1_000_000)
+QWEN_RATE_LIMITS_DEFAULT = (60, 1_000_000)  # Default prudente per modelli non elencati
 
 # Cache per le chiavi (60s)
 _qwen_key_cache = {"key": "", "ts": 0.0}
