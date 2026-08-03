@@ -71,13 +71,8 @@ GLM_UPSTREAM = os.environ.get(
     os.environ.get("GLM_UPSTREAM", "https://api.z.ai/api/anthropic")
 )
 
-# Endpoint per generazione media
-GLM_IMAGE_ENDPOINT = "https://api.z.ai/api/paas/v4/images/generations"
-GLM_VIDEO_ENDPOINT = "https://api.z.ai/api/paas/v4/videos/generations"
-
-# Endpoint per generazione media
-GLM_IMAGE_ENDPOINT = "https://api.z.ai/api/paas/v4/images/generations"
-GLM_VIDEO_ENDPOINT = "https://api.z.ai/api/paas/v4/videos/generations"
+# GLM_IMAGE_ENDPOINT e GLM_VIDEO_ENDPOINT rimossi il 2026-08-03 perche definiti due volte in modo identico e usati solo dalle rotte generative morte
+# (valori originali: "https://api.z.ai/api/paas/v4/images/generations" e "https://api.z.ai/api/paas/v4/videos/generations")
 
 # Tier costanti
 GLM_TIER_TOP = "TOP"
@@ -298,11 +293,13 @@ def has_multimodal_content(body: bytes) -> tuple[str, str]:
 
     Ritorna (content_type, detail):
     - ("text", ""): solo testo
-    - ("image", ""): immagini presenti
-    - ("video", ""): video (frame input)
-    - ("pdf", ""): PDF/documenti
     - ("image_gen", ""): richiesta generazione immagine
     - ("video_gen", ""): richiesta generazione video
+    Dal 2026-08-03 nessun chiamante interpreta piu image_gen e video_gen: il loro
+    unico consumatore era route_glm_request, rimossa quel giorno perche' codice morto.
+    classify_tier, unico chiamante rimasto, non ha rami per quei due valori e fa
+    ricadere quelle richieste nel tier scelto per dimensione. La rilevazione resta
+    perche' documenta il formato ed e' pronta se si cablano le rotte generative.
     """
     try:
         data = json.loads(body)
@@ -341,7 +338,7 @@ def has_multimodal_content(body: bytes) -> tuple[str, str]:
         # messaggio verso l'endpoint immagini z.ai (senza credito sul piano
         # coding) invece della chat normale — causa root del 429
         # "Insufficient balance" apparentemente casuale e mai loggato
-        # (forward_glm_image non logga sul percorso di successo/risposta).
+        # (l'allora forward_glm_image, rimossa il 2026-08-03, non loggava il successo).
         if '"type": "image_generation"' in body.decode(errors="ignore"):
             return ("image_gen", "")
         if '"type": "video_generation"' in body.decode(errors="ignore"):
@@ -583,113 +580,11 @@ def _fire_and_forget(coro):
     return task
 
 
-
-
-# ── Image & Video Generation ──────────────────────────────────────────────────
-
-async def forward_glm_image(request, body: bytes, session, log_fn=print):
-    """Genera immagine via /v4/images/generations."""
-    key = await get_glm_key()
-    if not key:
-        return aiohttp.web.Response(status=502, text="GLM key missing")
-
-    try:
-        data = json.loads(body)
-        prompt = data.get("prompt", "")
-        size = data.get("size", "1024x1024")
-
-        payload = {
-            "model": "glm-image",
-            "prompt": prompt,
-            "size": size,
-        }
-
-        timeout = ClientTimeout(total=120)
-        async with session.request(
-            method="POST",
-            url=GLM_IMAGE_ENDPOINT,
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=timeout,
-            ssl=True,
-        ) as resp:
-            raw = await resp.read()
-            return aiohttp.web.Response(
-                body=raw,
-                status=resp.status,
-                content_type="application/json",
-            )
-    except Exception as e:
-        log_fn(f"GLM image generation EXC: {e}")
-        return aiohttp.web.Response(status=502, text=f"GLM image error: {e}")
-
-
-async def forward_glm_video(request, body: bytes, session, log_fn=print):
-    """Genera video via CogVideoX-3."""
-    key = await get_glm_key()
-    if not key:
-        return aiohttp.web.Response(status=502, text="GLM key missing")
-
-    try:
-        data = json.loads(body)
-        prompt = data.get("prompt", "")
-        image_url = data.get("image_url")
-        quality = data.get("quality", "quality")
-        size = data.get("size", "1920x1080")
-        fps = data.get("fps", 30)
-        with_audio = data.get("with_audio", False)
-
-        payload = {
-            "model": "cogvideox-3",
-            "prompt": prompt,
-            "quality": quality,
-            "size": size,
-            "fps": fps,
-            "with_audio": with_audio,
-        }
-        if image_url:
-            payload["image_url"] = image_url
-
-        timeout = ClientTimeout(total=300)  # Video takes longer
-        async with session.request(
-            method="POST",
-            url=GLM_VIDEO_ENDPOINT,
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=timeout,
-            ssl=True,
-        ) as resp:
-            raw = await resp.read()
-            return aiohttp.web.Response(
-                body=raw,
-                status=resp.status,
-                content_type="application/json",
-            )
-    except Exception as e:
-        log_fn(f"GLM video generation EXC: {e}")
-        return aiohttp.web.Response(status=502, text=f"GLM video error: {e}")
-
-
-async def route_glm_request(request, body: bytes, session, log_fn=print):
-    """Route la richiesta all'endpoint appropriato in base al tipo."""
-    content_type, _ = has_multimodal_content(body)
-
-    if content_type == "image_gen":
-        log_fn(f"GLM route: image generation → /v4/images/generations")
-        return await forward_glm_image(request, body, session, log_fn)
-
-    if content_type == "video_gen":
-        log_fn(f"GLM route: video generation → /v4/videos/generations")
-        return await forward_glm_video(request, body, session, log_fn)
-
-    # Per tutto il resto, usa il flow standard
-    return None
+# Rimosse 2026-08-03: forward_glm_image, forward_glm_video e route_glm_request
+# erano codice morto: nessun caller le raggiungeva mai (grep + grafo chiamate
+# confermato). Se un giorno si vorranno cablare le rotte generative su GLM
+# andranno riscritte con decompressione, semaforo _GLM_SEM e model ID da env.
+# Storia completa: git log.
 
 
 # ── Forward GLM ───────────────────────────────────────────────────────────────
