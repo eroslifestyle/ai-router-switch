@@ -123,5 +123,6 @@ NON VERIFICATO, da chiudere col probe:
 
 ## Voci aperte
 
-- Il ramo glm ha la stessa forma latente corretta nel ramo qwen: `forward_glm` ritorna una `web.Response` sui percorsi d'errore e il relay ci chiama `.release()` sopra. Non toccato perché fuori mandato; l'esito resta comunque un 502.
+- ~~Il ramo glm ha la stessa forma latente corretta nel ramo qwen.~~ **CHIUSA il 2026-08-03**: corretta alla fonte per entrambi con `src/synthetic_response.py`, più il 429 che non degrada più a 502. Vedi `sviluppo/tests/test_synthetic_response.py`.
+- In modalità `glm` le rotte generative vanno ancora a **MiniMax**, benché `glm_backend` contenga `forward_glm_image`/`forward_glm_video`: quelle funzioni sono raggiungibili solo da `route_glm_request`, che **non è chiamata da nessuno**. Comportamento invariato rispetto a prima della modalità qwen; cablarle è una scelta da fare, non un fix.
 - Non esiste un equivalente di `m3-wiki` per Qwen: in modalità qwen l'hook della gerarchia rimanda i documenti a `qwen-code`.
