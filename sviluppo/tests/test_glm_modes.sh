@@ -27,21 +27,14 @@ echo "── [1] Import moduli ──"
   && ok "glm_backend + peak_scheduler importabili" || ko "import moduli fallito"
 
 # 2) Logica peak/tiering (unit, zero rete)
-echo "── [2] Unit tiering + peak ──"
+echo "── [2] Unit peak-cap ──"
 (cd "$ROOT/src" && python3 - <<'PY'
 import sys, json
 import glm_backend as gb
 import peak_scheduler as ps
 
-# heuristic_tier e' basato sulla DIMENSIONE del body (vedi la sua docstring),
-# non sul contenuto: le soglie sono 800.000 e 150.000 caratteri.
-piccolo = json.dumps({"messages": [{"role": "user", "content": "traduci ciao"}]}).encode()
-medio = b'x' * 200_000
-grande = b'x' * 900_000
-assert gb.heuristic_tier(piccolo) == gb.GLM_TIER_MID, "body piccolo deve dare MID"
-assert gb.heuristic_tier(medio) == gb.GLM_TIER_TURBO, "body >150K deve dare TURBO"
-assert gb.heuristic_tier(grande) == gb.GLM_TIER_TOP, "body >800K deve dare TOP"
-
+# heuristic_tier e classify_tier rimosse il 2026-08-04: il tiering per dimensione del body
+# non aveva piu chiamanti. Il modello GLM lo decide il ruolo (role_routing), non il body.
 # apply_peak_cap accetta sia TIER KEY (TOP/TURBO/MID/VISION) sia NOME MODELLO reale (glm-5.2, glm-4.7, ecc.).
 # Dal 2026-07-25 il tiering dinamico non esiste piu: il proxy riceve il modello da role_routing
 # (glm-5.2 per THINK, glm-4.7 per ACT), e apply_peak_cap lo converte in tier prima di consultare peak_scheduler.
@@ -58,7 +51,7 @@ assert gb.apply_peak_cap("glm-4.6V") == ("glm-4.6V", False), "VISION esente anch
 assert gb.apply_peak_cap("modello-ignoto") == ("modello-ignoto", False), "input sconosciuto invariato, fallback sicuro"
 print("ok")
 PY
-) >/dev/null 2>&1 && ok "tiering per dimensione + peak-cap (tier key e nome modello)" || ko "unit tiering/peak fallito"
+) >/dev/null 2>&1 && ok "peak-cap su tier key e su nome modello" || ko "unit peak-cap fallito"
 
 # 3) Avvio istanza isolata
 echo "── [3] Avvio istanza isolata ──"

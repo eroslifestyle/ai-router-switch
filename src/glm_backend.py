@@ -2,17 +2,18 @@
 """
 GLM Backend — Zhipu AI (Z.ai) Anthropic-compatible endpoint.
 
-3 tier modeli GLM con context window reali verificati:
-  - TOP    (GLM_TIER_TOP):    glm-5.2    — 1M ctx, 128K output
-  - TURBO  (GLM_TIER_TURBO): glm-5-turbo — 200K ctx
-  - MID    (GLM_TIER_MID):   glm-4.7     — 128K ctx, cheap
+2 modelli GLM instradati per ruolo (role_routing):
+  - THINK: glm-5.2  — 1M ctx, 128K output
+  - ACT:   glm-4.7  — 128K ctx, cheap
+(TOP/TURBO/MID/VISION/MULTIMODAL e GLM_MODEL_FOR_TIER sopravvivono
+ solo come input alternativo di apply_peak_cap)
 
 R3 decisions:
   R3-#1: GLMRateLimiter dedicato, non condiviso con minimax
   R3-#2: chiave da secrets.sh, mai stampata nei log
   R3-#3: circuit breaker con auto-recupero
-  R3-#4: classify_tier via MiniMax/M3
-  R3-#5: peak scheduler (Asia/Shanghai 14-18 UTC+8)
+  R3-#4: [2026-08-04] decaduto — classify_tier e heuristic_tier rimossi
+  R3-#5: peak scheduler (Asia/Shanghai 14-18 UTC+8); cap collegato al proxy il 2026-08-04, declassa glm-5.2 e glm-5-turbo a glm-4.7
   R3-#6: forward_glm con retry loop 2 tentativi
 """
 import asyncio
@@ -81,8 +82,9 @@ GLM_TIER_MID = "MID"
 GLM_TIER_VISION = "VISION"      # glm-4.6V (visione base)
 GLM_TIER_MULTIMODAL = "MULTIMODAL"  # glm-5V-Turbo (visione + video)
 
-# Marker per il proxy: task complesso in fascia peak → Anthropic esegue direttamente
-_ANTHROPIC_BLOCKED = "__ANTHROPIC_BLOCKED__"
+# Rimosso il 2026-08-04: _ANTHROPIC_BLOCKED, marker del vecchio dirottamento su Anthropic
+# in fascia peak. Aveva la sola definizione e nessun lettore; oggi il peak cap declassa
+# dentro GLM (glm-5.2 → glm-4.7) e non esce mai dal provider.
 
 # Modello GLM per ogni tier
 GLM_MODEL_FOR_TIER = {
@@ -286,68 +288,14 @@ def glm_alert(msg: str):
         pass
 
 
-# ── Multimodal detection ───────────────────────────────────────────────────────
-
-def has_multimodal_content(body: bytes) -> tuple[str, str]:
-    """Rileva il tipo di contenuto nel body.
-
-    Ritorna (content_type, detail):
-    - ("text", ""): solo testo
-    - ("image_gen", ""): richiesta generazione immagine
-    - ("video_gen", ""): richiesta generazione video
-    Dal 2026-08-03 nessun chiamante interpreta piu image_gen e video_gen: il loro
-    unico consumatore era route_glm_request, rimossa quel giorno perche' codice morto.
-    classify_tier, unico chiamante rimasto, non ha rami per quei due valori e fa
-    ricadere quelle richieste nel tier scelto per dimensione. La rilevazione resta
-    perche' documenta il formato ed e' pronta se si cablano le rotte generative.
-    """
-    try:
-        data = json.loads(body)
-        messages = data.get("messages", [])
-
-        # Check image blocks in messages
-        for msg in messages:
-            content = msg.get("content", "")
-            if isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict):
-                        t = block.get("type", "")
-                        if t == "image":
-                            # FIX 2026-07-22: un blocco type:"image" è SEMPRE
-                            # un'immagine, sia source base64 sia url. Il ramo
-                            # precedente classificava base64 → "video" (tier
-                            # MULTIMODAL glm-5V-Turbo), ma il formato Anthropic
-                            # standard per QUALSIASI immagine incollata (screenshot,
-                            # foto) è {type:image, source:{type:base64}} → OGNI
-                            # immagine finiva su glm-5V-Turbo (429/connection-reset,
-                            # "errore api" della modalità glm). Un frame video non è
-                            # distinguibile da un'immagine via source.type e Claude
-                            # Code non invia frame video in-band: il video vero si
-                            # rileva solo via marker espliciti (video_generation, sotto).
-                            return ("image", "")
-                        if t in ("video", "input_video"):
-                            return ("video", "")
-
-        # Check per generazione immagine/video: SOLO via marker esplicito nel
-        # body (type: image_generation/video_generation). FIX 2026-07-19:
-        # rimosso il matching su substring del NOME tool ("image" in name,
-        # "generation" in name, "video" in name) — troppo fragile, causava
-        # falsi positivi con QUALSIASI tool disponibile nella richiesta che
-        # contenesse quelle sottostringhe (es. mcp__MiniMax__understand_image,
-        # presente di default in molte sessioni Claude Code), dirottando OGNI
-        # messaggio verso l'endpoint immagini z.ai (senza credito sul piano
-        # coding) invece della chat normale — causa root del 429
-        # "Insufficient balance" apparentemente casuale e mai loggato
-        # (l'allora forward_glm_image, rimossa il 2026-08-03, non loggava il successo).
-        if '"type": "image_generation"' in body.decode(errors="ignore"):
-            return ("image_gen", "")
-        if '"type": "video_generation"' in body.decode(errors="ignore"):
-            return ("video_gen", "")
-
-        return ("text", "")
-    except Exception:
-        return ("text", "")
-
+# Rimossa il 2026-08-04: has_multimodal_content, insieme alla sezione Multimodal detection.
+# Il suo unico chiamante era classify_tier, rimossa lo stesso giorno poco piu sotto; gia dal
+# 2026-08-03 nessuno interpretava piu i suoi valori image_gen e video_gen, perche il loro
+# consumatore route_glm_request era stato tolto come codice morto.
+# Vale la pena ricordare il difetto che quella funzione documentava (fix del 2026-07-22): un
+# blocco type:"image" e SEMPRE un'immagine, sia source base64 sia url. Il ramo precedente
+# classificava le base64 come "video" e mandava OGNI screenshot incollato su glm-5V-Turbo,
+# che rispondeva 429 o chiudeva la connessione: era l'"errore api" della modalita glm.
 
 # ── Body size check ────────────────────────────────────────────────────────────
 
@@ -366,47 +314,13 @@ def classify_429_glm(raw: bytes) -> str:
     return "rpm_tpm"
 
 
-# ── Tier classification ───────────────────────────────────────────────────────
-
-def heuristic_tier(body: bytes) -> str:
-    """Fallback: stima il tier dalla dimensione del body.
-
-    - > 800K char → TOP (glm-5.2, 1M ctx)
-    - > 150K char → TURBO (glm-5-turbo, 200K ctx)
-    - altrimenti → MID (glm-4.7, 128K ctx)
-    """
-    try:
-        size = len(body)
-        if size > 800_000:
-            return GLM_TIER_TOP
-        if size > 150_000:
-            return GLM_TIER_TURBO
-        return GLM_TIER_MID
-    except Exception:
-        return GLM_TIER_MID
-
-
-async def classify_tier(body: bytes, request, session, log_fn=print):
-    """Classifica il tier ottimale per questo body.
-
-    1. Multimodal detection (vision/video) ha priorita assoluta
-    2. Size-based tier per text-only
-    """
-    try:
-        content_type, _ = has_multimodal_content(body)
-
-        # Routing basato su tipo contenuto
-        if content_type == "video":
-            log_fn(f"GLM classify: video detected → MULTIMODAL (glm-5V-Turbo)")
-            return GLM_TIER_MULTIMODAL
-        if content_type == "image":
-            log_fn(f"GLM classify: image detected → VISION (glm-4.6V)")
-            return GLM_TIER_VISION
-
-        # Text-only: usa size-based heuristic
-        return heuristic_tier(body)
-    except Exception:
-        return GLM_TIER_MID
+# Rimosse il 2026-08-04: la sezione Tier classification, cioe classify_tier e heuristic_tier.
+# Il tiering per COMPLESSITA non esiste piu dal refactoring del 2026-07-25, quando il router
+# e diventato un tunnel trasparente: classify_tier non aveva piu chiamanti, e heuristic_tier
+# la chiamava soltanto lei. Oggi il modello GLM lo decide il RUOLO e non la dimensione del
+# body: role_routing instrada glm-5.2 per il THINK e glm-4.7 per l'ACT. Cade con loro
+# has_multimodal_content, di cui classify_tier era l'unico chiamante. Le costanti GLM_TIER_*
+# e la mappa GLM_MODEL_FOR_TIER RESTANO: le usa apply_peak_cap.
 
 
 def apply_peak_cap(tier_or_model: str):
