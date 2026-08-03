@@ -1,0 +1,372 @@
+#!/usr/bin/env python3
+"""
+Script di setup per la modalità router qwen.
+Attivazione one-shot: credenziali, MCP WebSearch, verifica.
+"""
+
+import argparse
+import getpass
+import json
+import os
+import shutil
+import subprocess
+import sys
+import urllib.request
+import urllib.error
+from datetime import datetime
+from pathlib import Path
+
+VERSIONE = "1.0.0"
+DEFAULT_MODEL = "qwen3.7-max"
+DEFAULT_REGION = "ap-southeast-1"
+DEFAULT_MCP_URL = "https://dashscope-intl.aliyuncs.com/api/v1/mcps/WebSearch/mcp"
+
+
+def maschera_chiave(chiave: str) -> str:
+    """Maschera la chiave API mostrando solo i primi 6 e gli ultimi 4 caratteri."""
+    if not chiave or len(chiave) <= 10:
+        return "***"
+    return f"{chiave[:6]}...{chiave[-4:]}"
+
+
+def esegui_secrets(chiave: str, valore: str, operazione: str) -> tuple[bool, str]:
+    """
+    Esegue secrets.sh con l'operazione richiesta.
+    Ritorna (successo, output).
+    """
+    secrets_script = os.path.expanduser("~/.claude/secrets/secrets.sh")
+    if not os.path.exists(secrets_script):
+        return False, f"Script non trovato: {secrets_script}"
+
+    try:
+        result = subprocess.run(
+            ["bash", secrets_script, operazione, chiave, valore],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        return result.returncode == 0, result.stdout + result.stderr
+    except subprocess.TimeoutExpired:
+        return False, "Timeout durante l'esecuzione di secrets.sh"
+    except Exception as e:
+        return False, str(e)
+
+
+def leggi_secrets(chiave: str) -> tuple[bool, str]:
+    """Legge un valore dallo store secrets."""
+    successo, output = esegui_secrets(chiave, "", "get")
+    if successo:
+        return True, output.strip()
+    return False, ""
+
+
+def passo1_credenziali(api_key: str, workspace_id: str, dry_run: bool) -> str:
+    """
+    Passo 1: Salva le credenziali nello store cifrato.
+    Ritorna OK/SALTATO/ERRORE.
+    """
+    print("\n[PASSO 1] Salvataggio credenziali...")
+    print(f"  API Key: {maschera_chiave(api_key)}")
+
+    secrets_script = os.path.expanduser("~/.claude/secrets/secrets.sh")
+    if not os.path.exists(secrets_script):
+        print("  ERRORE: Script secrets.sh non trovato")
+        return "ERRORE"
+
+    if dry_run:
+        print("  [DRY-RUN] Scriverei qwen.api_key nello store")
+        if workspace_id:
+            print("  [DRY-RUN] Scriverei qwen.workspace_id nello store")
+        return "SALTATO"
+
+    # Scrivi API key
+    successo, output = esegui_secrets("qwen.api_key", api_key, "set")
+    if not successo:
+        print(f"  ERRORE: Impossibile salvare qwen.api_key: {output}")
+        return "ERRORE"
+    print("  API key salvata")
+
+    # Scrivi workspace_id solo se non vuoto
+    if workspace_id:
+        print(f"  Workspace ID: {workspace_id}")
+        successo, output = esegui_secrets("qwen.workspace_id", workspace_id, "set")
+        if not successo:
+            print(f"  ERRORE: Impossibile salvare qwen.workspace_id: {output}")
+            return "ERRORE"
+        print("  Workspace ID salvato")
+    else:
+        print("  Workspace ID: non fornito (verrà usato dashscope-intl)")
+
+    # Verifica rilettura
+    print("  Verifica rilettura...")
+    successo_api, valore_api = leggi_secrets("qwen.api_key")
+    if not successo_api or valore_api != api_key:
+        print(f"  ERRORE: Rilettura API key fallita o valore non coincidente")
+        return "ERRORE"
+
+    if workspace_id:
+        successo_ws, valore_ws = leggi_secrets("qwen.workspace_id")
+        if not successo_ws or valore_ws != workspace_id:
+            print(f"  ERRORE: Rilettura workspace_id fallita o valore non coincidente")
+            return "ERRORE"
+
+    print("  OK: Credenziali verificate")
+    return "OK"
+
+
+def passo2_mcp(ws: str, dry_run: bool) -> str:
+    """
+    Passo 2: Registra il server MCP WebSearch.
+    Ritorna OK/SALTATO/ERRORE.
+    """
+    print("\n[PASSO 2] Registrazione MCP WebSearch...")
+
+    mcp_file = Path(os.path.expanduser("~/.claude/.mcp.json"))
+    mcp_url = os.environ.get("QWEN_MCP_URL", DEFAULT_MCP_URL)
+
+    # Carica configurazione esistente
+    if mcp_file.exists():
+        try:
+            with open(mcp_file, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except json.JSONDecodeError:
+            print("  ERRORE: .mcp.json non è JSON valido")
+            return "ERRORE"
+    else:
+        print("  File .mcp.json non esistente, partirà da {}")
+        config = {}
+
+    # Assicura struttura base
+    if "mcpServers" not in config:
+        config["mcpServers"] = {}
+
+    # Voce da aggiungere/aggiornare
+    voce_attesa = {
+        "type": "http",
+        "url": mcp_url,
+        "headers": {"Authorization": f"Bearer <api_key>"}
+    }
+
+    # Verifica se già presente e identica
+    if config["mcpServers"].get("qwen-websearch") == voce_attesa:
+        print("  SALTATO: Configurazione già presente e identica")
+        return "SALTATO"
+    # Genera timestamp per consistenza dry-run/real
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+    # Dry-run: check PRIMA del backup
+    if dry_run:
+        print(f"  [DRY-RUN] Creerei il backup: {mcp_file.with_suffix(f'.json.bak-qwen-setup-{timestamp}')}")
+        print(f"  [DRY-RUN] Scriverei in .mcp.json:")
+        print(f"    url: {mcp_url}")
+        print()
+        print("  ATTENZIONE: la doc ufficiale documenta questo MCP sull'host cinese")
+        print("  dashscope.aliyuncs.com. L'equivalente internazionale non è")
+        print("  confermato: se il server non risponde, cambia QWEN_MCP_URL.")
+        return "OK"
+
+    # Backup
+    backup_file = mcp_file.with_suffix(f".json.bak-qwen-setup-{timestamp}")
+    shutil.copy2(mcp_file, backup_file)
+    print(f"  Backup creato: {backup_file}")
+
+    # Aggiorna configurazione
+    config["mcpServers"]["qwen-websearch"] = voce_attesa
+
+    # Scrittura atomica: temp + replace
+    temp_file = mcp_file.with_suffix(".json.tmp")
+    try:
+        with open(temp_file, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        os.replace(temp_file, mcp_file)
+    except Exception as e:
+        if temp_file.exists():
+            temp_file.unlink()
+        print(f"  ERRORE: Impossibile scrivere .mcp.json: {e}")
+        return "ERRORE"
+
+    print("  OK: MCP WebSearch registrato")
+    print()
+    print("  ATTENZIONE: la doc ufficiale documenta questo MCP sull'host cinese")
+    print("  dashscope.aliyuncs.com. L'equivalente internazionale non è")
+    print("  confermato: se il server non risponde, cambia QWEN_MCP_URL.")
+
+    return "OK"
+
+def passo3_verifica(api_key: str, workspace_id: str, region: str, model: str, dry_run: bool) -> str:
+    """
+    Passo 3: Verifica che le credenziali funzionino con chiamata reale.
+    Ritorna OK/SALTATO/ERRORE.
+    """
+    print("\n[PASSO 3] Verifica credenziali...")
+
+    if dry_run:
+        print("  [DRY-RUN] Effettuerei chiamata di verifica:")
+        print(f"    model: {model}")
+        print(f"    workspace: {workspace_id or 'dashscope-intl'}")
+        return "SALTATO"
+
+    # Costruisci URL base
+    if workspace_id:
+        base_url = f"https://{workspace_id}.{region}.maas.aliyuncs.com/apps/anthropic"
+    else:
+        base_url = "https://dashscope-intl.aliyuncs.com/apps/anthropic"
+
+    url = f"{base_url}/v1/messages"
+
+    payload = {
+        "model": model,
+        "max_tokens": 16,
+        "messages": [{"role": "user", "content": "rispondi con la sola parola PONG"}]
+    }
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+        "x-api-key": api_key
+    }
+
+    print(f"  URL: {url}")
+    print(f"  Model: {model}")
+
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST"
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            status = resp.status
+            body = json.loads(resp.read().decode("utf-8"))
+
+            print(f"  Status: {status}")
+            print(f"  Model risposta: {body.get('model', 'N/D')}")
+
+            # Estrai testo dal primo blocco
+            contenuto = ""
+            if "content" in body and isinstance(body["content"], list):
+                for blocco in body["content"]:
+                    if blocco.get("type") == "text":
+                        contenuto = blocco.get("text", "")
+                        break
+
+            print(f"  Risposta: {contenuto or '(vuota)'}")
+
+            if "usage" in body:
+                usage = body["usage"]
+                print(f"  Usage: input={usage.get('input_tokens', '?')} "
+                      f"output={usage.get('output_tokens', '?')} "
+                      f"totale={usage.get('total_tokens', '?')}")
+
+            if status == 200 and contenuto.strip().upper() == "PONG":
+                print("  OK: Credenziali funzionanti")
+                return "OK"
+            else:
+                print("  ERRORE: Risposta non conforme (atteso PONG)")
+                return "ERRORE"
+
+    except urllib.error.HTTPError as e:
+        corpo = e.read().decode("utf-8", errors="replace")[:400]
+        print(f"  ERRORE HTTP {e.code}: {corpo}")
+
+        # Suggerimento per modello non esistente
+        if "model" in corpo.lower() or e.code == 400:
+            print()
+            print("  Suggerimento: il modello potrebbe non esistere su questo account.")
+            print("  Per scoprire i modelli disponibili, lancia:")
+            print("    python3 sviluppo/tools/probe_qwen.py")
+
+        return "ERRORE"
+
+    except urllib.error.URLError as e:
+        print(f"  ERRORE di rete: {e.reason}")
+        return "ERRORE"
+
+    except Exception as e:
+        print(f"  ERRORE: {e}")
+        return "ERRORE"
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Setup one-shot per la modalità router qwen"
+    )
+    parser.add_argument("--api-key", help="Chiave API Model Studio")
+    parser.add_argument("--workspace-id", help="Workspace ID (opzionale)")
+    parser.add_argument("--region", default=DEFAULT_REGION, help="Regione (default: ap-southeast-1)")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="Model ID (default: qwen3.7-max)")
+    parser.add_argument("--skip-mcp", action="store_true", help="Non toccare .mcp.json")
+    parser.add_argument("--skip-verify", action="store_true", help="Non fare chiamata di verifica")
+    parser.add_argument("--dry-run", action="store_true", help="Mostra cosa farebbe senza scrivere")
+
+    args = parser.parse_args()
+
+    # Raccogli input interattivi
+    api_key = args.api_key
+    if not api_key:
+        print("Inserisci la API Key Alibaba Bailian: ", end="", flush=True)
+        api_key = getpass.getpass("")
+        if not api_key:
+            print("ERRORE: API key obbligatoria")
+            sys.exit(1)
+
+    workspace_id = args.workspace_id
+    if not workspace_id:
+        workspace_id = input("Workspace ID (invio per usare dashscope-intl): ").strip()
+        if not workspace_id:
+            print("  Verrà usato l'host dashscope-intl.aliyuncs.com (non cinese)")
+
+    print(f"\n=== Setup Qwen Router ===")
+    print(f"Versione: {VERSIONE}")
+    print(f"Region: {args.region}")
+    print(f"Model: {args.model}")
+    print(f"Workspace: {workspace_id or '(dashscope-intl)'}")
+    if args.skip_mcp:
+        print("MCP: SALTATO")
+    if args.skip_verify:
+        print("Verifica: SALTATO")
+    if args.dry_run:
+        print("Modalità DRY-RUN")
+
+    # Esegui i tre passi
+    esito_p1 = "SALTATO"
+    esito_p2 = "SALTATO"
+    esito_p3 = "SALTATO"
+
+    # Passo 1: credenziali
+    esito_p1 = passo1_credenziali(api_key, workspace_id, args.dry_run)
+
+    # Passo 2: MCP
+    if not args.skip_mcp:
+        esito_p2 = passo2_mcp(workspace_id, args.dry_run)
+
+    # Passo 3: verifica
+    if not args.skip_verify:
+        esito_p3 = passo3_verifica(api_key, workspace_id, args.region, args.model, args.dry_run)
+
+    # Riepilogo
+    print("\n" + "=" * 50)
+    print("RIEPILOGO:")
+    print(f"  [1] Credenziali:  {esito_p1}")
+    print(f"  [2] MCP WebSearch: {esito_p2}")
+    print(f"  [3] Verifica:      {esito_p3}")
+    print()
+    print("Prossimi passi:")
+    print("  - ai-mode qwen          per attivare la modalità globalmente")
+    print("  - !router qwen          per una singola chat")
+    print("  - python3 sviluppo/tools/probe_qwen.py --deep")
+    print("                         per verificare model ID e context window")
+
+    # Calcola exit code
+    passi_eseguiti = [esito_p1, esito_p2, esito_p3]
+    tutti_ok = all(e == "OK" or e == "SALTATO" for e in passi_eseguiti)
+    nessun_errore = not any(e == "ERRORE" for e in passi_eseguiti)
+
+    sys.exit(0 if nessun_errore else 1)
+
+
+if __name__ == "__main__":
+    main()
