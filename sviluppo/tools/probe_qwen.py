@@ -120,7 +120,8 @@ def testa_modello(base_url: str, api_key: str, modello: str, delay: float) -> di
 
 
 def cerca_context_window(base_url: str, api_key: str, modello: str, delay: float) -> dict:
-    """Cerca il context window tramite ricerca binaria."""
+    """Cerca il context window prima cercando il limite dichiarato a costo zero
+    e solo in subordine per accettazione."""
     url = f"{base_url}/v1/messages"
     headers = {
         "x-api-key": api_key,
@@ -128,62 +129,96 @@ def cerca_context_window(base_url: str, api_key: str, modello: str, delay: float
         "anthropic-version": "2023-06-01"
     }
 
-    BASSO = 1
-    ALTO = 1100000
-    MASSIMO_ITER = 6
+    # 1 token = 5 caratteri (misurato 2026-08-03: 50.000 caratteri -> 10.010 token).
+    CHAR_PER_TOKEN = 5
+    # Il gateway accetta corpi fino a ~4,8 MB, rifiuta con HTTP 413 oltre ~6,7 MB.
+    # Questo e' un limite ORTOGONALE al context window del modello.
+    MAX_BODY_PROBE_BYTES = 4_800_000
 
-    token_certo = None
+    # Sonda preliminare a costo zero: invia un payload oversized che il gateway
+    # rifiutera' con HTTP 400 dichiarando il limite effettivo. Il filler "a " vale
+    # 1 token ogni 2 caratteri (misurato: 40.000 caratteri hanno prodotto 20.010 token).
+    # 1.500.000 token danno un corpo di circa 2,86 MB, sopra ogni limite noto e sotto
+    # il tetto byte di 4,8 MB.
+    OVERSHOOT_TOKEN = 1_500_000
+    OVERSHOOT_CHAR_PER_TOKEN = 2
+    PATTERN_RANGE = re.compile(r"should be \[1,\s*(\d+)\]")
+
+    sys.stderr.write(f"  Sonda a costo zero con {OVERSHOOT_TOKEN} token...\n")
+    parole_overshoot = "a " * OVERSHOOT_TOKEN
+    body_overshoot = json.dumps({
+        "model": modello,
+        "max_tokens": 8,
+        "messages": [{"role": "user", "content": parole_overshoot}]
+    }).encode("utf-8")
+
+    status_overshoot, risposta_overshoot = richiesta_http(url, "POST", headers, body_overshoot, timeout=600)
+    time.sleep(delay)
+
+    if status_overshoot == 400:
+        match = PATTERN_RANGE.search(risposta_overshoot)
+        if match:
+            limite_dichiarato = int(match.group(1))
+            sys.stderr.write(f"  -> Limite dichiarato dal gateway a costo zero: {limite_dichiarato} token\n")
+            return {"tipo": "DICHIARATO", "valore": limite_dichiarato, "fonte": "limite dichiarato dal gateway in HTTP 400, misura a costo zero"}
+        else:
+            sys.stderr.write(f"  HTTP 400 ma pattern non trovato, proseguo con scala\n")
+    elif status_overshoot == 200:
+        sys.stderr.write(f"  Attenzione: il modello ha accettato piu' di {OVERSHOOT_TOKEN} token, la sonda non e' conclusiva (costo input applicato)\n")
+    else:
+        sys.stderr.write(f"  Stato {status_overshoot} - {risposta_overshoot[:200]}\n")
+
+    CANDIDATI = [1_000_000, 524_288, 262_144, 131_072, 65_536, 32_768]
     pattern_token = re.compile(r"(\d{1,3}(?:,\d{3})*|\d+)\s*(?:token|contesto|max)", re.IGNORECASE)
 
-    for i in range(MASSIMO_ITER):
-        mid = (BASSO + ALTO) // 2
-        # BUG CORRETTO 2026-08-03: qui c'era `parole[:100]`, che troncava a 100
-        # caratteri il messaggio appena costruito. Ogni richiesta partiva quindi
-        # minuscola, rispondeva sempre 200, e la ricerca binaria scivolava fino
-        # al massimo dell'intervallo: il risultato ("fra 1.082.812 e 1.100.000
-        # token" IDENTICO per tutti i modelli) era un artefatto della misura,
-        # non una misura. Stessa classe della baseline dei 201M token.
-        #
-        # ATTENZIONE AL COSTO: senza troncamento ogni iterazione accettata fa
-        # pagare l'input davvero. Misurare un modello con 6 iterazioni puo'
-        # costare milioni di token. Usare --deep con cognizione di causa, e
-        # preferibilmente su UN modello per volta con --models.
-        parole = "word " * (mid // 4)
+    for candidato in CANDIDATI:
+        parole = "word " * candidato
+        byte_stimati = candidato * CHAR_PER_TOKEN
+
+        if byte_stimati > MAX_BODY_PROBE_BYTES:
+            sys.stderr.write(f"  {candidato} token ({byte_stimati / 1_048_576:.2f} MB): salta - supera il limite byte del gateway\n")
+            continue
+
         body = json.dumps({
             "model": modello,
             "max_tokens": 8,
             "messages": [{"role": "user", "content": parole}]
         }).encode("utf-8")
 
-        status, risposta = richiesta_http(url, "POST", headers, body)
+        status, risposta = richiesta_http(url, "POST", headers, body, timeout=600)
         time.sleep(delay)
 
-        if status == 413:
-            # Il gateway rifiuta per DIMENSIONE DEL CORPO prima di guardare il
-            # contesto del modello, e non dichiara alcun limite in token.
-            # Misurato: 4,8 MB accettati, 6,7 MB respinti.
-            ALTO = mid
-            continue
         if status == 200:
-            BASSO = mid
-        elif status == 400:
+            dati = json.loads(risposta)
+            input_tokens = dati.get("usage", {}).get("input_tokens")
+            valore = input_tokens if input_tokens is not None else candidato
+            fonte = "usage.input_tokens su richiesta realmente accettata" if input_tokens is not None else "usage non disponibile, uso candidato"
+            sys.stderr.write(f"  {candidato} token ({byte_stimati / 1_048_576:.2f} MB): HTTP 200 - input_tokens={valore}\n")
+            return {"tipo": "MISURATO", "valore": valore, "candidato": candidato, "fonte": fonte}
+
+        if status == 400:
+            sys.stderr.write(f"  {candidato} token ({byte_stimati / 1_048_576:.2f} MB): HTTP 400\n")
             if any(p in risposta.lower() for p in ["too long", "exceed", "maximum", "limit"]):
-                ALTO = mid
                 match = pattern_token.search(risposta)
-                if match and token_certo is None:
+                if match:
                     numeri = re.sub(r",", "", match.group(1))
                     try:
                         token_certo = int(numeri)
+                        sys.stderr.write(f"    -> limite trovato: {token_certo}\n")
+                        return {"tipo": "CERTO", "valore": token_certo, "fonte": "messaggio d'errore upstream"}
                     except ValueError:
                         pass
-            else:
-                break
+                continue  # rifiuto per contesto: scendi al candidato successivo
+            break
+        elif status == 413:
+            sys.stderr.write(f"  {candidato} token ({byte_stimati / 1_048_576:.2f} MB): HTTP 413 - salta (limite byte, non contesto)\n")
+            continue
         else:
+            sys.stderr.write(f"  {candidato} token ({byte_stimati / 1_048_576:.2f} MB): HTTP {status} - interrompi\n")
             break
 
-    if token_certo:
-        return {"tipo": "CERTO", "valore": token_certo, "fonte": "messaggio d'errore upstream"}
-    return {"tipo": "INTERVALLO", "min": BASSO, "max": ALTO, "note": f"stima dopo {i+1} iterazioni"}
+    max_tentato = CANDIDATI[-1]
+    return {"tipo": "INDETERMINATO", "min": 0, "max": max_tentato, "note": "nessun candidato accettato"}
 
 
 def testa_streaming(base_url: str, api_key: str, modello: str, delay: float) -> dict:
@@ -419,7 +454,7 @@ def formatta_report(risultati: dict, maschera: str) -> str:
         lines.append("TEST 2 - CONTEXT WINDOW")
         lines.append("-" * 70)
         for modello, ctx in risultati["test_context"].items():
-            if ctx["tipo"] == "CERTO":
+            if ctx["tipo"] in ("CERTO", "MISURATO", "DICHIARATO"):
                 lines.append(f"  {modello}: {ctx['valore']} token (fonte: {ctx['fonte']})")
             else:
                 lines.append(f"  {modello}: fra {ctx['min']} e {ctx['max']} token ({ctx['note']})")

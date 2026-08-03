@@ -48,37 +48,37 @@ MODEL_CONTEXT_MAP = {
     "glm-4": 128_000,         # modello vecchio, valore storico
     "glm-5V-Turbo": 200_000,  # allineato a glm-5-turbo
 
-    # Qwen / Alibaba Model Studio — VERIFICATO IN PRODUZIONE il 2026-08-03
-    # sull'account ws-XXXXXXXXXXXXXXXX (Singapore), con richieste reali.
+    # Qwen / Alibaba Model Studio — LIMITI DICHIARATI DALL UPSTREAM, MISURATI IL 2026-08-03
+    # sull account ws-XXXXXXXXXXXXXXXX (Singapore), con richieste DELIBERATAMENTE RIFIUTATE.
     #
-    # Misura diretta su qwen3-coder-plus: una richiesta da 4,8 MB e' stata
-    # ACCETTATA con usage.input_tokens = 1.000.009. Il milione di contesto e'
-    # quindi un fatto misurato su quel modello, non una stima, e corrobora le
-    # fonti terze che davano 1M per max e plus.
+    # Metodo: si invia un payload sopra ogni limite noto (1.500.000 token con filler a 2
+    # caratteri per token, corpo da 2,86 MB, sotto il tetto byte di 4,8 MB). Il gateway
+    # risponde HTTP 400 con il messaggio "Range of input length should be [1, N]", dove N e
+    # il limite di INPUT dichiarato dall upstream. Questa misura e a COSTO ZERO: una richiesta
+    # rifiutata non fa pagare l input, al contrario della ricerca per accettazione (quella
+    # le cui due misure del 2026-08-03 costarono ~1,5M token). Questa tecnica va preferita.
     #
-    # Gli altri modelli NON sono stati misurati uno per uno: ogni misura costa
-    # l'input davvero (queste due sono costate ~1,5M token). Dove non misurato
-    # si resta prudenti: sottostimare costa solo compressione inutile,
-    # sovrastimare costa un 400 dall'upstream.
+    # ATTENZIONE, limite ORTOGONALE al contesto: il gateway rifiuta con HTTP 413
+    # RequestTooLarge in base alla DIMENSIONE DEL CORPO, prima di guardare il contesto del
+    # modello. Misurato: 4,8 MB passano, 6,7 MB no. Il guardrail vive in
+    # qwen_backend.QWEN_MAX_BODY_BYTES.
     #
-    # ATTENZIONE, limite ORTOGONALE al contesto: il gateway rifiuta con
-    # HTTP 413 RequestTooLarge in base alla DIMENSIONE DEL CORPO, prima di
-    # guardare il contesto del modello. Misurato: 4,8 MB passano, 6,7 MB no.
-    # Il guardrail vive in qwen_backend.QWEN_MAX_BODY_BYTES.
-    "qwen3.8-max": 1_000_000,        # famiglia max, allineato al misurato
-    "qwen3.7-max": 1_000_000,        # fonte terza concorde + famiglia
-    "qwen3.7-plus": 1_000_000,       # fonte terza concorde + famiglia
-    "qwen3.6-plus": 1_000_000,       # famiglia plus
-    "qwen3-max": 1_000_000,          # famiglia max
-    "qwen3-coder-plus": 1_000_000,   # MISURATO: 1.000.009 token accettati
-    "qwen3-coder-next": 1_000_000,   # stessa linea coder
-    "qwen3.7-flash": 262_144,        # NON misurato: stima prudenziale
-    "qwen3.6-flash": 262_144,        # NON misurato: stima prudenziale
-    "qwen3-coder-flash": 262_144,    # NON misurato: stima prudenziale
-    "qwen-plus": 1_000_000,          # famiglia plus
-    "qwen-flash": 262_144,           # NON misurato: stima prudenziale
-    "qwen3-vl-plus": 131_072,        # NON misurato: stima prudenziale
-    "qwen-max": 32_768,              # doc ufficiale (modello legacy)
+    # SOVRASTIME GRAVI corrette: qwen3-max era 1.000.000 e il reale e 258.048; qwen3-coder-next
+    # era 1.000.000 e il reale e 204.800. Oltre quei limiti l upstream avrebbe risposto 400.
+    "qwen3.8-max": 983_616,        # dichiarato dal gateway
+    "qwen3.7-max": 983_616,        # dichiarato dal gateway
+    "qwen3.7-plus": 983_616,        # dichiarato dal gateway
+    "qwen3.6-plus": 983_616,        # dichiarato dal gateway
+    "qwen3-max": 258_048,          # dichiarato dal gateway, precedente 1.000.000 (SOVRASTIMA GRAVE)
+    "qwen3-coder-plus": 1_048_576, # dichiarato dal gateway, confermato da 1.000.009 accettati
+    "qwen3-coder-next": 204_800,   # dichiarato dal gateway, precedente 1.000.000 (SOVRASTIMA GRAVE)
+    "qwen3.7-flash": 983_616,      # dichiarato dal gateway
+    "qwen3.6-flash": 983_616,      # dichiarato dal gateway
+    "qwen3-coder-flash": 997_952,  # dichiarato dal gateway
+    "qwen-plus": 1_000_000,        # dichiarato dal gateway
+    "qwen-flash": 1_000_000,       # dichiarato dal gateway
+    "qwen3-vl-plus": 260_096,      # dichiarato dal gateway
+    "qwen-max": 30_720,            # dichiarato dal gateway
 }
 
 BUFFER_PERCENT = 20  # 20% libero per output

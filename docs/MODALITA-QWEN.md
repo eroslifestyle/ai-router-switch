@@ -93,7 +93,25 @@ MISURATO IN PRODUZIONE, attraverso il router sulla porta 8778:
 - `/v1/embeddings` → `text-embedding-v4`, vettore da 1024 dimensioni
 - `/v1/images/generations` → URL PNG realmente generato
 - `qwen-web` → risposta aggiornata con 16 fonti citabili
-- context: `qwen3-coder-plus` ha **accettato 1.000.009 token di input** (corpo da 4,8 MB)
+- `qwen3-coder-plus` ha **accettato 1.000.009 token di input reali** con un corpo da 4,8 MB
+  Metodo a costo zero: si invia un payload sopra ogni limite noto, 1.500.000 token con filler da 2 caratteri per token pari a 2,86 MB, e il gateway risponde HTTP 400 con il messaggio "Range of input length should be [1, N]" dichiarando N, e siccome una richiesta rifiutata non fa pagare l'input la misura non costa nulla, al contrario della ricerca per accettazione
+  | Modello | Limite di input dichiarato | Nota |
+  |---|---|---|
+  | `qwen3.8-max` | `983.616` | |
+  | `qwen3.7-max` | `983.616` | |
+  | `qwen3.7-plus` | `983.616` | |
+  | `qwen3.6-plus` | `983.616` | |
+  | `qwen3.7-flash` | `983.616` | |
+  | `qwen3.6-flash` | `983.616` | |
+  | `qwen3-max` | `258.048` | Il valore precedente era 1.000.000 ed era una sovrastima grave |
+  | `qwen3-coder-plus` | `1.048.576` | Conferma i 1.000.009 accettati |
+  | `qwen3-coder-next` | `204.800` | Il valore precedente era 1.000.000 ed era una sovrastima grave |
+  | `qwen3-coder-flash` | `997.952` | |
+  | `qwen-plus` | `1.000.000` | |
+  | `qwen-flash` | `1.000.000` | |
+  | `qwen3-vl-plus` | `260.096` | |
+  | `qwen-max` | `30.720` | |
+  Il tetto sui byte del corpo resta ortogonale a questi limiti e il guardrail QWEN_MAX_BODY_BYTES è fissato a 4 MB, quindi con testo normale a circa 4 caratteri per token una richiesta vicina al milione di token può essere respinta dal guardrail prima di raggiungere il limite di contesto
 - **limite sui BYTE, ortogonale al contesto**: il gateway risponde `413 RequestTooLarge`
   guardando la dimensione del corpo, prima di valutare il contesto, e non dichiara il limite.
   4,8 MB passano, 6,7 MB no. Guardrail a 4 MB in `QWEN_MAX_BODY_BYTES`.
@@ -111,9 +129,7 @@ SMENTITO dalla misura (era scritto qui e non era vero):
 - la web search **non restituisce fonti** su `/compatible-mode/v1/chat/completions` (277 eventi
   ispezionati, zero occorrenze). Le fonti esistono solo su DashScope nativo in SSE
 
-ANCORA NON MISURATO (stime prudenziali nel codice, sottostimare costa solo compressione inutile):
-- context window di flash, coder-flash e vl-plus: ogni misura costa l'input davvero
-  (le due fatte sono costate ~1,5M token), quindi non sono state ripetute per ogni modello
+ANCORA NON MISURATO:
 - limiti RPM/TPM: le pagine della doc rispondono 404, il rate limiter usa placeholder
 - path DashScope di video, ASR e musica
 
