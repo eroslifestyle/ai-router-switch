@@ -31,6 +31,7 @@ from aiohttp import ClientTimeout
 
 import debug_catalog
 import tool_isolation
+from synthetic_response import synthetic_error, synthetic_rate_limit
 
 # Import lazy per evitare ciclo: router_constants importa qwen_backend PRIMA di definire
 # le proprie costanti, e router_utils importa router_constants. Un import a livello di
@@ -395,10 +396,25 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
     - URL base: /apps/anthropic senza /v1 finale
     - Passthrough: connessione lasciata APERTA (no async with)
     """
+    def _err(status, etype, msg, headers=None):
+        """Errore nel formato che il chiamante si aspetta.
+
+        Con passthrough=True il chiamante passa il risultato al relay, che vuole
+        la superficie di una ClientResponse (.release(), .content.iter_any()):
+        una web.Response li' esplode con AttributeError e nasconde il messaggio.
+        Senza passthrough il chiamante vuole invece una web.Response gia' pronta.
+        """
+        if passthrough:
+            return synthetic_error(status, etype, msg, headers=headers)
+        payload = json.dumps({"type": "error", "error": {"type": etype, "message": msg}})
+        return aiohttp.web.Response(status=status, text=payload,
+                                    content_type="application/json",
+                                    headers=headers or {})
+
     key = await get_qwen_key()
     if not key:
         log_fn("QWEN: chiave assente (QWEN_API_KEY/DASHSCOPE_API_KEY o secrets.sh qwen.api_key)")
-        return aiohttp.web.Response(status=502, text="qwen key missing")
+        return _err(502, "qwen_unavailable", "qwen key missing")
 
     body = tool_isolation.filter_tools_for_backend(body, "qwen")
     body = clamp_qwen_max_tokens(body, log_fn=log_fn)
@@ -441,6 +457,7 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
                 QWEN_LIMITER.on_success()
 
             if resp.status == 429:
+                _retry_after = resp.headers.get("retry-after")
                 step = QWEN_LIMITER.on_429()
                 log_fn(f"QWEN 429 attempt {attempt+1}: backoff {step}s")
                 debug_catalog.record_event(
@@ -458,7 +475,13 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
                 if attempt == 0:
                     await asyncio.sleep(step + random.uniform(0.5, 2))
                     continue
-                break
+                if passthrough:
+                    return synthetic_rate_limit(
+                        f"qwen rate limit persistente dopo 2 tentativi (model={lim_model})",
+                        retry_after=_retry_after)
+                return _err(429, "rate_limit_error",
+                            f"qwen rate limit persistente dopo 2 tentativi (model={lim_model})",
+                            headers={"Retry-After": _retry_after} if _retry_after else None)
 
             if resp.status >= 500 and attempt == 0:
                 debug_catalog.record_event(
@@ -490,10 +513,11 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
 
         except RateLimitExhausted as e:
             log_fn(f"QWEN rate-limit exhausted: {e}")
-            return aiohttp.web.Response(
-                status=429,
-                text=f"qwen rate-limit: budget esaurito. {e}"
-            )
+            if passthrough:
+                return synthetic_rate_limit(f"qwen rate-limit: budget esaurito. {e}",
+                                            retry_after="10")
+            return _err(429, "rate_limit_error", f"qwen rate-limit: budget esaurito. {e}",
+                        headers={"Retry-After": "10", "x-should-retry": "true"})
 
         except Exception as e:
             log_fn(f"QWEN forward error (attempt {attempt+1}): {e}")
@@ -506,13 +530,6 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
             if attempt == 0:
                 await asyncio.sleep(0.5)
                 continue
-            return aiohttp.web.Response(
-                status=502,
-                text=f"qwen upstream error: {e}"
-            )
+            return _err(502, "qwen_upstream_error", f"qwen upstream error: {e}")
 
-    return aiohttp.web.Response(
-        status=502,
-        text="qwen: max retries exhausted (2 attempts)"
-    )
-
+    return _err(502, "qwen_exhausted", "qwen: max retries exhausted (2 attempts)")

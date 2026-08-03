@@ -31,6 +31,7 @@ from typing import Optional
 
 import tool_isolation
 import debug_catalog
+from synthetic_response import synthetic_error, synthetic_rate_limit
 
 
 def _log_usage(**kw):
@@ -708,11 +709,26 @@ async def forward_glm(request, body: bytes, session, model: str,
                      se False (default), legge il body e ritorna web.Response.
     """
 
+    def _err(status, etype, msg, headers=None):
+        """Errore nel formato che il chiamante si aspetta.
+
+        Con passthrough=True il chiamante passa il risultato al relay, che vuole
+        la superficie di una ClientResponse (.release(), .content.iter_any()):
+        una web.Response li' esplode con AttributeError e nasconde il messaggio
+        vero dietro un 502 generico. Senza passthrough il chiamante vuole invece
+        una web.Response gia' pronta.
+        """
+        if passthrough:
+            return synthetic_error(status, etype, msg, headers=headers)
+        payload = json.dumps({"type": "error", "error": {"type": etype, "message": msg}})
+        return aiohttp.web.Response(status=status, text=payload,
+                                    content_type="application/json",
+                                    headers=headers or {})
+
     key = await get_glm_key()
     if not key:
         log_fn("GLM: chiave assente (GLM_API_KEY o secrets.sh glm.api_key)")
-        return aiohttp.web.Response(status=502, text="GLM key missing")
-
+        return _err(502, "glm_unavailable", "GLM key missing")
     # ISOLAMENTO TOOL (2026-07-19): choke-point unico, vedi tool_isolation.py.
     body = tool_isolation.filter_tools_for_backend(body, "glm")
 
@@ -767,6 +783,7 @@ async def forward_glm(request, body: bytes, session, model: str,
                 GLM_LIMITER.on_success()
 
             if resp.status == 429:
+                _retry_after = resp.headers.get("retry-after")
                 step = GLM_LIMITER.on_429()
                 log_fn(f"GLM 429 attempt {attempt + 1}: backoff {step}s")
                 debug_catalog.record_event(severity="block", category="glm",
@@ -779,8 +796,16 @@ async def forward_glm(request, body: bytes, session, model: str,
                 if attempt == 0:
                     await asyncio.sleep(step + random.uniform(0.5, 2))
                     continue
-                break
-
+                # 429 su entrambi i tentativi: e' un rate limit REALE, va inoltrato
+                # come 429 con il Retry-After dell'upstream. Convertirlo in 502
+                # (com'era) fa perdere al client l'informazione su quanto aspettare.
+                if passthrough:
+                    return synthetic_rate_limit(
+                        f"GLM rate limit persistente dopo 2 tentativi (model={lim_model})",
+                        retry_after=_retry_after)
+                return _err(429, "rate_limit_error",
+                            f"GLM rate limit persistente dopo 2 tentativi (model={lim_model})",
+                            headers={"Retry-After": _retry_after} if _retry_after else None)
             if resp.status >= 500 and attempt == 0:
                 debug_catalog.record_event(severity="error", category="glm",
                                             kind="glm_5xx_retry", code=resp.status,
@@ -827,11 +852,11 @@ async def forward_glm(request, body: bytes, session, model: str,
             debug_catalog.record_event(severity="block", category="glm",
                                         kind="glm_ratelimit_exhausted", code=429,
                                         snippet=f"model={model} {e}")
-            return aiohttp.web.Response(
-                status=429,
-                text='{"type":"error","error":{"type":"rate_limit_error","message":"glm limiter budget exhausted"}}',
-                content_type="application/json",
-                headers={"Retry-After": "10", "x-should-retry": "true"})
+            if passthrough:
+                return synthetic_rate_limit("glm limiter budget exhausted",
+                                            retry_after="10")
+            return _err(429, "rate_limit_error", "glm limiter budget exhausted",
+                        headers={"Retry-After": "10", "x-should-retry": "true"})
         except asyncio.TimeoutError:
             log_fn(f"GLM timeout attempt {attempt + 1}")
             debug_catalog.record_event(severity="error", category="glm",
@@ -868,7 +893,7 @@ async def forward_glm(request, body: bytes, session, model: str,
 
     debug_catalog.record_event(severity="error", category="glm",
                                 kind="glm_exhausted", code=502, snippet=f"model={model}")
-    return aiohttp.web.Response(status=502, text="GLM exhausted after 2 attempts")
+    return _err(502, "glm_exhausted", "GLM exhausted after 2 attempts")
 
 
 def _rewrite_glm_model(raw: bytes, orig_model: str) -> bytes:
