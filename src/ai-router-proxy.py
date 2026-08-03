@@ -607,6 +607,7 @@ async def handle(request):
         "/v1/videos/generations": (_route_v1_videos, "forward_qwen_video"),
         "/v1/music/generations": (_route_v1_music, "forward_qwen_music"),
         "/v1/audio/speech": (_route_v1_audio_speech, "forward_qwen_tts"),
+        "/v1/audio/transcriptions": (None, "forward_qwen_asr"),  # mancava: 6 su 7 mappate
         "/v1/embeddings": (None, "forward_qwen_embedding"),
         "/v1/rerank": (None, "forward_qwen_rerank"),
     }
