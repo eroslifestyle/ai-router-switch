@@ -137,16 +137,33 @@ def cerca_context_window(base_url: str, api_key: str, modello: str, delay: float
 
     for i in range(MASSIMO_ITER):
         mid = (BASSO + ALTO) // 2
+        # BUG CORRETTO 2026-08-03: qui c'era `parole[:100]`, che troncava a 100
+        # caratteri il messaggio appena costruito. Ogni richiesta partiva quindi
+        # minuscola, rispondeva sempre 200, e la ricerca binaria scivolava fino
+        # al massimo dell'intervallo: il risultato ("fra 1.082.812 e 1.100.000
+        # token" IDENTICO per tutti i modelli) era un artefatto della misura,
+        # non una misura. Stessa classe della baseline dei 201M token.
+        #
+        # ATTENZIONE AL COSTO: senza troncamento ogni iterazione accettata fa
+        # pagare l'input davvero. Misurare un modello con 6 iterazioni puo'
+        # costare milioni di token. Usare --deep con cognizione di causa, e
+        # preferibilmente su UN modello per volta con --models.
         parole = "word " * (mid // 4)
         body = json.dumps({
             "model": modello,
             "max_tokens": 8,
-            "messages": [{"role": "user", "content": parole[:100]}]
+            "messages": [{"role": "user", "content": parole}]
         }).encode("utf-8")
 
         status, risposta = richiesta_http(url, "POST", headers, body)
         time.sleep(delay)
 
+        if status == 413:
+            # Il gateway rifiuta per DIMENSIONE DEL CORPO prima di guardare il
+            # contesto del modello, e non dichiara alcun limite in token.
+            # Misurato: 4,8 MB accettati, 6,7 MB respinti.
+            ALTO = mid
+            continue
         if status == 200:
             BASSO = mid
         elif status == 400:
@@ -315,7 +332,10 @@ def testa_dashscope_native(dashscope_host: str, api_key: str, delay: float) -> l
     time.sleep(delay)
     results = []
 
-    headers = {"x-api-key": api_key, "Content-Type": "application/json"}
+    # I servizi nativi DashScope autenticano con Authorization: Bearer.
+    # Con x-api-key rispondono 401 "No API-key provided" (solo l'endpoint
+    # Anthropic-compatible accetta x-api-key).
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     url_img = f"{dashscope_host}/api/v1/services/aigc/multimodal-generation/generation"
     body_img = json.dumps({"model": "qwen-image-2.0-pro", "input": {}}).encode("utf-8")
@@ -456,7 +476,12 @@ def main():
         sys.exit(2)
 
     base_url = costruisci_base_url(workspace_id, region)
-    dashscope_host = os.environ.get("QWEN_DASHSCOPE_HOST") or "https://dashscope-intl.aliyuncs.com"
+    # Host DEDICATO del workspace: il CSV delle credenziali emesso dalla console
+    # riporta dashScope = https://{ws}.{region}.maas.aliyuncs.com/api/v1. Usare
+    # il generico dashscope-intl punta al tenant sbagliato e risponde 401.
+    dashscope_host = os.environ.get("QWEN_DASHSCOPE_HOST") or (
+        f"https://{workspace_id}.{region}.maas.aliyuncs.com" if workspace_id
+        else "https://dashscope-intl.aliyuncs.com")
 
     modelli = args.models.split(",") if args.models else MODELLI_CANDIDATI
 

@@ -193,32 +193,68 @@ def _main() -> None:
         sys.exit(2)
 
     base_url = _build_base_url()
-    endpoint = f"{base_url}/chat/completions"
+    # base_url finisce con /compatible-mode/v1: per DashScope nativo serve la
+    # radice del workspace.
+    radice = base_url.split("/compatible-mode")[0].rstrip("/")
+    endpoint = f"{radice}/api/v1/services/aigc/multimodal-generation/generation"
 
-    # Costruisci body
-    body = {
+    # Misurato dal vivo il 2026-08-03: su /compatible-mode/v1/chat/completions
+    # con enable_search le fonti NON tornano mai nello stream (277 eventi
+    # ispezionati, zero occorrenze). Sul path DashScope nativo invece le fonti
+    # ci sono: stessa domanda, 25 risultati con titolo e URL in
+    # output.search_info.search_results. Il non-streaming e' precluso:
+    # l'upstream risponde 400 'Non-streaming mode does not support Web Search
+    # in thinking mode'.
+    payload = {
         "model": args.model,
-        "messages": [{"role": "user", "content": query}],
-        "enable_search": True,
-        "search_options": {
-            "search_strategy": args.strategy,
-            "enable_source": True
-        }
+        "input": {"messages": [{"role": "user", "content": [{"text": query}]}]},
+        "parameters": {
+            "enable_search": True,
+            "search_options": {
+                "search_strategy": args.strategy,
+                "enable_source": True,
+            },
+        },
     }
     if args.max > 0:
-        body["max_tokens"] = args.max
+        payload["parameters"]["max_tokens"] = args.max
 
-    # Fai richiesta
     headers = {
         "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "X-DashScope-SSE": "enable",
     }
 
     start = time.time()
+    pezzi = []
+    fonti_grezze = []
+    usage_finale = {}
+    modello_visto = args.model
     try:
-        req = Request(endpoint, data=json.dumps(body).encode(), headers=headers, method="POST")
+        req = Request(endpoint, data=json.dumps(payload).encode(), headers=headers, method="POST")
         with urlopen(req, timeout=args.timeout) as resp:
-            data = json.loads(resp.read().decode())
+            for riga in resp:
+                s = riga.decode("utf-8", "replace").strip()
+                if not s.startswith("data:"):
+                    continue
+                p = s[5:].strip()
+                if p in ("", "[DONE]"):
+                    continue
+                try:
+                    ev = json.loads(p)
+                except json.JSONDecodeError:
+                    continue
+                if ev.get("usage"):
+                    usage_finale = ev["usage"]
+                out = ev.get("output") or {}
+                ricerca = (out.get("search_info") or {}).get("search_results")
+                if ricerca:
+                    fonti_grezze = ricerca
+                # i frammenti di testo sono INCREMENTALI: vanno concatenati
+                for ch in out.get("choices") or []:
+                    for blocco in (ch.get("message") or {}).get("content") or []:
+                        if blocco.get("text"):
+                            pezzi.append(blocco["text"])
     except HTTPError as e:
         body_err = e.read().decode(errors="replace")[:500]
         print(f"[qwen-web] HTTP {e.code}: {body_err}", file=sys.stderr)
@@ -227,6 +263,13 @@ def _main() -> None:
         print(f"[qwen-web] Errore rete: {e.reason}", file=sys.stderr)
         sys.exit(1)
 
+    # Si ricompone la forma che il resto dello script gia' sa leggere.
+    data = {
+        "model": modello_visto,
+        "usage": usage_finale,
+        "choices": [{"message": {"content": "".join(pezzi),
+                                  "search_results": fonti_grezze}}],
+    }
     elapsed = time.time() - start
 
     # Estrai info token

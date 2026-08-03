@@ -24,7 +24,10 @@ MINIMAX_THINK = "MiniMax-M3"
 MINIMAX_ACT = "MiniMax-M2.7"
 GLM_THINK = "glm-5.2"
 GLM_ACT = "glm-4.7"
-QWEN_THINK = "qwen3.7-max"
+# qwen3.8-max: e' il piu' recente della linea max e il probe live del
+# 2026-08-03 lo trova DISPONIBILE sull'account (HTTP 200), insieme a
+# 3.7-max. Si usa il piu' nuovo.
+QWEN_THINK = "qwen3.8-max"
 QWEN_ACT = "qwen3-coder-plus"
 
 # ── Role constants ─────────────────────────────────────────────────────────────

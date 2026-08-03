@@ -19,7 +19,7 @@ import aiohttp.web
 
 from qwen_backend import (
     QWEN_COMPATIBLE_PATH,
-    QWEN_DASHSCOPE_HOST,
+    qwen_dashscope_base,
     QWEN_MODEL_ASR,
     QWEN_MODEL_EMBED,
     QWEN_MODEL_IMAGE,
@@ -33,11 +33,43 @@ from qwen_backend import (
     get_qwen_key,
 )
 
-# ── Path DashScope ────────────────────────────────────────────────────────────
-# VERIFICATI sulla doc ufficiale: immagini e TTS passano entrambi dal path
-# 'multimodal-generation'. NON VERIFICATI: video (la doc lo descrive come task
-# asincrono con creazione + polling, forma non confermata), ASR e musica — le
-# pagine corrispondenti rispondono 404 sul mirror internazionale. Ogni path e'
+
+def _decomprimi(raw: bytes, encoding: str) -> bytes:
+    """Decomprime il corpo della risposta upstream.
+
+    La ClientSession del proxy usa auto_decompress=False PER SCELTA: il relay
+    streaming inoltra i byte compressi al client conservando Content-Encoding.
+    Qui pero' si costruisce una web.Response nuova, e l'header non viene
+    inoltrato: restituire i byte gzip dichiarandoli JSON fa arrivare al client
+    spazzatura binaria (verificato dal vivo su /v1/images/generations).
+    Quindi qui si decomprime, e l'header non serve piu'.
+    """
+    if not raw:
+        return raw
+    enc = (encoding or "").lower()
+    try:
+        if raw[:2] == b"\x1f\x8b" or "gzip" in enc:
+            import gzip as _gz
+            return _gz.decompress(raw)
+        if "deflate" in enc:
+            import zlib as _zl
+            return _zl.decompress(raw)
+        if "br" in enc:
+            try:
+                import brotli as _br
+            except ImportError:
+                return raw
+            return _br.decompress(raw)
+    except Exception:
+        # Meglio i byte grezzi di un'eccezione: il chiamante li inoltra e il
+        # problema resta visibile invece di diventare un 502 opaco.
+        return raw
+    return raw
+
+
+# sovrascrivibile da env, cosi' il probe live li corregge senza toccare il codice.
+QWEN_PATH_IMAGE = os.environ.get("QWEN_PATH_IMAGE", QWEN_MULTIMODAL_PATH)
+QWEN_PATH_TTS = os.environ.get("QWEN_PATH_TTS", QWEN_MULTIMODAL_PATH)
 # sovrascrivibile da env, cosi' il probe live li corregge senza toccare il codice.
 QWEN_PATH_IMAGE = os.environ.get("QWEN_PATH_IMAGE", QWEN_MULTIMODAL_PATH)
 QWEN_PATH_TTS = os.environ.get("QWEN_PATH_TTS", QWEN_MULTIMODAL_PATH)
@@ -50,14 +82,14 @@ async def _forward_dashscope(request, payload: dict, session, path: str, log_fn=
                              sse: bool = False) -> aiohttp.web.Response:
     """Helper comune per inoltrare richieste ai servizi nativi DashScope.
 
-    URL: QWEN_DASHSCOPE_HOST + path
+    URL: host DEDICATO del workspace + path (vedi qwen_dashscope_base)
     Auth: Authorization Bearer
     """
     key = await get_qwen_key()
     if not key:
         return aiohttp.web.Response(status=502, text="qwen key missing")
 
-    url = QWEN_DASHSCOPE_HOST + path
+    url = (await qwen_dashscope_base()) + path
     headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json"
@@ -78,7 +110,8 @@ async def _forward_dashscope(request, payload: dict, session, path: str, log_fn=
                 ssl=True
             )
 
-        raw = await resp.read()
+        raw = _decomprimi(await resp.read(),
+                          resp.headers.get("Content-Encoding", ""))
         return aiohttp.web.Response(
             status=resp.status,
             body=raw,
@@ -305,7 +338,7 @@ async def forward_qwen_embedding(request, body: bytes, session, log_fn=print):
     if not key:
         return aiohttp.web.Response(status=502, text="qwen key missing")
 
-    url = QWEN_DASHSCOPE_HOST + QWEN_COMPATIBLE_PATH + "/embeddings"
+    url = (await qwen_dashscope_base()) + QWEN_COMPATIBLE_PATH + "/embeddings"
     headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json"
@@ -323,7 +356,8 @@ async def forward_qwen_embedding(request, body: bytes, session, log_fn=print):
                 ssl=True
             )
 
-        raw = await resp.read()
+        raw = _decomprimi(await resp.read(),
+                          resp.headers.get("Content-Encoding", ""))
         return aiohttp.web.Response(
             status=resp.status,
             body=raw,
@@ -353,7 +387,7 @@ async def forward_qwen_rerank(request, body: bytes, session, log_fn=print):
     if not key:
         return aiohttp.web.Response(status=502, text="qwen key missing")
 
-    url = QWEN_DASHSCOPE_HOST + QWEN_COMPATIBLE_PATH + "/rerank"
+    url = (await qwen_dashscope_base()) + QWEN_COMPATIBLE_PATH + "/rerank"
     headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json"
@@ -371,7 +405,8 @@ async def forward_qwen_rerank(request, body: bytes, session, log_fn=print):
                 ssl=True
             )
 
-        raw = await resp.read()
+        raw = _decomprimi(await resp.read(),
+                          resp.headers.get("Content-Encoding", ""))
         return aiohttp.web.Response(
             status=resp.status,
             body=raw,

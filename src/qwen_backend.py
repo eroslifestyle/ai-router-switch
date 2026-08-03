@@ -91,6 +91,12 @@ QWEN_MODEL_EMBED = os.environ.get("QWEN_MODEL_EMBED", "text-embedding-v4")
 QWEN_MODEL_RERANK = os.environ.get("QWEN_MODEL_RERANK", "qwen3-rerank")
 
 QWEN_MAX_TOKENS_LIMIT = int(os.environ.get("AIROUTER_QWEN_MAX_TOKENS_LIMIT", "65536"))
+# Tetto sulla DIMENSIONE DEL CORPO, ortogonale al context window: il gateway
+# Model Studio risponde 413 RequestTooLarge guardando i byte, PRIMA di valutare
+# il contesto del modello, e nella risposta non dichiara alcun limite.
+# Misurato il 2026-08-03 sull'account: 4,8 MB accettati (1.000.009 token di
+# input), 6,7 MB respinti. 4 MB lascia margine sotto il punto accettato noto.
+QWEN_MAX_BODY_BYTES = int(os.environ.get("AIROUTER_QWEN_MAX_BODY_BYTES", str(4 * 1024 * 1024)))
 QWEN_SAFETY = float(os.environ.get("AIROUTER_QWEN_SAFETY", "0.8"))
 QWEN_RETRY_CAP_SEC = float(os.environ.get("AIROUTER_QWEN_RETRY_CAP_SEC", "90"))
 QWEN_STREAM_ACQUIRE_CAP_SEC = float(os.environ.get("AIROUTER_QWEN_STREAM_ACQUIRE_CAP_SEC", "8"))
@@ -184,6 +190,27 @@ async def qwen_upstream() -> str:
         return f"https://{ws}.{QWEN_REGION}.maas.aliyuncs.com/apps/anthropic"
 
     return QWEN_FALLBACK_UPSTREAM
+
+
+async def qwen_dashscope_base() -> str:
+    """Host dei servizi nativi DashScope (immagini, video, TTS, ASR, musica,
+    embeddings, rerank).
+
+    VERIFICATO 2026-08-03 dal CSV delle credenziali emesso dalla console: il
+    campo 'dashScope' vale https://{ws}.{region}.maas.aliyuncs.com/api/v1,
+    cioe' l'host DEDICATO del workspace, non il vecchio dashscope-intl. Usare
+    quello generico funzionava per l'endpoint Anthropic-compatible ma qui
+    avrebbe puntato al tenant sbagliato.
+
+    Ritorna la sola RADICE (senza /api/v1): i path del modulo generativo lo
+    includono gia'. Override totale con QWEN_DASHSCOPE_HOST.
+    """
+    if os.environ.get("QWEN_DASHSCOPE_HOST"):
+        return os.environ["QWEN_DASHSCOPE_HOST"].rstrip("/")
+    ws = await get_qwen_workspace()
+    if ws:
+        return f"https://{ws}.{QWEN_REGION}.maas.aliyuncs.com"
+    return QWEN_DASHSCOPE_HOST.rstrip("/")
 
 
 def resolve_qwen_upstream_model(tier: str) -> str:
@@ -418,6 +445,19 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
 
     body = tool_isolation.filter_tools_for_backend(body, "qwen")
     body = clamp_qwen_max_tokens(body, log_fn=log_fn)
+
+    # Il gateway risponde 413 RequestTooLarge sui byte, prima ancora di valutare
+    # il contesto del modello, e non spiega perche'. Intercettarlo qui produce un
+    # errore leggibile invece di un 413 grezzo che il client non sa interpretare.
+    if len(body) > QWEN_MAX_BODY_BYTES:
+        _mb = len(body) / (1024 * 1024)
+        log_fn(f"QWEN corpo {_mb:.1f} MB > limite {QWEN_MAX_BODY_BYTES // (1024*1024)} MB -> 413 anticipato")
+        debug_catalog.record_event(severity="block", category="qwen",
+                                   kind="qwen_body_too_large", code=413,
+                                   snippet=f"{len(body)}b > {QWEN_MAX_BODY_BYTES}b model={model}")
+        return _err(413, "request_too_large",
+                    f"qwen: corpo {_mb:.1f} MB oltre il limite del gateway "
+                    f"({QWEN_MAX_BODY_BYTES // (1024*1024)} MB)")
 
     url = (await qwen_upstream()) + request.path_qs
 

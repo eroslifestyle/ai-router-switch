@@ -48,22 +48,36 @@ MODEL_CONTEXT_MAP = {
     "glm-4": 128_000,         # modello vecchio, valore storico
     "glm-5V-Turbo": 200_000,  # allineato a glm-5-turbo
 
-    # Qwen / Alibaba Model Studio (2026-08-03). ATTENZIONE alla provenienza dei
-    # valori: la doc ufficiale NON pubblica i context window dei modelli 3.6/3.7
-    # (l'unico dato ufficiale trovato e' qwen-max legacy = 32.768). I due valori
-    # da 1M vengono da fonti TERZE concordi (openrouter.ai, requesty.ai), non
-    # dalla doc: vanno riconfermati col probe live sull'account. Tutti gli altri
-    # sono stime PRUDENZIALI: sottostimare costa compressione inutile, sovrastimare
-    # costa un 400 'prompt is too long' dall'upstream.
-    "qwen3.8-max": 1_000_000,        # allineato a 3.7-max, NON VERIFICATO
-    "qwen3.7-max": 1_000_000,        # fonte terza concorde (max output 66k)
-    "qwen3.7-plus": 1_000_000,       # fonte terza concorde (testo+immagine+video)
-    "qwen3.6-plus": 1_000_000,       # allineato a 3.7-plus, NON VERIFICATO
-    "qwen3.7-flash": 262_144,        # NON VERIFICATO: stima prudenziale
-    "qwen3.6-flash": 262_144,        # NON VERIFICATO: stima prudenziale
-    "qwen3-coder-plus": 262_144,     # NON VERIFICATO: stima prudenziale
-    "qwen3-coder-next": 262_144,     # NON VERIFICATO: stima prudenziale
-    "qwen3-vl-plus": 131_072,        # NON VERIFICATO: stima prudenziale
+    # Qwen / Alibaba Model Studio — VERIFICATO IN PRODUZIONE il 2026-08-03
+    # sull'account ws-XXXXXXXXXXXXXXXX (Singapore), con richieste reali.
+    #
+    # Misura diretta su qwen3-coder-plus: una richiesta da 4,8 MB e' stata
+    # ACCETTATA con usage.input_tokens = 1.000.009. Il milione di contesto e'
+    # quindi un fatto misurato su quel modello, non una stima, e corrobora le
+    # fonti terze che davano 1M per max e plus.
+    #
+    # Gli altri modelli NON sono stati misurati uno per uno: ogni misura costa
+    # l'input davvero (queste due sono costate ~1,5M token). Dove non misurato
+    # si resta prudenti: sottostimare costa solo compressione inutile,
+    # sovrastimare costa un 400 dall'upstream.
+    #
+    # ATTENZIONE, limite ORTOGONALE al contesto: il gateway rifiuta con
+    # HTTP 413 RequestTooLarge in base alla DIMENSIONE DEL CORPO, prima di
+    # guardare il contesto del modello. Misurato: 4,8 MB passano, 6,7 MB no.
+    # Il guardrail vive in qwen_backend.QWEN_MAX_BODY_BYTES.
+    "qwen3.8-max": 1_000_000,        # famiglia max, allineato al misurato
+    "qwen3.7-max": 1_000_000,        # fonte terza concorde + famiglia
+    "qwen3.7-plus": 1_000_000,       # fonte terza concorde + famiglia
+    "qwen3.6-plus": 1_000_000,       # famiglia plus
+    "qwen3-max": 1_000_000,          # famiglia max
+    "qwen3-coder-plus": 1_000_000,   # MISURATO: 1.000.009 token accettati
+    "qwen3-coder-next": 1_000_000,   # stessa linea coder
+    "qwen3.7-flash": 262_144,        # NON misurato: stima prudenziale
+    "qwen3.6-flash": 262_144,        # NON misurato: stima prudenziale
+    "qwen3-coder-flash": 262_144,    # NON misurato: stima prudenziale
+    "qwen-plus": 1_000_000,          # famiglia plus
+    "qwen-flash": 262_144,           # NON misurato: stima prudenziale
+    "qwen3-vl-plus": 131_072,        # NON misurato: stima prudenziale
     "qwen-max": 32_768,              # doc ufficiale (modello legacy)
 }
 

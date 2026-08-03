@@ -298,7 +298,15 @@ def main():
     parser.add_argument("--workspace-id", help="Workspace ID (opzionale)")
     parser.add_argument("--region", default=DEFAULT_REGION, help="Regione (default: ap-southeast-1)")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="Model ID (default: qwen3.7-max)")
-    parser.add_argument("--skip-mcp", action="store_true", help="Non toccare .mcp.json")
+    # MISURATO 2026-08-03: il server MCP WebSearch di Bailian NON esiste nella
+    # regione internazionale — 404 sia sull'host del workspace sia su
+    # dashscope-intl. Registrarlo aggiungerebbe un server morto alla config
+    # globale, quindi ora e' opt-in. La ricerca web con fonti citabili la
+    # copre `qwen-web`, che usa DashScope nativo in SSE.
+    parser.add_argument("--with-mcp", action="store_true",
+                        help="Registra il MCP WebSearch (404 in regione internazionale: opt-in)")
+    parser.add_argument("--skip-mcp", action="store_true",
+                        help="Deprecato: il MCP e' gia' disattivato per default")
     parser.add_argument("--skip-verify", action="store_true", help="Non fare chiamata di verifica")
     parser.add_argument("--dry-run", action="store_true", help="Mostra cosa farebbe senza scrivere")
 
@@ -324,7 +332,7 @@ def main():
     print(f"Region: {args.region}")
     print(f"Model: {args.model}")
     print(f"Workspace: {workspace_id or '(dashscope-intl)'}")
-    if args.skip_mcp:
+    if not args.with_mcp:
         print("MCP: SALTATO")
     if args.skip_verify:
         print("Verifica: SALTATO")
@@ -340,7 +348,7 @@ def main():
     esito_p1 = passo1_credenziali(api_key, workspace_id, args.dry_run)
 
     # Passo 2: MCP
-    if not args.skip_mcp:
+    if args.with_mcp:
         esito_p2 = passo2_mcp(workspace_id, args.dry_run)
 
     # Passo 3: verifica

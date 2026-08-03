@@ -344,10 +344,14 @@ class TestQwenMode:
     """Test routing per la modalita' qwen."""
 
     def test_qwen_think(self):
-        """Qwen THINK nativizza modelli Anthropic."""
-        assert rr.resolve_route('qwen', 'claude-opus-5') == ('qwen', 'qwen3.7-max')
-        assert rr.resolve_route('qwen', 'claude-sonnet-5') == ('qwen', 'qwen3.7-max')
-        assert rr.resolve_route('qwen', 'claude-fable-5') == ('qwen', 'qwen3.7-max')
+        """Qwen THINK nativizza modelli Anthropic.
+
+        qwen3.8-max e non 3.7: il probe live del 2026-08-03 lo trova
+        disponibile sull'account (HTTP 200), ed e' il piu' recente della linea.
+        """
+        assert rr.resolve_route('qwen', 'claude-opus-5') == ('qwen', 'qwen3.8-max')
+        assert rr.resolve_route('qwen', 'claude-sonnet-5') == ('qwen', 'qwen3.8-max')
+        assert rr.resolve_route('qwen', 'claude-fable-5') == ('qwen', 'qwen3.8-max')
 
     def test_qwen_act(self):
         """Qwen ACT nativizza modelli non-Think."""
@@ -360,7 +364,7 @@ class TestQwenMode:
 
     def test_qwen_modello_nativo_non_riscritto(self):
         """Un modello gia' nativo non va riscritto."""
-        assert rr.resolve_route('qwen', 'qwen3.7-max') == ('qwen', None)
+        assert rr.resolve_route('qwen', 'qwen3.8-max') == ('qwen', None)
 
     def test_model_provider_riconosce_qwen(self):
         """Provider riconosce modelli nativi qwen e non tocca gli altri."""
