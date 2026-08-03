@@ -8,7 +8,8 @@ metadata:
 
 # Modalità `qwen` — Alibaba Cloud Model Studio
 
-Settima modalità del router. Stato: implementata e attiva sul router, IN ATTESA DI CREDENZIALI.
+Settima modalità del router. Stato: **ATTIVA e verificata in produzione** dal 2026-08-03
+sull'account `ws-XXXXXXXXXXXXXXXX` (Singapore).
 
 ## Cos'è
 
@@ -18,10 +19,10 @@ Porta dedicata: 8778. Sul router principale :8787 si attiva con `ai-mode qwen` (
 
 | Fase | Modello |
 |---|---|
-| THINK | qwen3.7-max |
+| THINK | qwen3.8-max |
 | ACT | qwen3-coder-plus |
 | VERIFY | chi ha fatto il THINK |
-| Escalation dopo 2 fallimenti (solo esecuzione) | qwen3-coder-plus → qwen3.7-plus → qwen3.7-max |
+| Escalation dopo 2 fallimenti (solo esecuzione) | qwen3-coder-plus → qwen3.7-plus → qwen3.8-max |
 
 **Perché:** un quarto provider indipendente dai tre esistenti, con una linea di modelli dedicata al codice (`qwen3-coder-*`) e un catalogo di servizi nativi proprio.
 
@@ -30,8 +31,8 @@ Porta dedicata: 8778. Sul router principale :8787 si attiva con `ai-mode qwen` (
 ## Attivazione in tre passi
 
 1. Procurarsi da https://modelstudio.console.alibabacloud.com/ap-southeast-1 una API key della regione Singapore e il WorkspaceId (pagina Workspace Details). ATTENZIONE: le chiavi NON sono interscambiabili fra regioni.
-2. Eseguire `qwen-setup` (chiede la chiave con getpass, non la mostra a schermo). Lo script salva le credenziali nello store cifrato, registra il MCP WebSearch e verifica con una chiamata reale. Con `--dry-run` mostra cosa farebbe senza scrivere niente.
-3. Eseguire `python3 sviluppo/tools/probe_qwen.py --deep` per verificare quali model ID esistono davvero e qual è il context window reale, poi correggere le costanti che il probe segnala.
+2. Eseguire `qwen-setup` (chiede la chiave con getpass, non la mostra a schermo). Salva le credenziali nello store cifrato e verifica con una chiamata reale. Con `--dry-run` mostra cosa farebbe senza scrivere niente. Il MCP WebSearch **non** viene registrato: non esiste in regione internazionale (404). Con `--with-mcp` lo si forza comunque.
+3. Eseguire `python3 sviluppo/tools/probe_qwen.py` per vedere quali model ID esistono sull'account. **`--deep` con cautela**: misura il context window inviando payload reali, e ogni iterazione accettata fa pagare l'input. Preferire un modello per volta con `--models`.
 
 Senza credenziali la modalità risponde `qwen key missing` con HTTP 502: è il comportamento atteso, non un guasto.
 
@@ -55,8 +56,8 @@ NON supporta: `/v1/models` (404 innocuo) e la web search built-in.
 | Strumento | Comando o rotta | Note |
 |---|---|---|
 | Esecuzione codice | `qwen-code "spec" > file.py` | qwen3-coder-plus; stdout pulito, diagnostica su stderr |
-| Web search | `qwen-web "query"` | enable_search + search_options.search_strategy=agent |
-| Web search MCP | server `qwen-websearch` in `~/.claude/.mcp.json` | registrato da qwen-setup |
+| Web search | `qwen-web "query"` | DashScope nativo in SSE: è l'unico path che restituisce le fonti |
+| Web search MCP | — | **non disponibile**: 404 in regione internazionale |
 | Immagini | POST /v1/images/generations | qwen-image-2.0-pro |
 | Video | POST /v1/videos/generations | happyhorse-1.1-t2v |
 | TTS | POST /v1/audio/speech | qwen3-tts-flash |
@@ -74,7 +75,8 @@ Le rotte generative sono mode-aware: solo in modalità qwen vanno a DashScope, i
 | `QWEN_WORKSPACE_ID` | workspace (altrimenti secrets.sh qwen.workspace_id) |
 | `QWEN_REGION` | regione, default ap-southeast-1 |
 | `QWEN_API_BASE` | override totale dell'upstream Anthropic-compatible |
-| `QWEN_DASHSCOPE_HOST` | host dei servizi nativi |
+| `QWEN_DASHSCOPE_HOST` | host dei servizi nativi (default: derivato dal workspace) |
+| `AIROUTER_QWEN_MAX_BODY_BYTES` | tetto sui byte del corpo, default 4 MB (il gateway dà 413 oltre ~5 MB) |
 | `QWEN_MODEL_TOP` / `MID` / `CODER` / `VISION` | modelli per tier |
 | `QWEN_MODEL_IMAGE` / `VIDEO` / `TTS` / `ASR` / `MUSIC` / `EMBED` / `RERANK` | modelli dei servizi nativi |
 | `QWEN_PATH_IMAGE` / `TTS` / `VIDEO` / `ASR` / `MUSIC` | path DashScope |
@@ -83,26 +85,37 @@ Le rotte generative sono mode-aware: solo in modalità qwen vanno a DashScope, i
 
 ## Cosa è VERIFICATO e cosa NO
 
-Questa sezione è la più importante: non trattare come fatto ciò che è marcato NON VERIFICATO.
+**Attivata e in funzione dal 2026-08-03** sull'account `ws-XXXXXXXXXXXXXXXX` (Singapore).
 
-VERIFICATO sulla doc ufficiale:
-- forma, campi e limiti dell'endpoint Anthropic-compatible
-- path DashScope di immagini e TTS: `/api/v1/services/aigc/multimodal-generation/generation`
-- path embeddings: `/compatible-mode/v1/embeddings`
-- assenza di `/v1/models` e assenza della web search built-in su quell'endpoint
+MISURATO IN PRODUZIONE, attraverso il router sulla porta 8778:
+- `claude-opus-5` → `qwen3.8-max` e `claude-haiku` → `qwen3-coder-plus`, entrambi rispondono
+- streaming SSE, tool calling (`stop_reason: tool_use` con nome e argomenti corretti), thinking, `cache_control`
+- `/v1/embeddings` → `text-embedding-v4`, vettore da 1024 dimensioni
+- `/v1/images/generations` → URL PNG realmente generato
+- `qwen-web` → risposta aggiornata con 16 fonti citabili
+- context: `qwen3-coder-plus` ha **accettato 1.000.009 token di input** (corpo da 4,8 MB)
+- **limite sui BYTE, ortogonale al contesto**: il gateway risponde `413 RequestTooLarge`
+  guardando la dimensione del corpo, prima di valutare il contesto, e non dichiara il limite.
+  4,8 MB passano, 6,7 MB no. Guardrail a 4 MB in `QWEN_MAX_BODY_BYTES`.
+- modelli disponibili sull'account (13 su 13 testati, tutti HTTP 200): `qwen3.8-max`,
+  `qwen3.7-max`, `qwen3.7-plus`, `qwen3.7-flash`, `qwen3.6-plus`, `qwen3.6-flash`,
+  `qwen3-max`, `qwen3-coder-next`, `qwen3-coder-plus`, `qwen3-coder-flash`,
+  `qwen3-vl-plus`, `qwen-plus`, `qwen-flash`
 
-VERIFICATO per misura diretta (test end-to-end su istanza isolata, upstream finto):
-- `claude-opus-5` instrada a qwen3.7-max, `claude-haiku` a qwen3-coder-plus
-- `max_tokens` viene clampato a 65536
-- il tool nativo Qwen sopravvive in modalità qwen e viene rimosso nelle altre; i tool GLM/MiniMax/Anthropic vengono rimossi in modalità qwen
-- le quattro rotte generative raggiungono DashScope con path e modello attesi, e in modalità minimax la stessa rotta va a MiniMax
+SMENTITO dalla misura (era scritto qui e non era vero):
+- l'host DashScope **non** è `dashscope-intl.aliyuncs.com`: il CSV delle credenziali emesso
+  dalla console dichiara `dashScope = https://{ws}.{region}.maas.aliyuncs.com/api/v1`
+- i servizi nativi autenticano con `Authorization: Bearer`, **non** `x-api-key`
+- il **MCP WebSearch di Bailian non esiste in regione internazionale**: 404 sia sull'host del
+  workspace sia su `dashscope-intl`. La registrazione è diventata opt-in (`--with-mcp`)
+- la web search **non restituisce fonti** su `/compatible-mode/v1/chat/completions` (277 eventi
+  ispezionati, zero occorrenze). Le fonti esistono solo su DashScope nativo in SSE
 
-NON VERIFICATO, da chiudere col probe:
-- i nomi esatti dei model ID: i due mirror della doc divergono (`alibabacloud.com/help/en` dà `qwen3.7-max` e `qwen3.6-flash`, `help.aliyun.com/en` dà `qwen3.8-max` e `qwen3.7-flash`)
-- i context window: la doc non li pubblica per i modelli 3.6/3.7/3.8. I due valori da 1M in `model_context_map` vengono da fonti TERZE concordi (`openrouter.ai`, `requesty.ai`), gli altri sono stime prudenziali
-- i limiti RPM/TPM: le pagine della doc rispondono 404, il rate limiter usa placeholder
-- i path DashScope di video, ASR e musica
-- l'host internazionale del MCP WebSearch: la doc mostra quello cinese `dashscope.aliyuncs.com`
+ANCORA NON MISURATO (stime prudenziali nel codice, sottostimare costa solo compressione inutile):
+- context window di flash, coder-flash e vl-plus: ogni misura costa l'input davvero
+  (le due fatte sono costate ~1,5M token), quindi non sono state ripetute per ogni modello
+- limiti RPM/TPM: le pagine della doc rispondono 404, il rate limiter usa placeholder
+- path DashScope di video, ASR e musica
 
 ## File toccati
 
