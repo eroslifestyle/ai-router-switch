@@ -150,13 +150,7 @@ def _log_original_model(orig: str, final: str, chat_id: str) -> None:
         pass
 
 
-def _force_no_stream(body: bytes):
-    try:
-        d = json.loads(body)
-        d["stream"] = False
-        return json.dumps(d).encode(), d
-    except Exception:
-        return body, {}
+# _force_no_stream e stata rimossa il 2026-08-03 perche mai chiamata
 
 
 def _text_from_message(j: dict) -> str:

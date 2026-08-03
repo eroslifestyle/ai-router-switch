@@ -27,15 +27,8 @@ def _tz():
     return _zone_cache[TZ]
 PEAK_START, PEAK_END = 14, 18  # 14:00-18:00 UTC+8
 
-ALERT_LOG = None  # init_lazy
-
-
-def _alert_log():
-    global ALERT_LOG
-    if ALERT_LOG is None:
-        from pathlib import Path
-        ALERT_LOG = Path.home() / ".claude" / "logs" / "glm-peak-alerts.log"
-    return ALERT_LOG
+# _alert_log e ALERT_LOG rimosse il 2026-08-03: la funzione non era mai chiamata
+# e la variabile la leggeva solo lei.
 
 
 def is_peak_hour() -> bool:

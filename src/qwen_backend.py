@@ -279,22 +279,9 @@ def set_body_model(body: bytes, model: str) -> bytes:
         return body
 
 
-def is_qwen_body_too_large(body: bytes, model: str) -> bool:
-    """Verifica se il body e' troppo grande per il modello specificato.
-
-    Usa model_context_map.get_safe_input_limit() se disponibile.
-    """
-    try:
-        from model_context_map import get_safe_input_limit
-        limit = get_safe_input_limit(model)
-        if limit <= 0:
-            return False
-        est = _estimate_tokens(body)
-        return est > limit
-    except ImportError:
-        return False
-    except Exception:
-        return False
+# Rimossa il 2026-08-03: non era mai chiamata e duplicava il controllo
+# sul contesto gia' svolto dal proxy (ai-router-proxy.py righe 391 e 545).
+# Il guardrail sui byte QWEN_MAX_BODY_BYTES resta attivo ed e' cosa diversa.
 
 
 def _estimate_tokens(data: bytes) -> int:
@@ -307,8 +294,16 @@ def _estimate_tokens(data: bytes) -> int:
         return max(1, len(data) // 4)
 
 
+_last_qwen_alert_ts = 0.0  # istante dell'ultimo popup
+_QWEN_ALERT_MIN_INTERVAL_SEC = 300  # intervallo minimo fra due popup
+
+
 def qwen_alert(msg: str):
-    """Logga un alert per Qwen su file dedicato e notifica desktop."""
+    """Logga un alert per Qwen su file dedicato e notifica desktop.
+
+    Il popup desktop e' soggetto a throttle: viene emesso solo se sono
+    passati almeno _QWEN_ALERT_MIN_INTERVAL_SEC secondi dall'ultimo.
+    """
     try:
         ALERT_LOG.parent.mkdir(parents=True, exist_ok=True)
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -317,13 +312,17 @@ def qwen_alert(msg: str):
     except Exception:
         pass
 
-    try:
-        subprocess.Popen(
-            ["notify-send", "-u", "critical", "-a", "Qwen Quota", msg],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
-    except Exception:
-        pass
+    global _last_qwen_alert_ts
+    now = time.monotonic()
+    if now - _last_qwen_alert_ts >= _QWEN_ALERT_MIN_INTERVAL_SEC:
+        try:
+            _last_qwen_alert_ts = now
+            subprocess.Popen(
+                ["notify-send", "-u", "critical", "-a", "Qwen Quota", msg],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+        except Exception:
+            pass
 
 
 class RateLimitExhausted(Exception):
@@ -513,6 +512,7 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
                 QWEN_LIMITER.on_success()
 
             if resp.status == 429:
+                _raw429 = b""  # mai None: piu' sotto viene decodificato
                 _retry_after = resp.headers.get("retry-after")
                 step = QWEN_LIMITER.on_429()
                 log_fn(f"QWEN 429 attempt {attempt+1}: backoff {step}s")
@@ -524,13 +524,18 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
                     snippet=f"backoff {step}s"
                 )
                 try:
-                    await resp.read()
+                    _raw429 = await resp.read()
                 finally:
                     resp.release()
 
                 if attempt == 0:
                     await asyncio.sleep(step + random.uniform(0.5, 2))
                     continue
+                # Non allertiamo sul primo 429 perche il backoff con retry spesso risolve il problema da solo
+                qwen_alert(
+                    f"Rate limit Qwen persistente dopo due tentativi (model={lim_model}): "
+                    f"{_raw429.decode('utf-8', errors='replace')[:200]}"
+                )
                 if passthrough:
                     return synthetic_rate_limit(
                         f"qwen rate limit persistente dopo 2 tentativi (model={lim_model})",

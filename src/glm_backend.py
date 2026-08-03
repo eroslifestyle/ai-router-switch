@@ -351,16 +351,9 @@ def has_multimodal_content(body: bytes) -> tuple[str, str]:
 
 # ── Body size check ────────────────────────────────────────────────────────────
 
-def is_glm_body_too_large(body: bytes, model: str) -> bool:
-    """True se il body eccede il limite sicuro per il modello GLM target."""
-    # Stima: 1 token ≈ 4 char, aggiungiamo 20% headroom
-    try:
-        body_size = len(body)
-        est_tokens = int(body_size / 4 * 1.2)
-        limit = _GLM_CONTEXT_LIMITS.get(model, 900_000)
-        return est_tokens > limit
-    except Exception:
-        return False
+# Rimossa il 2026-08-03: mai chiamata, duplicava il controllo sul contesto
+# che il proxy fa gia con get_safe_input_limit (righe 391 e 545).
+# Il guardrail sui byte del corpo (alive) e altrove.
 
 
 # ── 429 classification ────────────────────────────────────────────────────────
@@ -567,17 +560,8 @@ Se l'output è INCOERENTE col piano o ha errori → rispondi SOLO con: INCOERENT
     return json.dumps(verify_body).encode()
 
 
-_background_tasks = set()
-
-
-def _fire_and_forget(coro):
-    """Lancia una coroutine in background senza attenderla, tenendo un
-    riferimento nel set _background_tasks per evitare che asyncio la
-    garbage-collecti prima del completamento (gotcha noto di create_task)."""
-    task = asyncio.create_task(coro)
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
-    return task
+# Rimosse 2026-08-03: _fire_and_forget, mai chiamata; con essa non resta alcun task lanciato in background.
+# _background_tasks pure rimosso: esisteva solo per questo helper.
 
 
 # Rimosse 2026-08-03: forward_glm_image, forward_glm_video e route_glm_request
@@ -680,14 +664,27 @@ async def forward_glm(request, body: bytes, session, model: str,
             if resp.status == 429:
                 _retry_after = resp.headers.get("retry-after")
                 step = GLM_LIMITER.on_429()
-                log_fn(f"GLM 429 attempt {attempt + 1}: backoff {step}s")
-                debug_catalog.record_event(severity="block", category="glm",
-                                            kind="glm_429_backoff", code=429,
-                                            snippet=f"attempt={attempt + 1} backoff={step}s model={model}")
+                # senza questo aggancio una quota da ore veniva trattata come un rate limit da secondi
+                # e nessuno avvisava l utente, mentre per MiniMax l avviso esisteva gia
+                _raw429 = b""  # mai None: classify_429_glm fa slicing sui byte
                 try:
-                    await resp.read()
+                    _raw429 = await resp.read()
                 finally:
                     resp.release()
+                _kind = classify_429_glm(_raw429)
+                log_fn(f"GLM 429 attempt {attempt + 1}: backoff {step}s kind={_kind}")
+                debug_catalog.record_event(severity="block", category="glm",
+                                            kind=f"glm_429_{_kind}", code=429,
+                                            snippet=f"attempt={attempt + 1} backoff={step}s kind={_kind} model={model}")
+                if _kind == "quota_5h":
+                    glm_alert(f"Quota GLM esaurita (model={lim_model}): {_raw429[:200].decode('utf-8', errors='replace')}")
+                    if passthrough:
+                        return synthetic_rate_limit(
+                            f"GLM quota esaurita, attesa nell'ordine delle ore, non si ritenta (model={lim_model})",
+                            retry_after=_retry_after)
+                    return _err(429, "rate_limit_error",
+                                f"GLM quota esaurita, attesa nell'ordine delle ore, non si ritenta (model={lim_model})",
+                                headers={"Retry-After": _retry_after} if _retry_after else None)
                 if attempt == 0:
                     await asyncio.sleep(step + random.uniform(0.5, 2))
                     continue

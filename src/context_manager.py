@@ -14,8 +14,7 @@ from model_context_map import get_context_limit, get_safe_input_limit
 
 # ponytail: copy-on-write stubs — replace with real when /v1/messages/count_tokens is available
 _TOKEN_STUB_AVAILABLE = False
-def _count_tokens_stub(request, session, body: bytes) -> int | None:
-    return None
+# _count_tokens_stub, stub che ritornava sempre None, rimossa il 2026-08-03 perche mai chiamata
 
 WARN_PCT    = 0.80
 WARN2_PCT   = 0.88   # secondo alert, urgente: compressione (90%) imminente

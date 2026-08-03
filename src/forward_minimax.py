@@ -59,12 +59,9 @@ def _synthetic_429(msg: str) -> "_SyntheticResponse":
     return _SyntheticResponse(429, {"type": "error", "error": {"type": "rate_limit_error", "message": msg}})
 
 
-def _synthetic_context_exceed(body_bytes: bytes) -> "_SyntheticResponse":
-    resp = _SyntheticResponse(
-        400, {"type": "error", "error": {"type": "context_exceeded",
-                "message": f"body {len(body_bytes)}b > MiniMax limit {MINIMAX_CONTEXT_BYTE_LIMIT}b"}})
-    resp.headers["x-ai-context-exceeded"] = "true"
-    return resp
+    # _synthetic_context_exceed rimossa il 2026-08-03: era rimasta orfana dopo che il suo
+    # unico chiamante (controllo anticipato sul limite di contesto) e stato tolto il 2026-07-23.
+    # MINIMAX_CONTEXT_BYTE_LIMIT resta usata altrove e non va toccata.
 
 
 def _minimax_est_tokens(new_body: bytes) -> int:
