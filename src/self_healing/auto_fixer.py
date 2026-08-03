@@ -76,12 +76,30 @@ def recurring_bugs(catalog, min_count=3):
     return result
 
 
+# The "mode" field holds router modes (e.g. anthropic, mix-am), not languages.
+# The previous typical_by_mode was keyed by language and never matched.
+# Three legacy mode names are preserved for backward compatibility with historical logs.
+TYPICAL_FILES_BY_MODE = {
+    "anthropic":    ["src/pipeline_anthropic.py", "src/forward_anthropic.py"],
+    "minimax":      ["src/pipeline_minimax.py", "src/forward_minimax.py"],
+    "glm":          ["src/glm_backend.py"],
+    "qwen":         ["src/qwen_backend.py"],
+    "mix-am":       ["src/role_routing.py", "src/pipeline_minimax.py", "src/forward_anthropic.py"],
+    "mix-ag":       ["src/role_routing.py", "src/glm_backend.py", "src/forward_anthropic.py"],
+    "mix-gm":       ["src/role_routing.py", "src/glm_backend.py", "src/pipeline_minimax.py"],
+}
+# Legacy aliases (mapped to the same list objects to avoid duplication)
+TYPICAL_FILES_BY_MODE["mixed"] = TYPICAL_FILES_BY_MODE["mix-am"]
+TYPICAL_FILES_BY_MODE["glm-minimax"] = TYPICAL_FILES_BY_MODE["mix-gm"]
+TYPICAL_FILES_BY_MODE["anthropic-glm"] = TYPICAL_FILES_BY_MODE["mix-ag"]
+
+
 def _suspected_files(sample):
     """Heuristically extract suspected source files from a bug sample.
 
     Looks for file paths with common code extensions in snippet, error,
-    and traceback fields. Falls back to typical modules based on the
-    sample's mode if no paths are found.
+    and traceback fields. Falls back to typical router-mode modules
+    if no paths are found.
     Returns up to five unique file paths.
     """
     # Combine relevant text fields
@@ -97,17 +115,9 @@ def _suspected_files(sample):
     if unique:
         return unique[:5]
 
-    # Fallback: typical files based on mode
+    # Fallback: typical files based on router mode
     mode = sample.get("mode")
-    typical_by_mode = {
-        "python": ["src/main.py", "src/module.py", "tests/test.py"],
-        "javascript": ["src/index.js", "src/app.js"],
-        "typescript": ["src/index.ts", "src/app.ts"],
-        "go": ["cmd/main.go", "pkg/foo.go"],
-        "rust": ["src/main.rs", "src/lib.rs"],
-        "sql": ["queries.sql", "schema.sql"],
-    }
-    return typical_by_mode.get(mode, [])[:5]
+    return TYPICAL_FILES_BY_MODE.get(mode, [])[:5]
 
 
 def make_ticket(bug):
