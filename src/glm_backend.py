@@ -97,10 +97,6 @@ GLM_MODEL_FOR_TIER = {
 # Serve ad apply_peak_cap: dal 2026-07-25 il proxy riceve un nome modello reale da role_routing, non una tier key
 GLM_TIER_FOR_MODEL = {model: tier for tier, model in GLM_MODEL_FOR_TIER.items()}
 
-# ── THINK-ACT-VERIFY constants ──────────────────────────────────────────────────
-GLM_THINK_VERIFY_MODEL = "glm-5.2"
-GLM_THINK_TIMEOUT_SEC = 60
-
 # Context limit sicuri per ogni modello (input tokens, con headroom).
 #
 # FONTE UNICA (2026-07-27): derivati da model_context_map, che ora contiene i
@@ -492,87 +488,15 @@ def set_body_model(body: bytes, model: str) -> bytes:
 # Isolamento tool per provider centralizzato in tool_isolation.py, applicato
 # dentro forward_glm (choke-point) — copre pure glm + mix-ag + mix-gm senza
 # bisogno della vecchia strip_foreign_branded_tools_for_glm (rimossa 2026-07-19).
-# ── THINK-ACT-VERIFY ───────────────────────────────────────────────────────────
 
-def _extract_text(content) -> str:
-    """Estrae testo semplice da un campo `content` Anthropic (stringa, o lista
-    di content-block dove tiene solo i blocchi di tipo 'text' — ignora
-    tool_use/tool_result/image, che il THINK/VERIFY non deve vedere)."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return " ".join(
-            block.get("text", "") for block in content
-            if isinstance(block, dict) and block.get("type") == "text"
-        )
-    return ""
-
-
-def build_glm_think_body(orig: dict, content_type: str) -> bytes:
-    """Costruisce il body per il THINK con GLM-5.2.
-
-    Chiede al modello di analizzare il task e produrre un piano di azione.
-
-    FIX 2026-07-19 (400 ricorrente sul background THINK): `system` va inviato
-    come campo TOP-LEVEL, non come messaggio `role: system` dentro `messages`
-    — l'endpoint z.ai è Anthropic-compatible e rigetta quel ruolo con 400.
-    Un solo messaggio `user` evita anche il vincolo di alternanza dei ruoli;
-    se il content dell'ultimo messaggio è a blocchi (tool/immagine, non
-    stringa) l'estrazione testuale garantisce comunque un messaggio non vuoto."""
-    system = """Sei un orchestrator AI. Analizza la richiesta e produci un piano di azione.
-Il piano deve specificare:
-1. Tipo di task (coding, reasoning, creative, vision, etc.)
-2. Modello consigliato per l'esecuzione
-3. Approccio principale
-
-Rispondi SOLO con il piano, nient'altro."""
-
-    messages = orig.get("messages", [])
-
-    history_lines = []
-    for msg in messages[-6:-1]:
-        text = _extract_text(msg.get("content", ""))
-        if text:
-            history_lines.append(f"[{msg.get('role', 'user')}] {text[:500]}")
-
-    last_text = _extract_text(messages[-1].get("content", "")) if messages else ""
-    if not last_text:
-        last_text = f"(contenuto {content_type or 'non testuale'})"
-
-    user_text = ""
-    if history_lines:
-        user_text = "\n".join(history_lines) + "\n\n"
-    user_text += f"Analizza questo task: {last_text[:2000]}"
-
-    think_body = {
-        "model": GLM_THINK_VERIFY_MODEL,
-        "system": system,
-        "messages": [{"role": "user", "content": user_text[:5000]}],
-        "max_tokens": 1000,
-    }
-
-    return json.dumps(think_body).encode()
-
-
-def build_glm_verify_body(orig: dict, plan: str, act_output: str) -> bytes:
-    """Costruisce il body per il VERIFY con GLM-5.2.
-
-    Chiede al modello di verificare che l'output sia corretto.
-    Stesso fix di build_glm_think_body: `system` top-level, non in messages."""
-    system = """Sei un verifier AI. Verifica che l'output prodotto sia corretto e completo.
-Se l'output è coerente col piano → rispondi SOLO con: VERIFIED
-Se l'output è INCOERENTE col piano o ha errori → rispondi SOLO con: INCOERENTE: [motivo breve]"""
-
-    verify_body = {
-        "model": GLM_THINK_VERIFY_MODEL,
-        "system": system,
-        "messages": [
-            {"role": "user", "content": "Piano:\n" + plan + "\n\nOutput:\n" + act_output[:3000]},
-        ],
-        "max_tokens": 500,
-    }
-
-    return json.dumps(verify_body).encode()
+# Rimosse il 2026-08-04: build_glm_think_body e build_glm_verify_body, residui
+# della pipeline THINK/ACT/VERIFY di mix-gm eliminata il 2026-07-25, quando il
+# router è diventato un tunnel trasparente. La funzione che le consumava,
+# _glm_minimax_think_act_verify, non esiste più; l'unico riferimento superstite
+# era sviluppo/tests/test_mixgm_verify_retry.sh, già rotto (il suo caso [3]
+# cercava _build_minimax_act_body_retry, assente dal proxy), rimosso insieme.
+# Cadono con loro le costanti GLM_THINK_VERIFY_MODEL e GLM_THINK_TIMEOUT_SEC e,
+# in cascata, l'helper _extract_text: nessun altro le leggeva.
 
 
 # Rimosse 2026-08-03: _fire_and_forget, mai chiamata; con essa non resta alcun task lanciato in background.
