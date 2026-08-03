@@ -167,5 +167,5 @@ VERIFICATO IL 2026-08-03, RATE LIMITS
 ## Voci aperte
 
 - ~~Il ramo glm ha la stessa forma latente corretta nel ramo qwen.~~ **CHIUSA il 2026-08-03**: corretta alla fonte per entrambi con `src/synthetic_response.py`, più il 429 che non degrada più a 502. Vedi `sviluppo/tests/test_synthetic_response.py`.
-- In modalità `glm` le rotte generative vanno ancora a **MiniMax**, benché `glm_backend` contenga `forward_glm_image`/`forward_glm_video`: quelle funzioni sono raggiungibili solo da `route_glm_request`, che **non è chiamata da nessuno**. Comportamento invariato rispetto a prima della modalità qwen; cablarle è una scelta da fare, non un fix.
+- ~~In modalità `glm` le rotte generative vanno ancora a MiniMax.~~ **CHIUSA il 2026-08-03** (`4dfcae8`): `route_glm_request`, `forward_glm_image` e `forward_glm_video` erano codice morto mai raggiunto e sono state **rimosse**. In modalità `glm` le immagini continuano ad andare a MiniMax: comportamento invariato. Se un giorno si vorranno cablare, vanno riscritte con decompressione, semaforo `_GLM_SEM` e model ID da variabile d'ambiente.
 - Non esiste un equivalente di `m3-wiki` per Qwen: in modalità qwen l'hook della gerarchia rimanda i documenti a `qwen-code`.
