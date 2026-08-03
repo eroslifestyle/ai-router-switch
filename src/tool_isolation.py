@@ -26,6 +26,10 @@ import debug_catalog
 _ANTHROPIC_CLIENT_TOOL_NAMES = {"websearch", "webfetch", "web_search", "web_fetch"}
 
 
+# Prefissi MCP dei tool nativi Alibaba Model Studio/Bailian
+_QWEN_TOOL_PREFIXES = ("mcp__qwen__", "mcp__dashscope__", "mcp__websearch__")
+
+
 def is_anthropic_server_tool(t: dict) -> bool:
     """Server-tool Anthropic (web_search_20250305, computer_use, bash,
     code_execution, ...): eseguiti server-side su api.anthropic.com,
@@ -37,11 +41,15 @@ def is_anthropic_server_tool(t: dict) -> bool:
     Fix 2026-07-22: i tool MCP branded di altri provider (mcp__zai__/mcp__MiniMax__/
     webSearchPrime) possono essere privi di input_schema; senza questa esclusione
     venivano classificati come server-tool Anthropic e strippati anche in mode
-    glm/minimax (bug: tool nativo GLM rimosso in modalità GLM)."""
+    glm/minimax (bug: tool nativo GLM rimosso in modalità GLM). Fix 2026-08-03:
+    stessa esclusione estesa ai tool nativi Qwen/Bailian, altrimenti in modalità
+    qwen il tool nativo veniva strippato."""
     if not isinstance(t, dict):
         return False
     name = (t.get("name") or "").lower()
-    if "minimax" in name or "websearchprime" in name or name.startswith("mcp__zai__"):
+    if ("minimax" in name or "websearchprime" in name
+            or name.startswith("mcp__zai__")
+            or name.startswith(_QWEN_TOOL_PREFIXES) or "dashscope" in name):
         return False
     if "input_schema" not in t:
         return True
@@ -62,10 +70,21 @@ def is_glm_branded_tool(t: dict) -> bool:
     return "websearchprime" in name or name.startswith("mcp__zai__")
 
 
+def is_qwen_branded_tool(t: dict) -> bool:
+    """Tool nativo Qwen/Alibaba Model Studio: MCP WebSearch di Bailian e affini,
+    riconosciuto per nome indipendentemente dall'alias del server MCP scelto
+    dall'utente."""
+    if not isinstance(t, dict):
+        return False
+    name = (t.get("name") or "").lower()
+    return name.startswith(_QWEN_TOOL_PREFIXES) or "dashscope" in name
+
+
 _BRAND_CHECK = {
     "anthropic": is_anthropic_server_tool,
     "minimax": is_minimax_branded_tool,
     "glm": is_glm_branded_tool,
+    "qwen": is_qwen_branded_tool,
 }
 
 
@@ -139,7 +158,7 @@ _TOOL_USE_NAME_BEFORE = re.compile(r'"name"\s*:\s*"([^"]+)"\s*,\s*(?:[^{}]*?,\s*
 def brand_of_tool_name(name: str) -> str | None:
     """
     Classifica un nome nudo di tool (senza input_schema) nel provider che lo esegue.
-    Restituisce 'minimax', 'glm' o 'anthropic' a seconda del brand,
+    Restituisce 'minimax', 'glm', 'qwen' o 'anthropic' a seconda del brand,
     oppure None se il tool non è brandizzato (es. Bash, Read, tool MCP di terze parti).
     In nessun caso si deve bloccare un tool con brand None: sono sempre leciti.
 
@@ -155,6 +174,8 @@ def brand_of_tool_name(name: str) -> str | None:
         return "minimax"
     if "websearchprime" in name_lower or name_lower.startswith("mcp__zai__"):
         return "glm"
+    if name_lower.startswith(_QWEN_TOOL_PREFIXES) or "dashscope" in name_lower:
+        return "qwen"
     if name_lower in _ANTHROPIC_CLIENT_TOOL_NAMES:
         return "anthropic"
     return None
@@ -162,7 +183,7 @@ def brand_of_tool_name(name: str) -> str | None:
 def backend_from_final(final: str) -> str | None:
     """
     Deduce il backend esecutore dalla stringa ``final`` della telemetria del relay.
-    Restituisce 'minimax', 'glm' o 'anthropic' a seconda del contenuto della stringa,
+    Restituisce 'minimax', 'glm', 'qwen' o 'anthropic' a seconda del contenuto,
     oppure None se non è classificabile; in tal caso la guardia si astiene.
     """
     if not final or not isinstance(final, str):
@@ -172,6 +193,8 @@ def backend_from_final(final: str) -> str | None:
         return "minimax"
     if final_lower.startswith("glm") or "glm-mode" in final_lower or "glm:" in final_lower:
         return "glm"
+    if final_lower.startswith("qwen") or "qwen-mode" in final_lower or "qwen:" in final_lower:
+        return "qwen"
     if "claude" in final_lower or "anthropic" in final_lower:
         return "anthropic"
     return None
@@ -185,10 +208,13 @@ def detect_foreign_tool_use(text: str, backend: str) -> list[str]:
     request‑side sulle *definizioni* dei tool non può intercettare.
 
     """
-    if backend not in ("anthropic", "minimax", "glm") or not text:
+    if backend not in ("anthropic", "minimax", "glm", "qwen") or not text:
         return []
     # Estrai tutti i match mantenendo l'ordine di apparizione
     matches = []
+    for regex in (_TOOL_USE_NAME_AFTER, _TOOL_USE_NAME_BEFORE):
+        for m in regex.finditer(text):
+            matches.append((m.start(), m.group(1)))
     for regex in (_TOOL_USE_NAME_AFTER, _TOOL_USE_NAME_BEFORE):
         for m in regex.finditer(text):
             matches.append((m.start(), m.group(1)))

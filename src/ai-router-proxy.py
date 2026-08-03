@@ -67,7 +67,7 @@ from router_constants import (
     LISTEN_HOST, LISTEN_PORT, LISTEN_PORTS,
     ANTHROPIC_UPSTREAM, MINIMAX_UPSTREAM, MINIMAX_MODEL,
     MINIMAX_ORCHESTRATOR_MODEL, MINIMAX_EXECUTORS, MIXED_EXECUTOR_MODEL,
-    NEW_PIPELINE, VALID_MODES, GLM_AVAILABLE,
+    NEW_PIPELINE, VALID_MODES, GLM_AVAILABLE, QWEN_AVAILABLE,
     MODE_FILE, KEY_FILE, LOG_FILE, SIDECAR, USAGE_SIDECAR,
     CHAT_STORE, TRIM_STATE_DIR,
     HOP_HEADERS, FALLBACK_STATUSES as _FS, MINIMAX_FALLBACK_STATUSES as _MFS,
@@ -348,11 +348,13 @@ async def handle(request):
         "anthropic": "claude-opus-4-8", "minimax": "MiniMax-M2.7",
         "glm": "glm-5.2", "mix-am": "MiniMax-M2.7",
         "mix-ag": "claude-opus-4-8", "mix-gm": "MiniMax-M2.7",
+        "qwen": "qwen3.7-max",
     }
     _provider_ctx_model_map = {
         "anthropic": "claude-opus-4-8",
         "minimax": "MiniMax-M2.7",
         "glm": "glm-5.2",
+        "qwen": "qwen3.7-max",
     }
     if _early_model:
         ctx_model = _early_override or _early_model
@@ -806,6 +808,27 @@ async def handle(request):
             return web.json_response({"type": "error", "error": {"type": "glm_unavailable",
                                       "message": f"{mode}: {e}"}}, status=502)
 
+    elif _provider == "qwen":
+        if not QWEN_AVAILABLE:
+            log(f"tunnel {mode}: Qwen non disponibile -> 502")
+            return web.json_response({"type": "error", "error": {"type": "qwen_unavailable",
+                                      "message": f"{mode}: modulo Qwen assente"}}, status=502)
+        try:
+            import qwen_backend as _qwen_mod
+            _qwen_model = _model_override or _qwen_mod.resolve_qwen_upstream_model(_qwen_mod.QWEN_TIER_CODER)
+            # L'upstream Model Studio onora il campo "model" del BODY (come z.ai):
+            # senza set_body_model userebbe il proprio default ignorando la rotta.
+            _qwen_body = _qwen_mod.set_body_model(body, _qwen_model)
+            up = await _qwen_mod.forward_qwen(request, _qwen_body, session,
+                                              _req_model or _qwen_model, log_fn=log,
+                                              passthrough=True, upstream_model=_qwen_model)
+            return await relay(up, extra_headers={"x-ai-verified": f"tunnel-{mode}-qwen({_qwen_model})"}, final_override=f"qwen:{_qwen_model}")
+        except Exception as e:
+            log(f"tunnel {mode} QWEN EXC: {e} -> 502")
+            debug_catalog.record_event(severity="error", category="qwen", kind="forward_exception", snippet=str(e))
+            return web.json_response({"type": "error", "error": {"type": "qwen_unavailable",
+                                      "message": f"{mode}: {e}"}}, status=502)
+
     # ANTHROPIC PURA
     if mode == "anthropic":
         if not request.path.endswith("/v1/messages"):
@@ -860,6 +883,17 @@ def _make_app(session, forced_mode):
                 _h["glm"] = {
                     "scheduling": _peak.scheduling_status(),
                     "rate_limit": _glm.GLM_LIMITER.snapshot() if _glm.GLM_LIMITER else None,
+                }
+            except Exception:
+                pass
+
+        if QWEN_AVAILABLE:
+            try:
+                import qwen_backend as _qwen
+                _h["qwen"] = {
+                    "upstream": await _qwen.qwen_upstream(),
+                    "has_key": bool(await _qwen.get_qwen_key()),
+                    "rate_limit": _qwen.QWEN_LIMITER.snapshot() if _qwen.QWEN_LIMITER else None,
                 }
             except Exception:
                 pass

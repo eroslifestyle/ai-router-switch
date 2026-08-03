@@ -47,6 +47,24 @@ MODEL_CONTEXT_MAP = {
     "glm-4v": 131_000,        # NON verificato sulla doc: valore storico
     "glm-4": 128_000,         # modello vecchio, valore storico
     "glm-5V-Turbo": 200_000,  # allineato a glm-5-turbo
+
+    # Qwen / Alibaba Model Studio (2026-08-03). ATTENZIONE alla provenienza dei
+    # valori: la doc ufficiale NON pubblica i context window dei modelli 3.6/3.7
+    # (l'unico dato ufficiale trovato e' qwen-max legacy = 32.768). I due valori
+    # da 1M vengono da fonti TERZE concordi (openrouter.ai, requesty.ai), non
+    # dalla doc: vanno riconfermati col probe live sull'account. Tutti gli altri
+    # sono stime PRUDENZIALI: sottostimare costa compressione inutile, sovrastimare
+    # costa un 400 'prompt is too long' dall'upstream.
+    "qwen3.8-max": 1_000_000,        # allineato a 3.7-max, NON VERIFICATO
+    "qwen3.7-max": 1_000_000,        # fonte terza concorde (max output 66k)
+    "qwen3.7-plus": 1_000_000,       # fonte terza concorde (testo+immagine+video)
+    "qwen3.6-plus": 1_000_000,       # allineato a 3.7-plus, NON VERIFICATO
+    "qwen3.7-flash": 262_144,        # NON VERIFICATO: stima prudenziale
+    "qwen3.6-flash": 262_144,        # NON VERIFICATO: stima prudenziale
+    "qwen3-coder-plus": 262_144,     # NON VERIFICATO: stima prudenziale
+    "qwen3-coder-next": 262_144,     # NON VERIFICATO: stima prudenziale
+    "qwen3-vl-plus": 131_072,        # NON VERIFICATO: stima prudenziale
+    "qwen-max": 32_768,              # doc ufficiale (modello legacy)
 }
 
 BUFFER_PERCENT = 20  # 20% libero per output
