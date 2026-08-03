@@ -68,7 +68,11 @@ async def get_minimax_key() -> str:
         try:
             import subprocess
             try:
-                loop = asyncio.get_running_loop()
+                # chiamata per l'EFFETTO: solleva RuntimeError se non c'e' un loop
+                # attivo, ed e' l'except RuntimeError qui sotto a gestire il caso
+                # sincrono. Il valore non serve: non assegnarlo evita di far credere
+                # il contrario a chi legge (e a ruff, che segnalava F841).
+                asyncio.get_running_loop()
                 proc = await asyncio.to_thread(
                     lambda: subprocess.check_output(
                         ["bash", str(KEY_FILE), "get", "minimax.api_key"],

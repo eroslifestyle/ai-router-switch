@@ -102,7 +102,7 @@ def _smart_truncate(msg: dict, max_len: int = TRUNCATE_MAX_LEN) -> str:
     """Truncation intelligente: preserva tool_use integrali, tronca resto."""
     content = msg.get("content", "")
     tool_use = msg.get("tool_use", [])
-    role = msg.get("role", "?")
+    # niente `role` qui: il prefisso "[ruolo]:" lo mettono i chiamanti (righe 43/51/57)
 
     if tool_use:
         tool_block = "\n[TOOL_USE]: " + "\n[TOOL_USE]: ".join(

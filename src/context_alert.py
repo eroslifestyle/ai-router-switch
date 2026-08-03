@@ -3,7 +3,6 @@ import sys
 import time
 import json
 import threading
-import subprocess
 
 CONTEXT_ALERTS_LOG = os.path.expanduser("~/.claude/logs/context-alerts.log")
 PENDING_DIR = "/tmp/ai-router-ctx-alert"
@@ -23,19 +22,10 @@ def notify_context_threshold(fp: str, mode: str, pct: float, est_tokens: int, li
             _last_alert[(fp, kind)] = now
 
         pct_str = f"{pct:.0%}"
-        if kind == "warn2":
-            title = f"⚠ Context {pct_str} — compressione IMMINENTE"
-            urg = "critical"
-        else:
-            title = f"⚠ Context {pct_str} — crea checkpoint"
-            urg = "normal"
 
-        body_msg = (
-            f"Context a {pct_str} ({est_tokens:,}/{limit:,} token), mode={mode}. "
-            f"La compressione automatica (lossy) scattera' a breve. "
-            f"Crea un checkpoint ORA per non perdere il lavoro."
-        )
-
+        # title, urg, body_msg servivano alla notifica desktop notify-send, rimossa
+        # il 2026-07-20 col commit 75aa186 perche' il fingerprint risultava illeggibile;
+        # restavano calcolati a vuoto, rimossi il 2026-08-04.
         # Canale 1: log dedicato + bell su stderr
         try:
             log_dir = os.path.dirname(CONTEXT_ALERTS_LOG)
@@ -53,7 +43,7 @@ def notify_context_threshold(fp: str, mode: str, pct: float, est_tokens: int, li
         except Exception:
             pass
 
-        # Canale 3: banner pending
+        # Canale 2: banner pending
         banner_text = f"⚠ Context a {pct_str}: compressione automatica imminente. Crea un checkpoint ora (lavoro a rischio)."
         _write_pending_banner(fp, banner_text)
 

@@ -4,8 +4,12 @@ import asyncio
 import json
 import os
 import time
+from typing import TYPE_CHECKING
 
 from aiohttp import ClientTimeout
+
+if TYPE_CHECKING:  # solo per le annotazioni delle rotte generative in fondo al file
+    from aiohttp import ClientSession, web
 
 import tool_isolation
 from router_debug import dl

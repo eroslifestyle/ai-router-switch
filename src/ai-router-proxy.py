@@ -53,7 +53,6 @@ from context_alert import notify_context_threshold, maybe_prepend_banner
 from providers.base import (
     FALLBACK_STATUSES, MINIMAX_FALLBACK_STATUSES,
     extract_last_user_text, _text_from_message as _pmsg_text,
-    _is_context_too_large_for_minimax, _is_context_exceed_400,
     strip_images_body, call_full,
     T2_KEYWORDS, trim_old_messages,
     _body_has_images,
@@ -102,8 +101,6 @@ from forward_minimax import (
 from pipeline_anthropic import (
     _text_from_message,
     _retry_forward,
-    _is_context_too_large_for_minimax as _is_ctx_too_large,
-    _is_context_exceed_400 as _is_ctx_exceed,
     _repair_message_sequence,
 )
 from pipeline_minimax import (

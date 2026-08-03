@@ -47,19 +47,23 @@ def _text_from_message(data: dict) -> str:
 
 # ── Context checks ────────────────────────────────────────────────────────────
 def _is_context_too_large_for_minimax(body: bytes) -> bool:
-    """True se il body supera ~180k token stimati (limite MiniMax)."""
-    try:
-        d = json.loads(body)
-    except Exception:
-        return False
-    # Stima: body bytes / 4 ≈ token. Limite MiniMax ~200k → 800k bytes
-    return len(body) > 800_000
+    """True se il body supera la soglia MINIMAX_CONTEXT_BYTE_LIMIT in byte.
+
+    Soglia default 750.000 byte, override con AIROUTER_MINIMAX_CONTEXT_LIMIT.
+    Confronto su byte, non su token stimati.
+    """
+    # Mantieni allineata all'omonima in pipeline_anthropic.py (effettivamente usata da pipeline_minimax)
+    from router_constants import MINIMAX_CONTEXT_BYTE_LIMIT
+    return len(body) > MINIMAX_CONTEXT_BYTE_LIMIT
 
 def _is_context_exceed_400(body: bytes) -> tuple[bool, str]:
     """Rileva errore context window 400 upstream. Ritorna (is_context, snippet)."""
     low = body.lower()
+    # Lista e' l'UNIONE dei marker delle due copie; too long e maximum context coprono
+    # l'errore reale di Anthropic sul prompt troppo lungo
     markers = [b"context window", b"reached its context", b"context_exceeded",
-               b"context limit", b"exceeds limit", b"2013"]
+               b"context limit", b"exceeds limit", b"2013",
+               b"context_length", b"too long", b"maximum context"]
     for m in markers:
         idx = low.find(m)
         if idx >= 0:
