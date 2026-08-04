@@ -13,6 +13,7 @@ _ALIAS_MAP = {
 _INTERNAL_TO_DISPLAY = {
     "mix-am": "MixAM", "mix-gm": "MixGM", "mix-ag": "MixAG",
     "anthropic": "anthropic", "minimax": "minimax", "glm": "glm",
+    "qwen": "qwen",   # aggiunta 2026-08-04: la 7a modalita' mancava dalla mappa
 }
 # RIMOSSO 2026-07-26 (decisione utente): riconoscimento in linguaggio naturale
 # (_NL_MODE + _CMD_VERB). Cambiava la modalita' SENZA autorizzazione esplicita:
@@ -60,8 +61,12 @@ def parse_router_command(text: str):
         trailing = _re.sub(r"</?\w[\w-]*>", "", t[m.end():]).strip()
         if len(trailing) > 5:
             return None
+        # gli alias brevi (mixam/mixgm/mixag) stanno in _ALIAS_MAP qui, i nomi storici in _LEGACY_MODE_MAP di router_mode,
+        # che è la stessa mappa usata in lettura da get_mode -- riusarla evita che i due ingressi divergano.
+        from router_mode import _LEGACY_MODE_MAP
         arg = m.group(1).lower()
-        resolved = _ALIAS_MAP.get(arg, arg)
+        _short = _ALIAS_MAP.get(arg, arg)
+        resolved = _LEGACY_MODE_MAP.get(_short, _short)
         if resolved in VALID_MODES:
             return {"action": "set", "mode": resolved}
         if arg in ("status", "reset", "help"):
@@ -87,8 +92,10 @@ def _router_reply_text(action: dict, fp: str, fallback_fp: str = None) -> str:
             clear_chat_mode(fallback_fp)
         _gm = get_file_mode()
         return f"↺ Chat riportata al default: **{_INTERNAL_TO_DISPLAY.get(_gm, _gm)}**"
-    return ("🧭 Comandi: `!router <anthropic|minimax|mixam|glm|mixgm|mixag>` · "
-            "`!router status` · `!router reset`.")
+    return ("🧭 Comandi: `!router <anthropic|minimax|mixam|mixag|mixgm|glm|qwen>` · "
+            "`!router status` · `!router reset`.\n"
+            "Alias accettati: `mix-am`/`mix-ag`/`mix-gm` per esteso, e i nomi storici "
+            "`mixed`, `glm-minimax`, `anthropic-glm`, normalizzati al canonico.")
 
 
 def _synthetic_message(text: str, model: str = "ai-router") -> dict:
