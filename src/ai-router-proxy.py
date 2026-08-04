@@ -851,6 +851,22 @@ async def handle(request):
             debug_catalog.record_event(severity="error", category="qwen", kind="forward_exception", snippet=str(e))
             return web.json_response({"type": "error", "error": {"type": "qwen_unavailable",
                                       "message": f"{mode}: {e}"}}, status=502)
+    # Provider local: LLM sulla stessa macchina servito da LiteLLM su porta 4000,
+    # espone il protocollo Anthropic nativo su /v1/messages (nessuna conversione); import lazy come glm/qwen.
+    elif _provider == "local":
+        try:
+            import local_backend as _local_mod
+            _local_model = _local_mod.resolve_local_model(_model_override)
+            _local_body = _local_mod.set_body_model(body, _local_model)
+            up = await _local_mod.forward_local(request, _local_body, session,
+                                                _req_model or _local_model, log_fn=log,
+                                                passthrough=True, upstream_model=_local_model)
+            return await relay(up, extra_headers={"x-ai-verified": f"tunnel-{mode}-local({_local_model})"}, final_override=f"local:{_local_model}")
+        except Exception as e:
+            log(f"tunnel {mode} LOCAL EXC: {e} -> 502")
+            debug_catalog.record_event(severity="error", category="local", kind="forward_exception", snippet=str(e))
+            return web.json_response({"type": "error", "error": {"type": "local_unavailable",
+                                      "message": f"{mode}: {e}"}}, status=502)
 
     # ANTHROPIC PURA
     if mode == "anthropic":

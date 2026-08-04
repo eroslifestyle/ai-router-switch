@@ -336,7 +336,7 @@ class TestModeListCoherence:
         """Il ruolo sconosciuto non deve mai far esplodere resolve_route."""
         for mode in rr.VALID_MODES:
             provider, override = rr.resolve_route(mode, "un-modello-mai-visto")
-            assert provider in ("anthropic", "minimax", "glm", "qwen")
+            assert provider in ("anthropic", "minimax", "glm", "qwen", "local")
             assert override is None
 
 
@@ -411,3 +411,53 @@ def run_tests():
 if __name__ == "__main__":
     exit_code = run_tests()
     sys.exit(exit_code)
+
+
+class TestMixALMode:
+    """Test suite for mix-al mode (THINK/VERIFY on Anthropic, ACT on local)."""
+
+    def test_think_claude_opus_5(self):
+        """THINK with claude-opus-5 routes to anthropic."""
+        assert rr.resolve_route('mix-al', 'claude-opus-5') == ('anthropic', None)
+
+    def test_think_claude_fable_5(self):
+        """THINK with claude-fable-5 routes to anthropic."""
+        assert rr.resolve_route('mix-al', 'claude-fable-5') == ('anthropic', None)
+
+    def test_think_claude_sonnet_5(self):
+        """VERIFY follows THINK, same route to anthropic."""
+        assert rr.resolve_route('mix-al', 'claude-sonnet-5') == ('anthropic', None)
+
+    def test_act_claude_haiku(self):
+        """ACT with claude-haiku-4-5-20251001 routes to local."""
+        assert rr.resolve_route('mix-al', 'claude-haiku-4-5-20251001') == ('local', rr.LOCAL_ACT)
+
+    def test_minimax_nativized(self):
+        """MiniMax-M2.7 in mix-al must be nativized to local, never MiniMax."""
+        assert rr.resolve_route('mix-al', 'MiniMax-M2.7') == ('local', rr.LOCAL_ACT)
+
+    def test_unknown_model_routes_local(self):
+        """Unknown model in mix-al routes to local without exception."""
+        result = rr.resolve_route('mix-al', 'some-unknown-model-xyz')
+        assert result[0] == 'local'
+
+    def test_mix_al_in_valid_modes(self):
+        """mix-al must be present in VALID_MODES."""
+        assert 'mix-al' in rr.VALID_MODES
+
+    def test_model_provider_local_models(self):
+        """code-max, code-max-ollama and qcnext* are local; claude-opus-5 is not."""
+        assert rr.model_provider('code-max') == 'local'
+        assert rr.model_provider('code-max-ollama') == 'local'
+        assert rr.model_provider('qcnext-mini') == 'local'
+        assert rr.model_provider('claude-opus-5') != 'local'
+
+    def test_haiku_still_routes_to_minimax_in_mix_am(self):
+        """Non-regression: claude-haiku-4-5-20251001 in mix-am goes to minimax."""
+        assert rr.resolve_route('mix-am', 'claude-haiku-4-5-20251001') == ('minimax', 'MiniMax-M2.7')
+
+    def test_local_model_not_forwarded_in_pure_anthropic(self):
+        """Isolation: code-max in pure anthropic is remapped, not forwarded as-is."""
+        result = rr.resolve_route('anthropic', 'code-max')
+        assert result[0] == 'anthropic'
+        assert result[1] != 'code-max'

@@ -31,7 +31,9 @@ DESKTOP_NAME = "router-mode-panel"
 # +98 (CARD_H 90 + SPACING 8): la sezione SOLO e' passata da una riga a due.
 # +16: l'hero e' cresciuto da 56 a 72 per non tagliare il sottotitolo.
 # +78: le card sono passate da 90 a 116 (3 righe di card in totale).
-WINDOW_W, WINDOW_H = 480, 732
+# +124 (CARD_H 116 + SPACING 8): la sezione MULTI e' passata da 1x3 a 2x2
+# con l'arrivo di mix-al (2026-08-04).
+WINDOW_W, WINDOW_H = 480, 856
 TITLE_H = 38
 # 56 non bastava: il titolo da 24pt piu' il sottotitolo che va a capo sforavano
 # il riquadro, e il testo dell'esecutore usciva tagliato sotto il nome della
@@ -47,6 +49,7 @@ MODES = [
     {"id": "qwen", "icon": "🟣", "label": "Qwen", "exec": "3.7-max / coder-plus"},
     {"id": "mix-gm", "icon": "🟢🟠", "label": "MixGM", "exec": "GLM-5.2 THINK + MiniMax ACT"},
     {"id": "mix-ag", "icon": "🔵🟢", "label": "MixAG", "exec": "Anthropic THINK + GLM ACT"},
+    {"id": "mix-al", "icon": "🔵🖥", "label": "MixAL", "exec": "Anthropic THINK + LLM locale ACT"},
 ]
 
 def hex_c(h, a=255):
@@ -368,7 +371,7 @@ class Card(QWidget):
         spacer1.setFixedHeight(8)
         body_layout.addWidget(spacer1)
 
-        # ── Sezione MULTI (1x3) ──────────────────────────────────────
+        # ── Sezione MULTI (2x2, blocco centrato) ────────────────────
         multi_lbl = QLabel("MULTI")
         multi_lbl.setFont(QFont("Sans", 9, QFont.Weight.Bold))
         multi_lbl.setStyleSheet("background:transparent;color:#5a6470")
@@ -376,13 +379,18 @@ class Card(QWidget):
 
         multi_grid = QGridLayout()
         multi_grid.setSpacing(SPACING)
-        multi_ids = ["mix-am", "mix-gm", "mix-ag"]
+        multi_ids = ["mix-am", "mix-ag", "mix-gm", "mix-al"]
         for i, mid in enumerate(multi_ids):
             m = next(x for x in MODES if x["id"] == mid)
             card = ModeCard(m, self._do_switch)
             self._cards[mid] = card
-            multi_grid.addWidget(card, 0, i)
-        body_layout.addLayout(multi_grid)
+            multi_grid.addWidget(card, i // 2, i % 2)
+        multi_row = QHBoxLayout()
+        multi_row.setContentsMargins(0, 0, 0, 0)
+        multi_row.addStretch()
+        multi_row.addLayout(multi_grid)
+        multi_row.addStretch()
+        body_layout.addLayout(multi_row)
 
         inner.addWidget(body)
 
