@@ -237,33 +237,42 @@ class TestInjectSystemHint:
 
 
 class TestStripImagesWithNote:
-    """Test per strip_images_with_note: rimozione immagini con nota sostitutiva."""
+    """Test per strip_images_with_note: salva le immagini su disco e mette il percorso nella nota."""
+
+    # PNG 1x1 valido: deve essere decodificabile perché la funzione ora SALVA i byte.
+    _PNG_B64 = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+                "AAAADUlEQVR42mNgYGD4DwABBAEAX6RfXgAAAABJRU5ErkJggg==")
+
+    def _img(self, media="image/png"):
+        return {"type": "image", "source": {"type": "base64", "media_type": media, "data": self._PNG_B64}}
 
     def _body(self, content):
         return json.dumps({"messages": [{"role": "user", "content": content}]}).encode()
 
-    def test_immagine_sostituita(self):
-        """Un blocco image viene sostituito da una nota testuale."""
-        body = self._body([
-            {"type": "text", "text": "cosa vedi?"},
-            {"type": "image", "source": {"type": "base64", "data": "xxx"}},
-        ])
+    def test_immagine_salvata_e_nota_con_percorso(self):
+        """Un blocco image viene salvato su disco e sostituito da una nota col percorso."""
+        body = self._body([{"type": "text", "text": "cosa vedi?"}, self._img()])
         c = json.loads(lb.strip_images_with_note(body))["messages"][0]["content"]
         assert not any(b.get("type") == "image" for b in c)
-        assert any("vision_local" in b.get("text", "") for b in c)
+        nota = next(b["text"] for b in c if "vision_local" in b.get("text", ""))
+        assert lb.SAVED_IMAGE_DIR in nota  # la nota contiene il percorso salvato
+        assert "NON usare Read" in nota    # istruzione direttiva
 
     def test_due_immagini_una_nota(self):
-        """Due blocchi image producono esattamente UNA nota."""
-        body = self._body([
-            {"type": "image", "source": {"data": "xxx"}},
-            {"type": "image", "source": {"data": "yyy"}},
-        ])
+        """Due blocchi image producono esattamente UNA nota (con due percorsi)."""
+        body = self._body([self._img(), self._img("image/jpeg")])
         c = json.loads(lb.strip_images_with_note(body))["messages"][0]["content"]
         assert sum("vision_local" in b.get("text", "") for b in c) == 1
 
     def test_nessuna_immagine_invariato(self):
         """Senza immagini non viene aggiunta alcuna nota."""
         body = self._body([{"type": "text", "text": "ciao"}])
+        c = json.loads(lb.strip_images_with_note(body))["messages"][0]["content"]
+        assert not any("vision_local" in b.get("text", "") for b in c)
+
+    def test_base64_invalido_nessuna_nota(self):
+        """Un base64 non decodificabile non viene salvato: nessuna nota (fail-safe)."""
+        body = self._body([{"type": "image", "source": {"data": "!!!non-base64!!!"}}])
         c = json.loads(lb.strip_images_with_note(body))["messages"][0]["content"]
         assert not any("vision_local" in b.get("text", "") for b in c)
 
@@ -277,10 +286,9 @@ class TestStripImagesWithNote:
         assert lb.strip_images_with_note(b"xx") == b"xx"
 
     def test_tool_result_annidato(self):
-        """Immagini dentro tool_result.content vengono sostituite ricorsivamente."""
+        """Immagini dentro tool_result.content vengono salvate ricorsivamente."""
         body = self._body([
-            {"type": "tool_result", "tool_use_id": "x",
-             "content": [{"type": "image", "source": {}}]},
+            {"type": "tool_result", "tool_use_id": "x", "content": [self._img()]},
         ])
         tr = json.loads(lb.strip_images_with_note(body))["messages"][0]["content"][0]
         assert any("vision_local" in b.get("text", "") for b in tr["content"])

@@ -150,53 +150,104 @@ def inject_system_hint(body: bytes) -> bytes:
         return body
 
 
-# --- Rimozione blocchi immagine (SOLO modalità local): il modello è solo-testo,
-# llama.cpp rifiuta le immagini con 500. Le sostituiamo con una nota che dice al
-# modello di salvarle su file e usare vision_local/ocr_image.
-IMAGE_PLACEHOLDER_NOTE = "[Un'immagine era allegata qui ma non e' visibile a un modello di solo testo. Se devi analizzarla: salvala su file con un comando bash (le immagini incollate non sono su disco), poi usa il tool vision_local con image_path per il contenuto visivo, o ocr_image per estrarne il testo.]"
+# --- Immagini in modalità local: il modello è solo-testo e llama.cpp le rifiuta
+# con 500. Le SALVIAMO su disco e le sostituiamo con una nota che contiene il
+# PERCORSO ESATTO, così il modello fa una sola chiamata a vision_local/ocr_image
+# invece di brancolare (Read, ricerca file, percorsi indovinati).
+SAVED_IMAGE_DIR = "/tmp/claude-local-images"
+
+_IMG_EXT = {
+    "image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg",
+    "image/webp": ".webp", "image/gif": ".gif",
+}
 
 
-def strip_images_with_note(body: bytes) -> bytes:
+def _save_image_block(source) -> Optional[str]:
+    """Salva un blocco immagine base64 su disco (nome = hash del contenuto).
+
+    Ritorna il path assoluto, o None se il blocco non è salvabile.
+    Idempotente: la stessa immagine finisce sempre nello stesso file.
+    """
+    import base64
+    import hashlib
+
+    if not isinstance(source, dict):
+        return None
+    data = source.get("data")
+    if not data:
+        return None
+    ext = _IMG_EXT.get(source.get("media_type", "image/png"), ".png")
     try:
-        data = json.loads(body)
+        raw = base64.b64decode(data)
     except Exception:
-        return body
-
+        return None
+    name = hashlib.sha1(raw).hexdigest()[:16] + ext
+    path = os.path.join(SAVED_IMAGE_DIR, name)
     try:
-        if "messages" not in data:
-            return body
-
-        for message in data["messages"]:
-            if isinstance(message.get("content"), list):
-                message["content"] = _process_content_list(message["content"])
-
-        return json.dumps(data).encode()
+        os.makedirs(SAVED_IMAGE_DIR, exist_ok=True)
+        if not os.path.exists(path):
+            with open(path, "wb") as f:
+                f.write(raw)
     except Exception:
-        return body
+        return None
+    return os.path.abspath(path)
+
+
+def _build_image_note(paths: list) -> dict:
+    """Costruisce il blocco-nota testuale con i percorsi salvati (istruzione direttiva)."""
+    if len(paths) == 1:
+        text = (
+            f"[Immagine allegata salvata in: {paths[0]}. Sei un modello di solo testo: "
+            f"per analizzarla usa SUBITO il tool vision_local con image_path={paths[0]} "
+            f"(contenuto visivo) oppure ocr_image (solo testo). NON usare Read, "
+            f"NON cercare il file: il percorso è questo.]"
+        )
+    else:
+        joined = ", ".join(paths)
+        text = (
+            f"[Immagini allegate salvate in: {joined}. Sei un modello di solo testo: "
+            f"per analizzarle usa SUBITO il tool vision_local con image_path=<percorso> "
+            f"(contenuto visivo) oppure ocr_image (solo testo) per ciascuna. "
+            f"NON usare Read, NON cercare i file: i percorsi sono questi.]"
+        )
+    return {"type": "text", "text": text}
 
 
 def _process_content_list(content_list: list) -> list:
-    """Sostituisce blocchi immagine con nota testuale (una per lista)."""
-    has_images = any(isinstance(b, dict) and b.get("type") == "image" for b in content_list)
-
-    # Rimuovi blocchi immagine e processa ricorsivamente tool_result
+    """Rimuove i blocchi image (salvandoli su disco) e aggiunge UNA nota col percorso."""
+    saved = []
     result = []
     for b in content_list:
         if not isinstance(b, dict):
             result.append(b)
             continue
         if b.get("type") == "image":
-            continue
+            path = _save_image_block(b.get("source", {}))
+            if path:
+                saved.append(path)
+            continue  # il blocco image non va all'output
         if b.get("type") == "tool_result" and isinstance(b.get("content"), list):
             b = dict(b)
             b["content"] = _process_content_list(b["content"])
         result.append(b)
 
-    # Una sola nota per messaggio/blocco se c'erano immagini
-    if has_images:
-        result.append({"type": "text", "text": IMAGE_PLACEHOLDER_NOTE})
-
+    if saved:
+        result.append(_build_image_note(saved))
     return result
+
+
+def strip_images_with_note(body: bytes) -> bytes:
+    """Salva le immagini del body su disco e le sostituisce con una nota col percorso."""
+    try:
+        data = json.loads(body)
+        if not isinstance(data, dict) or "messages" not in data:
+            return body
+        for message in data["messages"]:
+            if isinstance(message, dict) and isinstance(message.get("content"), list):
+                message["content"] = _process_content_list(message["content"])
+        return json.dumps(data).encode()
+    except Exception:
+        return body
 
 
 # ELEMENTO 2
