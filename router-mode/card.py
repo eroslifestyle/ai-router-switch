@@ -33,8 +33,8 @@ DESKTOP_NAME = "router-mode-panel"
 # +78: le card sono passate da 90 a 116 (3 righe di card in totale).
 # +124 (CARD_H 116 + SPACING 8): la sezione MULTI e' passata da 1x3 a 2x2
 # con l'arrivo di mix-al (2026-08-04).
-# +124 (CARD_H 116 + SPACING 8): la sezione SOLO e passata da 2x2 a 3 righe con l arrivo di local (2026-08-04).
-WINDOW_W, WINDOW_H = 480, 980
+# La sezione SOLO ospita 5 modalita' su griglia 3x2 (2 righe): l arrivo di local non aumenta l altezza, resta a 856.
+WINDOW_W, WINDOW_H = 480, 856
 TITLE_H = 38
 # 56 non bastava: il titolo da 24pt piu' il sottotitolo che va a capo sforavano
 # il riquadro, e il testo dell'esecutore usciva tagliato sotto il nome della
@@ -357,8 +357,8 @@ class Card(QWidget):
             m = next(x for x in MODES if x["id"] == mid)
             card = ModeCard(m, self._do_switch)
             self._cards[mid] = card
-            solo_grid.addWidget(card, i // 2, i % 2)
-        # Le card hanno larghezza fissa: due colonne coprono meno della riga
+            solo_grid.addWidget(card, i // 3, i % 3)
+        # Le card hanno larghezza fissa: tre colonne coprono meno della riga
         # MULTI da tre. Gli stretch ai lati centrano il blocco invece di
         # lasciarlo incollato al bordo sinistro.
         solo_row = QHBoxLayout()
