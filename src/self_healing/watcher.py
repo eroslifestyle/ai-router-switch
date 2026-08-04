@@ -191,7 +191,10 @@ def emit_policy(learner, policy_path, threshold=0.5):
         for k, st in learner._stats.items():
             if st["ewma"] >= threshold and st["total"] >= 3:
                 m, _, tc = k.partition("|")
-                deg[m] = {"task_class": tc or "*", "ewma": round(st["ewma"], 3),
+                # "?" = non classificato nel sidecar: emesso come "*" perche'
+                # is_degraded fa matchare solo "*" o la classe esatta.
+                deg[m] = {"task_class": tc if tc not in ("", "?") else "*",
+                          "ewma": round(st["ewma"], 3),
                           "fails": st["fails"], "total": st["total"], "since": st["last_ts"]}
         tmp = Path(policy_path).with_suffix(".tmp")
         tmp.write_text(json.dumps({"updated": time.time(), "degraded": deg}, indent=2))

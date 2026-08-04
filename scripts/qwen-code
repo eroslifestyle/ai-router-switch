@@ -74,8 +74,9 @@ def _strip_fence(text: str) -> str:
     return "\n".join(lines)
 
 
-def _telemetry(model: str, usage: dict, elapsed: float) -> None:
+def _telemetry(model: str, usage: dict, elapsed: float, finish: str = "") -> None:
     """Registra la telemetria in ~/.claude/m3/usage.jsonl."""
+    # finish va SEMPRE valorizzato: m3_source mappa finish assente -> error.
     try:
         path = Path.home() / ".claude" / "m3" / "usage.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -83,6 +84,7 @@ def _telemetry(model: str, usage: dict, elapsed: float) -> None:
             "ts": datetime.now(timezone.utc).isoformat(),
             "tool": "qwen-code",
             "model": model,
+            "finish": finish,
             "prompt_tokens": usage.get("prompt_tokens", 0),
             "completion_tokens": usage.get("completion_tokens", 0),
             "elapsed_s": round(elapsed, 2)
@@ -153,12 +155,15 @@ def main() -> None:
     except urllib.error.HTTPError as e:
         body_err = e.read().decode("utf-8", errors="replace")[:500]
         print(f"ERRORE HTTP {e.code}: {body_err}", file=sys.stderr)
+        _telemetry(args.model, {}, time.time() - start, finish="error")
         sys.exit(1)
     except urllib.error.URLError as e:
         print(f"ERRORE di rete: {e.reason}", file=sys.stderr)
+        _telemetry(args.model, {}, time.time() - start, finish="error")
         sys.exit(1)
     except Exception as e:
         print(f"ERRORE: {e}", file=sys.stderr)
+        _telemetry(args.model, {}, time.time() - start, finish="error")
         sys.exit(1)
 
     elapsed = time.time() - start
@@ -169,6 +174,7 @@ def main() -> None:
     if not content:
         raw_preview = json.dumps(data)[:300]
         print(f"ERRORE: risposta vuota. finish_reason={finish_reason}. Risposta grezza: {raw_preview}", file=sys.stderr)
+        _telemetry(args.model, data.get("usage", {}), elapsed, finish="error")
         sys.exit(1)
 
     if not args.raw:
@@ -177,7 +183,7 @@ def main() -> None:
     print(content)
 
     usage = data.get("usage", {})
-    _telemetry(args.model, usage, elapsed)
+    _telemetry(args.model, usage, elapsed, finish=finish_reason)
 
     comp_tokens = usage.get("completion_tokens", 0)
     print(f"[qwen-code] {args.model} · {comp_tokens}tok · {elapsed:.1f}s · {finish_reason}", file=sys.stderr)
