@@ -30,9 +30,9 @@ def test_text_extraction():
 def test_context_checks():
     from providers.base import _is_context_exceed_400
     body_ctx = b'{"error": {"type": "context_exceeded", "message": "context window exceeded"}}'
-    assert _is_context_exceed_400(body_ctx)[0] == True
+    assert _is_context_exceed_400(body_ctx)[0] is True
     body_ok = b'{"data": "ok"}'
-    assert _is_context_exceed_400(body_ok)[0] == False
+    assert _is_context_exceed_400(body_ok)[0] is False
     print("  context checks: OK")
 
 def test_strip_images():

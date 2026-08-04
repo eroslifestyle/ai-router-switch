@@ -379,7 +379,8 @@ def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
             entry["outcome"] = classify_outcome(
                 status, entry.get("stop_reason", ""),
                 entry.get("text_blocks", 0), entry.get("tool_use_blocks", 0),
-                entry.get("output_tokens", 0), _partial)
+                entry.get("output_tokens", 0), _partial,
+                entry.get("thinking_blocks", 0))
             entry["task_class"] = usage.get("task_class") or (classify_task(body) if body else "")
         except Exception:
             pass

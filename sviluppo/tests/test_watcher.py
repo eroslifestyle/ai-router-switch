@@ -16,7 +16,7 @@ def test_process_file_aggregates(tmp_path):
     )
     _write_jsonl(jsonl, entries)
     learner = OutcomeLearner(alpha=0.1, half_life_seconds=200)
-    offset = process_file(str(jsonl), learner, 0)
+    process_file(str(jsonl), learner, 0)  # il valore di ritorno non serve a questo test
     coding_stats = learner._stats["glm-5.2|coding"]
     assert coding_stats["total"] == 5, f"expected total 5, got {coding_stats['total']}"
     assert coding_stats["fails"] == 2, f"expected fails 2, got {coding_stats['fails']}"
@@ -60,7 +60,7 @@ def test_process_file_skips_malformed(tmp_path):
         f.write("not json{\n")
         f.write(json.dumps({"outcome": "error", "final": "a", "task_class": "b", "ts": 2}) + "\n")
     learner = OutcomeLearner(alpha=0.1, half_life_seconds=100)
-    offset = process_file(str(jsonl), learner, 0)
+    process_file(str(jsonl), learner, 0)  # il valore di ritorno non serve a questo test
     total = sum(v["total"] for v in learner._stats.values())
     assert total == 2, f"expected total 2, got {total}"
 

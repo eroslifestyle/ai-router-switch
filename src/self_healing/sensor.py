@@ -17,12 +17,16 @@ def classify_outcome(
     tool_use_blocks: int = 0,
     output_tokens: int = 0,
     measure_partial: bool = False,
+    thinking_blocks: int = 0,
 ) -> str:
     """
     Classify the actual outcome of a response.
 
     Returns: str in {ok, empty, truncated, tool_only, error, unknown}
     'unknown' means incomplete measurement, not an empty response.
+    When thinking_blocks>=1 with no text or tool blocks and stop_reason
+    empty, the stream never reached the final message_delta so the
+    measurement is incomplete - this is 'unknown', not 'empty'.
     """
     # Handle None values by treating them as defaults
     if status is None:
@@ -37,12 +41,27 @@ def classify_outcome(
         output_tokens = 0
     if measure_partial is None:
         measure_partial = False
+    if thinking_blocks is None:
+        thinking_blocks = 0
 
     # Logic order - return at first match
     if status >= 400 or stop_reason == "error":
         return "error"
     if measure_partial and text_blocks == 0 and tool_use_blocks == 0:
         return "unknown"
+    # The relay accumulates only the first and last 16KB of the response.
+    # A "text" content_block_start that falls in the middle 16KB gap
+    # is never counted, while "thinking" blocks (at the start) are.
+    # Result: text_blocks=0 with thinking_blocks>=1.
+    # "empty" is in FAIL_OUTCOMES, so false "empty" degrades the model.
+    if text_blocks == 0 and tool_use_blocks == 0 and thinking_blocks >= 1:
+        # stop_reason empty = stream never reached final message_delta,
+        # measurement incomplete -> unknown (not empty).
+        if not stop_reason:
+            return "unknown"
+        # stop_reason set = model concluded producing only thinking,
+        # no text or tools -> real failure.
+        return "empty"
     if text_blocks == 0 and tool_use_blocks == 0:
         return "empty"
     if text_blocks == 0 and tool_use_blocks > 0:
