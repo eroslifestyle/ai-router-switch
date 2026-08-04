@@ -11,7 +11,9 @@ from aiohttp import web
 from synthetic_response import synthetic_error
 
 LOCAL_MODEL_CODE = 'code-max'
-LOCAL_MODEL_FALLBACK = 'code-max-ollama'
+# Nessun fallback: il modello locale ha una sola via, llama.cpp :8083 dietro LiteLLM.
+# L'alias Ollama code-max-ollama e' stato rimosso il 2026-08-04 (duplicazione da 48GB).
+LOCAL_MODEL_FALLBACK = LOCAL_MODEL_CODE
 LOCAL_TIMEOUT_SEC = int(os.environ.get('AIROUTER_LOCAL_TIMEOUT_SEC', 600))
 LOCAL_MAX_RETRY = 2
 
