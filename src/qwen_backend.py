@@ -31,6 +31,7 @@ from aiohttp import ClientTimeout
 
 import debug_catalog
 import tool_isolation
+import qwen_tool_trim
 from synthetic_response import synthetic_error, synthetic_rate_limit
 
 # Import lazy per evitare ciclo: router_constants importa qwen_backend PRIMA di definire
@@ -99,7 +100,10 @@ QWEN_MAX_TOKENS_LIMIT = int(os.environ.get("AIROUTER_QWEN_MAX_TOKENS_LIMIT", "65
 QWEN_MAX_BODY_BYTES = int(os.environ.get("AIROUTER_QWEN_MAX_BODY_BYTES", str(4 * 1024 * 1024)))
 QWEN_SAFETY = float(os.environ.get("AIROUTER_QWEN_SAFETY", "0.8"))
 QWEN_RETRY_CAP_SEC = float(os.environ.get("AIROUTER_QWEN_RETRY_CAP_SEC", "90"))
-QWEN_STREAM_ACQUIRE_CAP_SEC = float(os.environ.get("AIROUTER_QWEN_STREAM_ACQUIRE_CAP_SEC", "8"))
+# 8s era troppo poco: il 25,6% delle richieste qwen veniva rifiutato dal limiter
+# INTERNO (120 "budget esaurito", zero 429 da Alibaba). Meglio aspettare il turno
+# che restituire un 429 sintetico al client (2026-08-04).
+QWEN_STREAM_ACQUIRE_CAP_SEC = float(os.environ.get("AIROUTER_QWEN_STREAM_ACQUIRE_CAP_SEC", "45"))
 QWEN_BACKOFF_STEPS = (5, 10, 20, 40, 60)
 QWEN_CONCURRENCY = int(os.environ.get("AIROUTER_QWEN_SEMAPHORE", "8"))
 _QWEN_SEM = asyncio.Semaphore(QWEN_CONCURRENCY)
@@ -459,6 +463,7 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
         return _err(502, "qwen_unavailable", "qwen key missing")
 
     body = tool_isolation.filter_tools_for_backend(body, "qwen")
+    body = qwen_tool_trim.strip_heavy_connectors(body)
     body = clamp_qwen_max_tokens(body, log_fn=log_fn)
 
     # Il gateway risponde 413 RequestTooLarge sui byte, prima ancora di valutare
