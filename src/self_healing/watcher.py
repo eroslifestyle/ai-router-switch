@@ -17,6 +17,7 @@ from typing import Optional
 # Constants for default paths
 DEFAULT_JSONL = Path.home() / ".claude" / "logs" / "router-usage.jsonl"
 DEFAULT_STATE = Path.home() / ".claude" / "router-learnings.json"
+DEFAULT_POLICY = Path.home() / ".claude" / "router-policy.json"
 
 # Constants for outcome classification
 FAIL_OUTCOMES = frozenset({"empty", "truncated", "error"})
@@ -244,21 +245,42 @@ def process_file(jsonl_path: Path, learner: OutcomeLearner, offset: int) -> int:
         return offset
 
 
+def run_cycle(jsonl_path: Path, state_path: Path, policy_path: Optional[Path] = None) -> "OutcomeLearner":
+    """
+    Un ciclo completo: carica lo stato, processa il log del router, processa la telemetria m3-code,
+    salva e rigenera la policy. Usata sia da --once sia dal loop continuo: prima esisteva solo
+    dentro il ramo --once e follow() ne era una copia monca, senza Fase 2.5 e senza emit_policy.
+    """
+    if policy_path is None:
+        policy_path = DEFAULT_POLICY
+
+    learner, offset = load_state(state_path)
+    offset = process_file(jsonl_path, learner, offset)
+
+    # La telemetria m3-code è OUT-OF-BAND: invisibile a router-usage.jsonl
+    try:
+        from self_healing.m3_source import process_m3_usage, DEFAULT_M3_USAGE
+        m3_off_path = state_path.with_suffix(state_path.suffix + ".m3off")
+        off_m3 = _read_int(m3_off_path)
+        # l'offset AVANZATO va riscritto: senza l'assegnazione il file resterebbe
+        # fermo e la telemetria m3 verrebbe riprocessata a ogni ciclo
+        off_m3 = process_m3_usage(DEFAULT_M3_USAGE, learner, off_m3)
+        _write_int(m3_off_path, off_m3)
+    except Exception:
+        pass
+
+    save_state(state_path, learner, offset)
+    emit_policy(learner, policy_path)
+    return learner
+
+
 def follow(jsonl_path: Path, state_path: Path, interval: int = 30) -> None:
     """
-    Run continuous monitoring loop.
-
-    Args:
-        jsonl_path: Path to the JSONL log file.
-        state_path: Path to the state file.
-        interval: Seconds to sleep between processing cycles.
+    Loop continuo: esegue run_cycle ogni interval secondi.
     """
     while True:
-        learner, offset = load_state(state_path)
-        offset = process_file(jsonl_path, learner, offset)
-        save_state(state_path, learner, offset)
+        run_cycle(jsonl_path, state_path)
         time.sleep(interval)
-
 
 def main() -> int:
     """
@@ -276,20 +298,8 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.once:
-        learner, offset = load_state(args.state)
-        offset = process_file(args.jsonl, learner, offset)
-        # Fase 2.5: processa anche la telemetria m3-code (coding MiniMax OUT-OF-BAND,
-        # invisibile a router-usage.jsonl). Offset m3 tenuto in file affiancato allo state.
-        try:
-            from self_healing.m3_source import process_m3_usage, DEFAULT_M3_USAGE
-            m3_off_path = args.state.with_suffix(args.state.suffix + ".m3off")
-            off_m3 = _read_int(m3_off_path)
-            off_m3 = process_m3_usage(DEFAULT_M3_USAGE, learner, off_m3)
-            _write_int(m3_off_path, off_m3)
-        except Exception:
-            pass
-        save_state(args.state, learner, offset)
-        emit_policy(learner, Path.home() / ".claude" / "router-policy.json")
+        # il ciclo è condiviso con il loop continuo, così i due rami non possono più divergere.
+        learner = run_cycle(args.jsonl, args.state)
         snapshot = learner.snapshot()
         print(f"Processed entries: {sum(e['total'] for e in snapshot['stats'].values())}")
         print(f"Unique keys: {len(snapshot['stats'])}")
@@ -305,48 +315,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    # Self-test
-    learner = OutcomeLearner(alpha=0.5, half_life_seconds=1000)
-    base_ts = 1000.0
-
-    # Test 1: 10 consecutive fails should bring EWMA close to 1.0
-    for i in range(10):
-        learner.observe("glm-5.2", "coding", "error", base_ts + i)
-    key1 = "glm-5.2|coding"
-    assert learner._stats[key1]["ewma"] > 0.9, f"Expected ewma > 0.9 after 10 fails, got {learner._stats[key1]['ewma']}"
-
-    # Test 2: 10 consecutive OK should reduce EWMA significantly
-    for i in range(10):
-        learner.observe("glm-5.2", "coding", "ok", base_ts + 10 + i)
-    assert learner._stats[key1]["ewma"] < 0.5, f"Expected ewma < 0.5 after 10 ok, got {learner._stats[key1]['ewma']}"
-
-    # Test 3: New key with 1 fail should have EWMA = alpha
-    learner.observe("minimax-m2.7", "coding", "error", base_ts + 20)
-    key2 = "minimax-m2.7|coding"
-    assert abs(learner._stats[key2]["ewma"] - 0.5) < 0.001, f"Expected ewma = 0.5 after 1 fail, got {learner._stats[key2]['ewma']}"
-
-    # Test 4: Temporal decay - after dt = half_life with no events, observe 1 ok
-    learner2 = OutcomeLearner(alpha=0.5, half_life_seconds=1000)
-    learner2.observe("model-x", "task-y", "error", 1000.0)  # ewma = 0.5
-    ewma_before = learner2._stats["model-x|task-y"]["ewma"]
-    # Simulate half_life elapsed (dt = 1000s)
-    learner2.observe("model-x", "task-y", "ok", 2000.0)  # Decay factor = 0.5, then update
-    ewma_after = learner2._stats["model-x|task-y"]["ewma"]
-    _decayed = 0.5 * 0.5  # ewma_before(0.5) * decay_factor(0.5 at dt=half_life)
-    expected = 0.5 * 0.0 + (1 - 0.5) * _decayed  # alpha*fail(0, ok) + (1-alpha)*decayed
-    assert abs(ewma_after - expected) < 0.001, f"Expected ewma ~ {expected}, got {ewma_after}"
-    assert ewma_after < ewma_before, "EWMA should decrease after decay and OK"
-
-    # Test 5: Roundtrip serialization
-    snapshot = learner.snapshot()
-    restored = OutcomeLearner.from_dict(snapshot)
-    assert restored.alpha == learner.alpha
-    assert restored.half_life_seconds == learner.half_life_seconds
-    for k in learner._stats:
-        assert k in restored._stats
-        assert learner._stats[k]["ewma"] == restored._stats[k]["ewma"]
-        assert learner._stats[k]["total"] == restored._stats[k]["total"]
-        assert learner._stats[k]["fails"] == restored._stats[k]["fails"]
-        assert learner._stats[k]["last_ts"] == restored._stats[k]["last_ts"]
-
-    print("OK")
+    # Fino al 2026-08-04 qui viveva un self-test che stampava "OK" e non
+    # chiamava mai main(): la CLI era irraggiungibile e il watcher non poteva
+    # girare, ne una volta ne in continuo. I suoi cinque casi sull'EWMA sono
+    # stati spostati in sviluppo/tests/test_watcher.py.
+    raise SystemExit(main())

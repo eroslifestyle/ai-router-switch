@@ -1,0 +1,43 @@
+[Unit]
+Description=AI Router self-healing watcher — aggrega gli outcome da router-usage.jsonl e produce router-policy.json
+Documentation=file:///mnt/backup/Dropbox/1%%20Programmazione/Progetti/ai-router-switch/.claude/TODO.md
+After=ai-router.service
+Wants=ai-router.service
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+Type=simple
+WorkingDirectory=/mnt/backup/Dropbox/1 Programmazione/Progetti/ai-router-switch/src
+
+# Il modulo si risolve dalla WorkingDirectory: `python3 -m` antepone la cwd a
+# sys.path, e self_healing/ sta dentro src/. Nessun wrapper necessario, a
+# differenza del proxy che deve raggiungere fail_tracker.py nella dir parent.
+#
+# --interval 60 invece del default 30: e un processo di sola analisi, legge il
+# delta di router-usage.jsonl dall'offset persistito e non ha bisogno di essere
+# reattivo. Fino al 2026-08-04 non poteva girare affatto: nel modulo il blocco
+# __main__ conteneva un self-test che stampava "OK" al posto di chiamare main(),
+# quindi la CLI era irraggiungibile e i due file non venivano mai prodotti.
+ExecStart=/usr/bin/python3 -m self_healing.watcher --interval 60
+
+# Bassa priorita: non deve mai togliere CPU al router sulla stessa macchina.
+Nice=10
+IOSchedulingClass=idle
+
+Restart=always
+RestartSec=10
+
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=10
+SendSIGKILL=yes
+
+# router-usage.jsonl supera i 37 MB: il primo giro lo legge tutto, poi solo il delta.
+MemoryHigh=256M
+MemoryMax=512M
+TasksMax=32
+OOMScoreAdjust=500
+
+[Install]
+WantedBy=default.target

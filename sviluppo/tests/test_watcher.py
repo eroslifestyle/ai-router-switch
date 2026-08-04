@@ -109,3 +109,56 @@ def test_decay_lowers_ewma(tmp_path):
     ewma2 = learner._stats["x|y"]["ewma"]
     assert ewma2 < ewma1, f"ewma2 ({ewma2}) should be lower than ewma1 ({ewma1})"
     assert ewma2 < 0.5, f"ewma2 ({ewma2}) should be less than 0.5"
+
+
+# vivevano nel blocco if __name__ == "__main__" di src/self_healing/watcher.py, che il 2026-08-04 è stato sostituito dalla chiamata a main() -- il self-test aveva preso il posto dell'entry point e rendeva la CLI irraggiungibile. Spostati qui per non perdere copertura.
+
+def test_ewma_satura_dopo_dieci_fallimenti():
+    learner = OutcomeLearner(alpha=0.5, half_life_seconds=1000)
+    for i in range(10):
+        learner.observe("glm-5.2", "coding", "error", 1000.0 + i)
+    ewma = learner._stats["glm-5.2|coding"]["ewma"]
+    assert ewma > 0.9, f"ewma ({ewma}) should be greater than 0.9 after 10 errors"
+
+def test_ewma_scende_dopo_dieci_successi():
+    learner = OutcomeLearner(alpha=0.5, half_life_seconds=1000)
+    for i in range(10):
+        learner.observe("glm-5.2", "coding", "error", 1000.0 + i)
+    for i in range(10):
+        learner.observe("glm-5.2", "coding", "ok", 1010.0 + i)
+    ewma = learner._stats["glm-5.2|coding"]["ewma"]
+    assert ewma < 0.5, f"ewma ({ewma}) should be less than 0.5 after 10 successes"
+
+def test_ewma_di_chiave_nuova_vale_alpha():
+    learner = OutcomeLearner(alpha=0.5, half_life_seconds=1000)
+    learner.observe("minimax-m2.7", "coding", "error", 1020.0)
+    ewma = learner._stats["minimax-m2.7|coding"]["ewma"]
+    assert abs(ewma - 0.5) < 0.001, f"ewma ({ewma}) should be approximately 0.5 on first failure for unseen key"
+
+def test_run_cycle_emette_la_policy(tmp_path):
+    """Guardia anti-regressione: run_cycle DEVE scrivere il file della policy. Fino al 2026-08-04 follow() era una copia monca del ramo --once e non chiamava emit_policy, quindi in modalita continua router-policy.json non veniva MAI rigenerato: il servizio aggiornava router-learnings.json ogni 60 secondi mentre la policy restava congelata."""
+    from self_healing.watcher import run_cycle
+    jsonl = tmp_path / "usage.jsonl"
+    entries = [{"outcome": "error", "final": "modello-x", "task_class": "coding", "ts": n} for n in range(1, 7)]
+    _write_jsonl(jsonl, entries)
+    state = tmp_path / "learnings.json"
+    policy = tmp_path / "policy.json"
+    run_cycle(jsonl, state, policy)
+    assert policy.exists(), "run_cycle non ha scritto la policy"
+    dati = json.loads(policy.read_text())
+    assert "degraded" in dati, f"degraded non presente in {dati.keys()}"
+    assert "modello-x" in dati["degraded"], f"modello-x non in degraded: {dati['degraded'].keys()}"
+    assert state.exists(), "run_cycle non ha scritto lo state"
+
+def test_run_cycle_ritorna_il_learner(tmp_path):
+    """run_cycle restituisce il learner, perche il ramo --once di main() lo usa per stampare il riepilogo."""
+    from self_healing.watcher import run_cycle
+    jsonl = tmp_path / "usage.jsonl"
+    entries = [
+        {"outcome": "ok", "final": "m", "task_class": "chat", "ts": 1},
+        {"outcome": "ok", "final": "m", "task_class": "chat", "ts": 2}
+    ]
+    _write_jsonl(jsonl, entries)
+    learner = run_cycle(jsonl, tmp_path / "s.json", tmp_path / "p.json")
+    assert learner is not None, "run_cycle ha restituito None"
+    assert hasattr(learner, "_stats"), f"learner non ha _stats: {dir(learner)}"
