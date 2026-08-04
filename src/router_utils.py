@@ -279,6 +279,9 @@ TOOLS_TELEMETRY_ENABLED: bool = os.environ.get("AIROUTER_TOOLS_TELEMETRY", "") =
 MCP_TOOL_PREFIX = "mcp__"
 MCP_NAME_SEPARATOR = "__"
 MCP_SERVER_UNKNOWN = "sconosciuto"
+# Un client Claude Code integro espone 24 tool built-in: sotto questa soglia il set
+# e' mutilato e vanno registrati i nomi per capire cosa manca.
+BUILTIN_ANOMALY_THRESHOLD = 20
 
 
 def _serialized_size(value) -> int:
@@ -338,7 +341,12 @@ def collect_tools_stats(body: bytes) -> dict | None:
         server = resto[:separatore] if separatore != -1 else MCP_SERVER_UNKNOWN
         servers_bytes[server] = servers_bytes.get(server, 0) + _serialized_size(tool)
 
+    # Set built-in ridotto = anomalia da diagnosticare: registra QUALI tool sono
+    # arrivati. Solo sotto la soglia, per non gonfiare il sidecar (2026-08-04).
+    _bi = [t["name"] for t in tools if isinstance(t, dict)
+           and isinstance(t.get("name"), str) and not t["name"].startswith(MCP_TOOL_PREFIX)]
     return {
+        "tools_builtin": _bi if len(_bi) < BUILTIN_ANOMALY_THRESHOLD else None,
         "tools_count": len(tools),
         "tools_bytes": _serialized_size(tools),
         "tools_mcp_count": len(mcp_tools),
