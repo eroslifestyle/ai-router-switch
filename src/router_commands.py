@@ -12,6 +12,7 @@ _ALIAS_MAP = {
 }
 _INTERNAL_TO_DISPLAY = {
     "mix-am": "MixAM", "mix-gm": "MixGM", "mix-ag": "MixAG",
+    "mix-al": "MixAL",  # aggiunta 2026-08-04: l'8a modalita' mancava dalla mappa
     "anthropic": "anthropic", "minimax": "minimax", "glm": "glm",
     "qwen": "qwen",   # aggiunta 2026-08-04: la 7a modalita' mancava dalla mappa
 }

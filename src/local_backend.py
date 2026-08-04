@@ -84,6 +84,102 @@ def resolve_local_model(requested: Optional[str]) -> str:
     return LOCAL_MODEL_CODE
 
 
+# --- Correzione difensiva stop_reason (LiteLLM 1.95.0 non mappa finish_reason
+# 'length' su stop_reason 'max_tokens': il client crede completa una risposta
+# troncata). La trasformazione avviene chunk per chunk: lo streaming resta intatto.
+# ELEMENTO 1
+def requested_max_tokens(body: bytes) -> int | None:
+    try:
+        obj = json.loads(body)
+        return obj.get("max_tokens")
+    except Exception:
+        return None
+
+
+# ELEMENTO 2
+class _FixedContent:
+    def __init__(self, original_content, max_tokens: int, is_sse: bool, log_fn):
+        self._orig = original_content
+        self._max = max_tokens
+        self._is_sse = is_sse
+        self._log = log_fn
+
+    def at_eof(self):
+        return self._orig.at_eof()
+
+    def __getattr__(self, name):
+        return getattr(self._orig, name)
+
+    async def iter_any(self):
+        if self._is_sse:
+            buffer = b""
+            async for chunk in self._orig.iter_any():
+                buffer += chunk
+                parts = buffer.split(b"\n")
+                buffer = parts.pop()
+                for line in parts:
+                    yield self._fix_line(line) + b"\n"
+            if buffer:
+                yield buffer
+        else:
+            chunks = []
+            async for chunk in self._orig.iter_any():
+                chunks.append(chunk)
+            raw = b"".join(chunks)
+            yield self._fix_json(raw)
+
+    def _fix_line(self, line: bytes):
+        prefix = b"data: "
+        if not line.startswith(prefix):
+            return line
+        try:
+            obj = json.loads(line[len(prefix):])
+        except Exception:
+            return line
+        if (isinstance(obj, dict)
+                and obj.get("type") == "message_delta"
+                and obj.get("delta", {}).get("stop_reason") == "end_turn"
+                and obj.get("usage", {}).get("output_tokens", 0) >= self._max):
+            obj["delta"]["stop_reason"] = "max_tokens"
+            self._log("stop_reason corretto: end_turn -> max_tokens")
+            return prefix + json.dumps(obj).encode()
+        return line
+
+    def _fix_json(self, raw: bytes):
+        try:
+            obj = json.loads(raw)
+        except Exception:
+            return raw
+        if (obj.get("stop_reason") == "end_turn"
+                and obj.get("usage", {}).get("output_tokens", 0) >= self._max):
+            obj["stop_reason"] = "max_tokens"
+            self._log("stop_reason corretto: end_turn -> max_tokens")
+            return json.dumps(obj).encode()
+        return raw
+
+
+# ELEMENTO 3
+class _StopReasonFixed:
+    def __init__(self, original_response, max_tokens: int, log_fn):
+        ct = original_response.headers.get("content-type", "")
+        is_sse = "text/event-stream" in ct.lower()
+        object.__setattr__(self, "_orig", original_response)
+        object.__setattr__(self, "_content", _FixedContent(
+            original_response.content, max_tokens, is_sse, log_fn))
+
+    @property
+    def content(self):
+        return self._content
+
+    @property
+    def headers(self):
+        return {k: v for k, v in self._orig.headers.items()
+                if k.lower() != "content-length"}
+
+    def __getattr__(self, name):
+        return getattr(self._orig, name)
+
+
 async def forward_local(
     request,
     body: bytes,
@@ -134,6 +230,9 @@ async def forward_local(
                     await asyncio.sleep(2)
                     continue
             if passthrough:
+                _max_tok = requested_max_tokens(body)
+                if status == 200 and _max_tok:
+                    return _StopReasonFixed(resp, _max_tok, log_fn)
                 return resp
             body_bytes = await resp.read()
             await resp.release()
