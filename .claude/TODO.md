@@ -10,6 +10,8 @@ Questo file unifica il vecchio `TODO.md` (32 sezioni, 5 blocchi «Attivo» spars
 
 ## Aperti
 
+- [ ] **Passthrough dei blocchi `tool_reference` (tool deferral di Claude Code). Emersa il 2026-08-04.** Il repo non ha una sola occorrenza di `tool_reference`: finché è così, `ENABLE_TOOL_SEARCH` deve restare disattivata (commentata in `~/.bashrc` e `~/.config/environment.d/anthropic.conf`), altrimenti i tool deferiti — Read, Bash, Edit, Write, Agent — diventano irrecuperabili dietro il router. Rilevatore già in produzione: `tools_builtin` nel sidecar, popolato sotto `BUILTIN_ANOMALY_THRESHOLD = 20`.
+
 - [x] **Settima modalità del router: `qwen` (Alibaba Cloud Model Studio). CHIUSA il 2026-08-03, ATTIVA e verificata in produzione con credenziali reali.**
   **Cosa c'è.** THINK `qwen3.8-max`, ACT `qwen3-coder-plus`, porta 8778. Backend `src/qwen_backend.py` modellato su `glm_backend.py` (stesso endpoint Anthropic-compatible di z.ai), servizi DashScope separati in `src/qwen_generative.py`. CLI `qwen-code`, `qwen-web`, `qwen-setup`. Account `ws-XXXXXXXXXXXXXXXX` (Singapore).
   **Verificato dal vivo sulla porta 8778:** claude-opus-5 → qwen3.8-max risponde PONG; claude-haiku → qwen3-coder-plus risponde PING; streaming SSE, tool calling (stop_reason=tool_use con argomenti corretti), thinking e cache_control tutti OK; /v1/embeddings → text-embedding-v4 con vettore da 1024 dimensioni; /v1/images/generations → URL PNG realmente generato; qwen-web → risposta aggiornata con 16 fonti citabili. 13 modelli su 13 testati rispondono 200.
