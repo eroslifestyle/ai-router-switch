@@ -237,7 +237,11 @@ class StreamingRelay:
                 _buf_str = _raw.decode("utf-8", errors="replace")
                 if is_sse:
                     def _scan(text):
-                        for _data in re_module.findall(r"^data: (.+)$", text, re_module.MULTILINE):
+                        # Lo spazio dopo "data:" e' OPZIONALE per lo standard SSE: il
+                        # gateway Qwen/Alibaba emette "data:{...}" senza spazio, quindi il
+                        # vecchio r"^data: " non matchava NULLA e ogni risposta qwen
+                        # risultava con 0 blocchi e stop_reason vuoto (2026-08-04).
+                        for _data in re_module.findall(r"^data:\s*(.+)$", text, re_module.MULTILINE):
                             try:
                                 _ev = json.loads(_data)
                                 if _ev.get("type") == "message_start":
