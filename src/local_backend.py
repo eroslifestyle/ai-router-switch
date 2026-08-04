@@ -96,6 +96,109 @@ def requested_max_tokens(body: bytes) -> int | None:
         return None
 
 
+# --- Iniezione istruzione visione (SOLO modalità local): il modello locale
+# è di solo testo e va istruito a delegare le immagini ai tool vision_local/ocr_image.
+# Costante per il sistema
+LOCAL_SYSTEM_HINT = (
+    "Sei un modello locale di solo testo: non puoi vedere le immagini direttamente. "
+    "Quando l'utente allega o menziona un'immagine o uno screenshot: per capire il CONTENUTO visivo "
+    "(forme, colori, oggetti, interfacce, grafici, scene) usa il tool vision_local passando image_path; "
+    "per estrarre solo il TESTO da un'immagine usa il tool ocr_image. "
+    "Non tentare mai di leggere un'immagine senza questi tool, perche' fallirebbe con un errore."
+)
+
+
+def inject_system_hint(body: bytes) -> bytes:
+    """
+    Inietta l'hint per la visione nel campo system della richiesta.
+    Idempotente: non duplica l'hint se gia' presente.
+    """
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, ValueError):
+        # Body non e' JSON valido, inoltra invariato
+        return body
+
+    system = data.get("system")
+
+    # Caso assente o None: imposta l'hint
+    if system is None:
+        data["system"] = LOCAL_SYSTEM_HINT
+
+    # Caso stringa: appendi hint se non gia' presente
+    elif isinstance(system, str):
+        if "vision_local" not in system:
+            data["system"] = system + "\n\n" + LOCAL_SYSTEM_HINT
+
+    # Caso lista di blocchi: aggiungi hint in coda se non gia' presente
+    elif isinstance(system, list):
+        hint_gia_presente = any(
+            isinstance(b, dict) and "vision_local" in b.get("text", "")
+            for b in system
+        )
+        if not hint_gia_presente:
+            data["system"] = system + [{"type": "text", "text": LOCAL_SYSTEM_HINT}]
+
+    # Altri tipi (dict, int, etc.): non toccare
+    else:
+        return body
+
+    try:
+        return json.dumps(data).encode()
+    except (TypeError, ValueError):
+        # Ri-serializzazione fallita: non rompere il forward
+        return body
+
+
+# --- Rimozione blocchi immagine (SOLO modalità local): il modello è solo-testo,
+# llama.cpp rifiuta le immagini con 500. Le sostituiamo con una nota che dice al
+# modello di salvarle su file e usare vision_local/ocr_image.
+IMAGE_PLACEHOLDER_NOTE = "[Un'immagine era allegata qui ma non e' visibile a un modello di solo testo. Se devi analizzarla: salvala su file con un comando bash (le immagini incollate non sono su disco), poi usa il tool vision_local con image_path per il contenuto visivo, o ocr_image per estrarne il testo.]"
+
+
+def strip_images_with_note(body: bytes) -> bytes:
+    try:
+        data = json.loads(body)
+    except Exception:
+        return body
+
+    try:
+        if "messages" not in data:
+            return body
+
+        for message in data["messages"]:
+            if isinstance(message.get("content"), list):
+                message["content"] = _process_content_list(message["content"])
+
+        return json.dumps(data).encode()
+    except Exception:
+        return body
+
+
+def _process_content_list(content_list: list) -> list:
+    """Sostituisce blocchi immagine con nota testuale (una per lista)."""
+    has_images = any(isinstance(b, dict) and b.get("type") == "image" for b in content_list)
+
+    # Rimuovi blocchi immagine e processa ricorsivamente tool_result
+    result = []
+    for b in content_list:
+        if not isinstance(b, dict):
+            result.append(b)
+            continue
+        if b.get("type") == "image":
+            continue
+        if b.get("type") == "tool_result" and isinstance(b.get("content"), list):
+            b = dict(b)
+            b["content"] = _process_content_list(b["content"])
+        result.append(b)
+
+    # Una sola nota per messaggio/blocco se c'erano immagini
+    if has_images:
+        result.append({"type": "text", "text": IMAGE_PLACEHOLDER_NOTE})
+
+    return result
+
+
 # ELEMENTO 2
 class _FixedContent:
     def __init__(self, original_content, max_tokens: int, is_sse: bool, log_fn):

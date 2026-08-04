@@ -180,3 +180,107 @@ class TestStopReasonFixed:
         fixed = lb._StopReasonFixed(resp, max_tokens=50, log_fn=lambda msg: log_calls.append(msg))
         await collect(fixed)
         assert len(log_calls) == 0
+
+
+class TestInjectSystemHint:
+    """Test per lb.inject_system_hint: inietta hint nel campo system del JSON."""
+    
+    def test_system_assente(self):
+        """Body senza campo system: viene aggiunto con LOCAL_SYSTEM_HINT."""
+        body = json.dumps({"messages": []}).encode()
+        result = lb.inject_system_hint(body)
+        data = json.loads(result)
+        assert data["system"] == lb.LOCAL_SYSTEM_HINT
+        assert "vision_local" in data["system"]
+    
+    def test_system_stringa(self):
+        """System gia' presente come stringa: hint accodato."""
+        body = json.dumps({"system": "Sei Claude.", "messages": []}).encode()
+        result = lb.inject_system_hint(body)
+        data = json.loads(result)
+        assert data["system"].startswith("Sei Claude.")
+        assert "vision_local" in data["system"]
+    
+    def test_idempotente_stringa(self):
+        """Chiamata ripetuta non duplica il hint."""
+        body = json.dumps({"system": "Sei Claude.", "messages": []}).encode()
+        result = lb.inject_system_hint(lb.inject_system_hint(body))
+        assert result.decode().count("vision_local") == 1
+    
+    def test_system_lista(self):
+        """System come lista di blocchi: hint aggiunto come nuovo blocco."""
+        body = json.dumps({"system": [{"type": "text", "text": "You are X"}], "messages": []}).encode()
+        result = lb.inject_system_hint(body)
+        data = json.loads(result)
+        assert len(data["system"]) == 2
+        assert data["system"][1]["text"] == lb.LOCAL_SYSTEM_HINT
+    
+    def test_idempotente_lista(self):
+        """Idempotenza su lista: hint presente una sola volta."""
+        body = json.dumps({"system": [{"type": "text", "text": "You are X"}], "messages": []}).encode()
+        result = lb.inject_system_hint(lb.inject_system_hint(body))
+        data = json.loads(result)
+        count = sum(1 for b in data["system"] if "vision_local" in b.get("text", ""))
+        assert count == 1
+    
+    def test_body_non_json(self):
+        """Body non JSON: ritornato invariato."""
+        body = b"non json"
+        result = lb.inject_system_hint(body)
+        assert result == body
+    
+    def test_system_dict_invariato(self):
+        """System dict non viene modificato."""
+        body = json.dumps({"system": {"weird": 1}, "messages": []}).encode()
+        result = lb.inject_system_hint(body)
+        assert result == body
+
+
+class TestStripImagesWithNote:
+    """Test per strip_images_with_note: rimozione immagini con nota sostitutiva."""
+
+    def _body(self, content):
+        return json.dumps({"messages": [{"role": "user", "content": content}]}).encode()
+
+    def test_immagine_sostituita(self):
+        """Un blocco image viene sostituito da una nota testuale."""
+        body = self._body([
+            {"type": "text", "text": "cosa vedi?"},
+            {"type": "image", "source": {"type": "base64", "data": "xxx"}},
+        ])
+        c = json.loads(lb.strip_images_with_note(body))["messages"][0]["content"]
+        assert not any(b.get("type") == "image" for b in c)
+        assert any("vision_local" in b.get("text", "") for b in c)
+
+    def test_due_immagini_una_nota(self):
+        """Due blocchi image producono esattamente UNA nota."""
+        body = self._body([
+            {"type": "image", "source": {"data": "xxx"}},
+            {"type": "image", "source": {"data": "yyy"}},
+        ])
+        c = json.loads(lb.strip_images_with_note(body))["messages"][0]["content"]
+        assert sum("vision_local" in b.get("text", "") for b in c) == 1
+
+    def test_nessuna_immagine_invariato(self):
+        """Senza immagini non viene aggiunta alcuna nota."""
+        body = self._body([{"type": "text", "text": "ciao"}])
+        c = json.loads(lb.strip_images_with_note(body))["messages"][0]["content"]
+        assert not any("vision_local" in b.get("text", "") for b in c)
+
+    def test_content_stringa_invariato(self):
+        """Il content stringa resta invariato."""
+        body = self._body("ciao")
+        assert json.loads(lb.strip_images_with_note(body))["messages"][0]["content"] == "ciao"
+
+    def test_body_non_json(self):
+        """Un body non-JSON torna identico."""
+        assert lb.strip_images_with_note(b"xx") == b"xx"
+
+    def test_tool_result_annidato(self):
+        """Immagini dentro tool_result.content vengono sostituite ricorsivamente."""
+        body = self._body([
+            {"type": "tool_result", "tool_use_id": "x",
+             "content": [{"type": "image", "source": {}}]},
+        ])
+        tr = json.loads(lb.strip_images_with_note(body))["messages"][0]["content"][0]
+        assert any("vision_local" in b.get("text", "") for b in tr["content"])

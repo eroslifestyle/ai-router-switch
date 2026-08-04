@@ -857,7 +857,17 @@ async def handle(request):
         try:
             import local_backend as _local_mod
             _local_model = _local_mod.resolve_local_model(_model_override)
-            _local_body = _local_mod.set_body_model(body, _local_model)
+            # Modalità local pura: istruisci il modello (solo testo) a delegare le
+            # immagini ai tool vision_local/ocr_image. mix-al NON riceve l'hint:
+            # lì il THINK è Anthropic, che vede le immagini nativamente.
+            _local_body = body
+            if mode == "local":
+                # Il modello locale è solo-testo: rimuovi le immagini (llama.cpp le
+                # rifiuta con 500) sostituendole con una nota, poi istruisci il
+                # modello a delegarle a vision_local/ocr_image.
+                _local_body = _local_mod.strip_images_with_note(_local_body)
+                _local_body = _local_mod.inject_system_hint(_local_body)
+            _local_body = _local_mod.set_body_model(_local_body, _local_model)
             up = await _local_mod.forward_local(request, _local_body, session,
                                                 _req_model or _local_model, log_fn=log,
                                                 passthrough=True, upstream_model=_local_model)
