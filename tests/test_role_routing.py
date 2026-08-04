@@ -461,3 +461,42 @@ class TestMixALMode:
         result = rr.resolve_route('anthropic', 'code-max')
         assert result[0] == 'anthropic'
         assert result[1] != 'code-max'
+
+
+class TestLocalMode:
+    """Test routing per la modalita' local (pura, tutto sul modello locale)."""
+
+    def test_local_think(self):
+        """Verifica nativizzazione modelli THINK Anthropic a code-max."""
+        assert rr.resolve_route('local', 'claude-opus-5') == ('local', 'code-max')
+        assert rr.resolve_route('local', 'claude-sonnet-5') == ('local', 'code-max')
+        assert rr.resolve_route('local', 'claude-fable-5') == ('local', 'code-max')
+
+    def test_local_act(self):
+        """Verifica nativizzazione modello ACT a code-max."""
+        assert rr.resolve_route('local', 'claude-haiku-4-5-20251001') == ('local', 'code-max')
+
+    def test_local_nativizza_modelli_stranieri(self):
+        """Modelli di altri provider vengono nativizzati a code-max."""
+        assert rr.resolve_route('local', 'MiniMax-M3') == ('local', 'code-max')
+        assert rr.resolve_route('local', 'glm-5.2') == ('local', 'code-max')
+        assert rr.resolve_route('local', 'qwen3.8-max') == ('local', 'code-max')
+
+    def test_local_modello_nativo_non_riscritto(self):
+        """Un modello gia' nativo non va riscritto."""
+        assert rr.resolve_route('local', 'code-max') == ('local', None)
+
+    def test_local_ruolo_sconosciuto(self):
+        """Un modello mai visto in mode local cade su provider local con override None."""
+        assert rr.resolve_route('local', 'un-modello-mai-visto') == ('local', None)
+
+    def test_local_in_valid_modes(self):
+        """Verifica che 'local' sia nei modi validi."""
+        assert 'local' in rr.VALID_MODES
+
+    def test_local_isolamento_nessun_provider_remoto(self):
+        """Verifica isolamento: nessun provider remoto in modalita' local."""
+        modelli = ['claude-opus-5', 'claude-haiku-4-5-20251001', 'MiniMax-M3', 'glm-5.2', 'qwen3.8-max']
+        for modello in modelli:
+            provider, _ = rr.resolve_route('local', modello)
+            assert provider == 'local', f"Provider remoto rilevato per {modello}: {provider}"

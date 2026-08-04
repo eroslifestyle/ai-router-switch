@@ -33,7 +33,8 @@ DESKTOP_NAME = "router-mode-panel"
 # +78: le card sono passate da 90 a 116 (3 righe di card in totale).
 # +124 (CARD_H 116 + SPACING 8): la sezione MULTI e' passata da 1x3 a 2x2
 # con l'arrivo di mix-al (2026-08-04).
-WINDOW_W, WINDOW_H = 480, 856
+# +124 (CARD_H 116 + SPACING 8): la sezione SOLO e passata da 2x2 a 3 righe con l arrivo di local (2026-08-04).
+WINDOW_W, WINDOW_H = 480, 980
 TITLE_H = 38
 # 56 non bastava: il titolo da 24pt piu' il sottotitolo che va a capo sforavano
 # il riquadro, e il testo dell'esecutore usciva tagliato sotto il nome della
@@ -50,6 +51,7 @@ MODES = [
     {"id": "mix-gm", "icon": "🟢🟠", "label": "MixGM", "exec": "GLM-5.2 THINK + MiniMax ACT"},
     {"id": "mix-ag", "icon": "🔵🟢", "label": "MixAG", "exec": "Anthropic THINK + GLM ACT"},
     {"id": "mix-al", "icon": "🔵🖥", "label": "MixAL", "exec": "Anthropic THINK + LLM locale ACT"},
+    {"id": "local", "icon": "🖥️", "label": "Local", "exec": "Tutto su LLM locale (code-max)"},
 ]
 
 def hex_c(h, a=255):
@@ -349,7 +351,7 @@ class Card(QWidget):
 
         solo_grid = QGridLayout()
         solo_grid.setSpacing(SPACING)
-        solo_ids = ["anthropic", "minimax", "glm", "qwen"]
+        solo_ids = ["anthropic", "minimax", "glm", "qwen", "local"]
         self._cards = {}
         for i, mid in enumerate(solo_ids):
             m = next(x for x in MODES if x["id"] == mid)

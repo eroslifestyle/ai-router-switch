@@ -67,6 +67,9 @@ ROUTING_TABLE = {
     ("mix-gm", ROLE_ACT): ("minimax", MINIMAX_ACT),
     ("mix-al", ROLE_THINK): ("anthropic", None),
     ("mix-al", ROLE_ACT): ("local", LOCAL_ACT),
+    # local è una modalità pura, THINK ACT e VERIFY vanno tutti al modello locale code-max su llama.cpp 8083, nessuna escalation remota, isolamento totale, e il _nativize riscrive ogni modello incluso claude-opus del THINK su code-max.
+    ("local", ROLE_THINK): ("local", LOCAL_ACT),
+    ("local", ROLE_ACT): ("local", LOCAL_ACT),
 }
 
 # ── Default provider per mode (used for unknown roles) ────────────────────────
@@ -80,9 +83,10 @@ _MODE_DEFAULT_PROVIDER = {
     "mix-ag": "glm",
     "mix-gm": "minimax",
     "mix-al": "local",
+    "local": "local",
 }
 
-VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-ag", "mix-gm", "mix-al")
+VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-ag", "mix-gm", "mix-al", "local")
 
 
 # ── Native executor per provider ─────────────────────────────────────────────
