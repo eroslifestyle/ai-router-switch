@@ -80,7 +80,7 @@ Fallback chain on error/quota: GLM → MiniMax → Claude.
 **Global** (all apps connected to `:8787`):
 
 ```bash
-ai-mode anthropic      # or: minimax / mix-am / mix-ag / mix-gm / glm
+ai-mode anthropic      # or: minimax / mix-am / mix-ag / mix-gm / glm / qwen
 ai-mode status
 ai-mode log
 ```
