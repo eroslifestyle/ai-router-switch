@@ -384,7 +384,11 @@ class QwenRateLimiter:
 
             wait += random.uniform(0.05, 0.5)
 
-            if waited + wait > budget_sec:
+            # spendi il budget PRIMA di rinunciare, perche a finestra appena riempita
+            # la stima e circa 60s e superava qualsiasi budget, facendo fallire
+            # all istante con waited 0s (2026-08-04); ora si attende e poi si riprova.
+            wait = min(wait, budget_sec - waited)
+            if wait <= 0:
                 raise RateLimitExhausted(
                     f"qwen rate-limit: budget {budget_sec:.0f}s esaurito (waited {waited:.0f}s)"
                 )
