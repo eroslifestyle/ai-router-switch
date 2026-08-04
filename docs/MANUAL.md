@@ -34,7 +34,7 @@ del client, non qui. La mappa è una tabella-dati in `src/role_routing.py`.
 
 ---
 
-## Le Sei Modalità
+## Le Sette Modalità
 
 Ogni modalità è una coppia di destinazioni: una per il modello che **pensa** (THINK)
 e una per il modello che **esegue** (ACT). Il router deduce il ruolo dal nome del
@@ -121,6 +121,19 @@ Accetta l'alias storico `glm-minimax`.
 Accetta l'alias storico `anthropic-glm`.
 
 **Uso:** Claude come orchestratore, GLM per l'esecuzione a basso costo.
+
+### 7. `qwen` — Qwen puro (Alibaba Model Studio)
+
+- **qwen3.8-max** fa il THINK e il VERIFY
+- **qwen3-coder-plus** esegue
+
+Modalità PURA: THINK e ACT restano entrambi su Qwen, non intervengono né Anthropic né MiniMax né GLM.
+
+Endpoint Anthropic-compatible sull'host dedicato del workspace, `https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/apps/anthropic`, che autentica con `x-api-key`. La base URL termina con `/apps/anthropic` SENZA `/v1`. I servizi DashScope nativi, sotto `/api/v1/...`, vogliono invece `Authorization: Bearer`.
+
+Chiave: `secrets.sh get qwen.api_key`. Porta fissa: `8778`. Guida dedicata: `docs/MODALITA-QWEN.md`.
+
+**Uso:** contesti molto lunghi a basso costo — `qwen3-coder-plus` dichiara 1.048.576 token di input.
 
 ---
 
@@ -327,8 +340,8 @@ Testato: `kill -9` su tutti i servizi → ripristino completo in <10 secondi.
 | Modalità non cambia | Connessioni persistenti (~2s) | Aspetta 2 secondi |
 | GLM mode ritorna 500 | `GLM_API_KEY` non impostata | `export GLM_API_KEY=...` |
 | Proxy non risponde | Servizio non avviato | `systemctl --user start ai-router.service` |
-| `!router <modo>` risponde con l'help | Argomento non canonico (es. `mixed`, `inverse`) | Usa un nome canonico o gli alias `mixam`/`mixag`/`mixgm` |
-| Modalità scritta a mano non applicata | Il file di stato accetta solo i 6 nomi canonici | Usa `ai-mode`, che normalizza gli alias |
+| `!router <modo>` risponde con l'help | Argomento non riconosciuto (es. `inverse`, rimossa il 2026-07-26) | Usa uno dei sette nomi canonici, gli alias `mixam`/`mixag`/`mixgm`, oppure gli storici `mixed`/`glm-minimax`/`anthropic-glm`, accettati e normalizzati dal 2026-08-04 |
+| Modalità scritta a mano non applicata | Il file di stato accetta solo i 7 nomi canonici | Usa `ai-mode`, che normalizza gli alias |
 
 ### Debug
 

@@ -43,8 +43,14 @@ your model's settings, skills, agents, MCP, tools, or system prompt.
 | Mode | Behaviour |
 |---|---|
 | `glm` | Role-based: `glm-5.2` THINK → `glm-4.7` ACT |
-| `glm-minimax` | GLM-5.2 THINK → MiniMax ACT (streaming) → GLM verify on complex tasks |
-| `anthropic-glm` | Claude orchestrates → GLM tiered execution → Claude verifies T2 tasks |
+| `mix-gm` | GLM-5.2 THINK → MiniMax M2.7 ACT (alias: `glm-minimax`) |
+| `mix-ag` | Claude THINK → `glm-4.7` ACT (alias: `anthropic-glm`) |
+
+### Qwen (Alibaba Model Studio, Anthropic-compatible endpoint)
+
+| Mode | Behaviour |
+|---|---|
+| `qwen` | Pure: `qwen3.8-max` THINK → `qwen3-coder-plus` ACT |
 
 **GLM cost control:** peak window `14:00–18:00 Asia/Shanghai` (~08:00–12:00 Italy summer).
 In peak, `glm-5.2` / `glm-5-turbo` cost 3× → router automatically downgrades to `glm-4.7`
@@ -63,8 +69,9 @@ Fallback chain on error/quota: GLM → MiniMax → Claude.
 | `8772` | Forced: `minimax` |
 | `8773` | Forced: `mix-am` |
 | `8775` | Forced: `glm` |
-| `8776` | Forced: `glm-minimax` |
-| `8777` | Forced: `anthropic-glm` |
+| `8776` | Forced: `mix-gm` |
+| `8777` | Forced: `mix-ag` |
+| `8778` | Forced: `qwen` |
 
 ---
 
@@ -97,7 +104,7 @@ Per-chat commands are confined to the conversation fingerprint — no cross-talk
 
 ```bash
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8772   # always minimax
-export ANTHROPIC_BASE_URL=http://127.0.0.1:8777   # always anthropic-glm
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8777   # always mix-ag
 ```
 
 ---
@@ -114,7 +121,7 @@ python3 src/ai-router-proxy.py
 #  or: systemctl --user start ai-router-proxy.service  (after setup)
 
 # 3. Switch mode
-ai-mode mixed
+ai-mode mix-am
 ```
 
 GLM modes need a z.ai key: `export GLM_API_KEY=...` or `secrets.sh set glm.api_key ...`.

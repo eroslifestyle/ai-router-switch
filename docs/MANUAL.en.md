@@ -34,7 +34,7 @@ configuration, not here. The map is a data table in `src/role_routing.py`.
 
 ---
 
-## The Six Modes
+## The Seven Modes
 
 Each mode is a pair of destinations: one for the model that **thinks** (THINK) and
 one for the model that **executes** (ACT). The router infers the role from the
@@ -117,6 +117,21 @@ Accepts the historical alias `glm-minimax`.
 Accepts the historical alias `anthropic-glm`.
 
 **Use when:** Claude as the orchestrator, GLM for low-cost execution.
+
+---
+
+### 7. `qwen` — Pure Qwen (Alibaba Model Studio)
+
+- **qwen3.8-max** does THINK and VERIFY
+- **qwen3-coder-plus** executes
+
+PURE mode: both THINK and ACT stay on Qwen — Anthropic, MiniMax and GLM never step in.
+
+Anthropic-compatible endpoint on the workspace-dedicated host, `https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/apps/anthropic`, authenticating with `x-api-key`. The base URL ends with `/apps/anthropic` WITHOUT `/v1`. The native DashScope services, under `/api/v1/...`, require `Authorization: Bearer` instead.
+
+Key: `secrets.sh get qwen.api_key`. Fixed port: `8778`. Dedicated guide: `docs/MODALITA-QWEN.md`.
+
+**Use when:** very long contexts at low cost — `qwen3-coder-plus` declares 1,048,576 input tokens.
 
 ---
 
@@ -323,7 +338,7 @@ Tested: `kill -9` on all services → full restore in <10 seconds.
 | Mode doesn't change | Persistent connections (~2s) | Wait 2 seconds |
 | GLM mode returns 500 | `GLM_API_KEY` not set | `export GLM_API_KEY=...` |
 | Proxy doesn't respond | Service not started | `systemctl --user start ai-router.service` |
-| `!router <mode>` replies with help | Non-canonical argument (e.g. `mixed`, `inverse`) | Use a canonical name or the `mixam`/`mixag`/`mixgm` aliases |
+| `!router <mode>` replies with help | Unrecognised argument (e.g. `inverse`, removed on 2026-07-26) | Use one of the seven canonical names, the `mixam`/`mixag`/`mixgm` aliases, or the historical `mixed`/`glm-minimax`/`anthropic-glm`, accepted and normalised since 2026-08-04 |
 | Hand-written mode not applied | The state file only accepts the 6 canonical names | Use `ai-mode`, which normalises aliases |
 
 ### Debug
