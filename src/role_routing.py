@@ -29,6 +29,10 @@ GLM_ACT = "glm-4.7"
 # 3.7-max. Si usa il piu' nuovo.
 QWEN_THINK = "qwen3.8-max"
 QWEN_ACT = "qwen3-coder-plus"
+# code-max: esecutore coding locale (Qwen3-Coder-Next 80B MXFP4 servito da
+# llama.cpp dietro LiteLLM). Il provider 'local' NON ha un modello THINK:
+# in mix-al il THINK resta su Anthropic.
+LOCAL_ACT = "code-max"
 
 # ── Role constants ─────────────────────────────────────────────────────────────
 ROLE_THINK = "think"
@@ -61,6 +65,8 @@ ROUTING_TABLE = {
     ("mix-ag", ROLE_ACT): ("glm", GLM_ACT),
     ("mix-gm", ROLE_THINK): ("glm", GLM_THINK),
     ("mix-gm", ROLE_ACT): ("minimax", MINIMAX_ACT),
+    ("mix-al", ROLE_THINK): ("anthropic", None),
+    ("mix-al", ROLE_ACT): ("local", LOCAL_ACT),
 }
 
 # ── Default provider per mode (used for unknown roles) ────────────────────────
@@ -73,9 +79,10 @@ _MODE_DEFAULT_PROVIDER = {
     "mix-am": "minimax",
     "mix-ag": "glm",
     "mix-gm": "minimax",
+    "mix-al": "local",
 }
 
-VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-ag", "mix-gm")
+VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-ag", "mix-gm", "mix-al")
 
 
 # ── Native executor per provider ─────────────────────────────────────────────
@@ -86,6 +93,7 @@ _NATIVE_EXECUTOR = {
     "minimax": MINIMAX_ACT,
     "glm": GLM_ACT,
     "qwen": QWEN_ACT,
+    "local": LOCAL_ACT,
 }
 
 
@@ -149,6 +157,12 @@ def model_provider(model_name: str | None) -> str | None:
     # happyhorse* = video (modelli dei servizi nativi Model Studio).
     if model_lower.startswith(("qwen", "qwq", "qvq", "wan", "happyhorse")):
         return "qwen"
+
+    # Modelli locali (LiteLLM/llama.cpp su questa macchina): confronto ESATTO o
+    # startswith, mai `in`, per non catturare per sbaglio altri nomi. Serve
+    # all'isolamento fra modalita': un modello locale non va mai a un provider remoto.
+    if model_lower in ("code-max", "code-max-ollama") or model_lower.startswith("qcnext"):
+        return "local"
 
     return None
 

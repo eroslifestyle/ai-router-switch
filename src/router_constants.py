@@ -101,7 +101,7 @@ HOP_HEADERS = frozenset({
 })
 
 # ── Valid modes ────────────────────────────────────────────────────────────────
-VALID_MODES = ("anthropic", "minimax", "mix-am", "mix-ag", "mix-gm", "glm", "qwen")
+VALID_MODES = ("anthropic", "minimax", "mix-am", "mix-ag", "mix-gm", "glm", "qwen", "mix-al")
 
 # ── Port mode map ─────────────────────────────────────────────────────────────
 PORT_MODE = {
@@ -112,6 +112,7 @@ PORT_MODE = {
     8776: "mix-gm",
     8777: "mix-ag",
     8778: "qwen",
+    8774: "mix-al",   # sandbox: prova mix-al senza toccare :8787
 }
 _pm_override = os.environ.get("AIROUTER_PORT_MODE_JSON", "").strip()
 if _pm_override:
