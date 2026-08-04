@@ -1,0 +1,11 @@
+[Unit]
+Description=Timer self-fixer L2: un tentativo ogni 6 ore (finestre 03/09/15/21 locali)
+
+[Timer]
+# Minuto 17 (fuori dai :00/:30 per non sommare carico al parco macchine).
+OnCalendar=*-*-* 03,09,15,21:17:00
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,14 @@
+[Unit]
+Description=AI Router self-fixer L2 — tenta il fix automatico dei bug ricorrenti (worktree isolato, gate, auto-revert)
+After=ai-router.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/mnt/backup/Dropbox/1 Programmazione/Progetti/ai-router-switch/src
+# Il modulo si risolve dalla WorkingDirectory: `python3 -m` antepone la cwd.
+# --auto: rispetta busy-window, max 2 tentativi per ticket, cooldown 6h, zona proibita.
+ExecStart=/usr/bin/python3 -m self_healing.fixer --auto
+Nice=10
+IOSchedulingClass=idle
+# Un tentativo completo puo' durare ~50 min (agente 30 + gate 15 + healthcheck 8).
+TimeoutStartSec=90min
