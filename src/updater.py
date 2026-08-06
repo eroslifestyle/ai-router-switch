@@ -153,8 +153,8 @@ def update(args: argparse.Namespace) -> int:
 
     n = commits_behind()
     if n == 0:
-        log("Gia aggiornato, nessun commit da applicare.")
-        print("Il repository e gia aggiornato.")
+        log("Già aggiornato, nessun commit da applicare.")
+        print("Il repository è già aggiornato.")
         return 0
 
     print(f"Ci sono {n} commit da applicare.")
@@ -180,7 +180,7 @@ def update(args: argparse.Namespace) -> int:
         pull = git("pull", "--ff-only")
         if pull.returncode != 0:
             log("Pull fallito: storia divergente?")
-            print("Pull fallito: la storia e divergente.")
+            print("Pull fallito: la storia è divergente.")
             print("Intervento manuale richiesto.")
             return 1
 
