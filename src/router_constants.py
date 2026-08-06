@@ -17,7 +17,9 @@ MINIMAX_EXECUTORS = set(
     ).split(",") if m.strip()
 )
 MIXED_EXECUTOR_MODEL = os.environ.get("AIROUTER_MIXED_EXECUTOR", "MiniMax-M2.7")
-NEW_PIPELINE = os.environ.get("AIROUTER_NEW_PIPELINE", "1") == "1"
+# NEW_PIPELINE rimosso il 2026-08-06: era il flag che sceglieva fra la pipeline
+# THINK/ACT/VERIFY e il path legacy. La pipeline non esiste piu' dal 2026-07-25,
+# quindi il flag non aveva piu' un lettore: solo la propria definizione.
 # VERIFY_MODEL rimosso: il router non sceglie il modello Anthropic (gerarchia = config globale).
 ANTHROPIC_DIRECT_URL = os.environ.get("AIROUTER_ANTHROPIC_DIRECT", "https://api.anthropic.com")
 MINIMAX_GENERATIVE_HOST = os.environ.get(

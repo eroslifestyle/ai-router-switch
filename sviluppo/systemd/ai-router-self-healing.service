@@ -12,7 +12,7 @@ WorkingDirectory=@PROJECT_ROOT@/src
 
 # Il modulo si risolve dalla WorkingDirectory: `python3 -m` antepone la cwd a
 # sys.path, e self_healing/ sta dentro src/. Nessun wrapper necessario, a
-# differenza del proxy che deve raggiungere fail_tracker.py nella dir parent.
+# differenza del proxy che deve raggiungere streaming_relay.py nella dir parent.
 #
 # --interval 60 invece del default 30: e un processo di sola analisi, legge il
 # delta di router-usage.jsonl dall'offset persistito e non ha bisogno di essere

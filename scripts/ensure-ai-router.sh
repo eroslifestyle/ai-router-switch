@@ -2,7 +2,7 @@
 # Garantisce che il proxy ai-router sia attivo su :8787 (idempotente).
 # Lanciato da SessionStart di Claude Code.
 # Usa il file originale in src/ con PYTHONPATH esteso, così non servono
-# symlink per ogni modulo (providers/, pipelines/, context_*, fail_tracker, …).
+# symlink per ogni modulo (providers/, pipelines/, context_*, streaming_relay, …).
 # flock -n: se un'altra invocazione concorrente (altra sessione SessionStart)
 # ha già il lock, esci subito invece di rischiare un processo doppio in race
 # con systemd (che su restart uccide tutto su queste porte via ExecStartPre).
