@@ -29,7 +29,6 @@ logs/*.json
 .claude/codemap.json
 .claude/settings.json
 CLAUDE.md
-src//graphify-out/
 
 # router-mode GUI runtime state
 router-mode/widget_state.json
