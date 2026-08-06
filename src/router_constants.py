@@ -1,7 +1,8 @@
 # ~130 lines
 """Router constants extracted from ai-router-proxy.py (~lines 386-476 + scattered scalars)."""
 import os
-from pathlib import Path
+
+import paths
 
 # ── Network ────────────────────────────────────────────────────────────────────
 LISTEN_HOST = os.environ.get("AIROUTER_LISTEN_HOST", "127.0.0.1")
@@ -42,14 +43,16 @@ except Exception:
     QWEN_AVAILABLE = False
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-MODE_FILE = Path.home() / ".claude" / "ai-router-mode"
-KEY_FILE = Path.home() / ".claude" / "secrets" / "secrets.sh"
-LOG_FILE = Path.home() / ".claude" / "logs" / "ai-router.log"
-SIDECAR = Path.home() / ".claude" / "logs" / "router-model-map.jsonl"
-USAGE_SIDECAR = Path.home() / ".claude" / "logs" / "router-usage.jsonl"
-CHAT_STORE = Path.home() / ".claude" / "ai-router-chats.json"
-TRIM_STATE_DIR = Path(os.environ.get("AIROUTER_TRIM_DIR", "/tmp/ai-router-trim"))
-TRIM_STATE_DIR.mkdir(exist_ok=True)
+# Risolti da paths.py: su questa macchina ~/.claude esiste e vince, quindi i
+# valori sono gli stessi di prima; altrove seguono XDG / APPDATA / Library.
+MODE_FILE = paths.mode_file()
+KEY_FILE = paths.secrets_script()
+LOG_FILE = paths.log_file("ai-router.log")
+SIDECAR = paths.log_file("router-model-map.jsonl")
+USAGE_SIDECAR = paths.log_file("router-usage.jsonl")
+CHAT_STORE = paths.chat_store()
+
+TRIM_STATE_DIR = paths.ensure_dir(paths.trim_state_dir())
 
 # ── Limits & constants ─────────────────────────────────────────────────────────
 MINIMAX_CONTEXT_BYTE_LIMIT = int(os.environ.get("AIROUTER_MINIMAX_CONTEXT_LIMIT", "750000"))
@@ -67,7 +70,7 @@ MINIMAX_SAFETY = float(os.environ.get("AIROUTER_MINIMAX_SAFETY", "0.8"))
 MINIMAX_RETRY_CAP_SEC = float(os.environ.get("AIROUTER_MINIMAX_RETRY_CAP_SEC", "90"))
 MINIMAX_CONCURRENCY = int(os.environ.get("AIROUTER_MINIMAX_SEMAPHORE", "8"))
 MINIMAX_BACKOFF_STEPS = (5, 10, 20, 40, 60)
-MINIMAX_ALERTS_LOG = os.path.expanduser("~/.claude/logs/minimax-alerts.log")
+MINIMAX_ALERTS_LOG = str(paths.log_file("minimax-alerts.log"))
 MINIMAX_RETRY_BUDGET_SHORT = float(os.environ.get("AIROUTER_MINIMAX_RETRY_SHORT_SEC", "8"))
 # Fix 2026-07-21: allineato a pipelines/primitives.py (512) — 200 troncava i piani.
 THINK_MAX_TOKENS = int(os.environ.get("AIROUTER_THINK_MAX_TOKENS", "512"))

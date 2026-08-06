@@ -2,12 +2,13 @@
 import asyncio
 import json
 import os
-from pathlib import Path
-from typing import Optional, Callable, AsyncIterator
+from typing import Optional, Callable
 
 import aiohttp
 from aiohttp import web
 
+import paths
+import secrets_provider
 from synthetic_response import synthetic_error
 
 LOCAL_MODEL_CODE = 'code-max'
@@ -17,54 +18,24 @@ LOCAL_MODEL_FALLBACK = LOCAL_MODEL_CODE
 LOCAL_TIMEOUT_SEC = int(os.environ.get('AIROUTER_LOCAL_TIMEOUT_SEC', 600))
 LOCAL_MAX_RETRY = 2
 
-_cache_key: Optional[str] = None
-_cache_base: Optional[str] = None
+def _local_env_file():
+    """File .env dedicato al backend locale: non e quello della config dir."""
+    return paths.secrets_dir() / "local-llm.env"
 
 
 async def get_local_key() -> str:
-    """Legge la chiave API da env o file ~/.claude/secrets/local-llm.env."""
-    global _cache_key
-    if _cache_key is not None:
-        return _cache_key
-    key = os.environ.get('LOCAL_LLM_API_KEY', '')
-    if not key:
-        env_file = Path.home() / '.claude' / 'secrets' / 'local-llm.env'
-        if env_file.exists():
-            for line in env_file.read_text().splitlines():
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                if '=' in line:
-                    k, v = line.split('=', 1)
-                    if k.strip() == 'LOCAL_LLM_API_KEY':
-                        key = v.strip().strip('"').strip("'")
-                        break
-    _cache_key = key
-    return key
+    """Chiave del provider locale: env LOCAL_LLM_API_KEY, poi secrets/local-llm.env."""
+    return await secrets_provider.get_secret_async(
+        "local_llm.api_key", extra_env=("LOCAL_LLM_API_KEY",), env_files=(_local_env_file(),),
+    )
 
 
 def get_local_base() -> str:
-    """Legge l'URL base da env o file, default http://127.0.0.1:4000."""
-    global _cache_base
-    if _cache_base is not None:
-        return _cache_base
-    base = os.environ.get('LOCAL_LLM_API_BASE', '')
-    if not base:
-        env_file = Path.home() / '.claude' / 'secrets' / 'local-llm.env'
-        if env_file.exists():
-            for line in env_file.read_text().splitlines():
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                if '=' in line:
-                    k, v = line.split('=', 1)
-                    if k.strip() == 'LOCAL_LLM_API_BASE':
-                        base = v.strip().strip('"').strip("'")
-                        break
-    if not base:
-        base = 'http://127.0.0.1:4000'
-    _cache_base = base.rstrip('/')
-    return _cache_base
+    """URL base del provider locale; default http://127.0.0.1:4000 se non configurato."""
+    base = secrets_provider.get_secret(
+        "local_llm.api_base", extra_env=("LOCAL_LLM_API_BASE",), env_files=(_local_env_file(),),
+    )
+    return (base or "http://127.0.0.1:4000").rstrip("/")
 
 
 def set_body_model(body: bytes, model: str) -> bytes:

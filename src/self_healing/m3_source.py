@@ -4,7 +4,9 @@ import pathlib
 import datetime
 from typing import Union, Any
 
-DEFAULT_M3_USAGE = pathlib.Path.home() / ".claude" / "m3" / "usage.jsonl"
+import paths
+
+DEFAULT_M3_USAGE = paths.config_home() / "m3" / "usage.jsonl"
 
 
 def _parse_ts(ts: Union[str, int, float, None]) -> float:

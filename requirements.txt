@@ -1,0 +1,7 @@
+# Minimo necessario per far girare il proxy.
+# Gli extra facoltativi (gui con PySide6, dev con pytest e ruff, keyring) stanno in pyproject.toml.
+
+aiohttp
+brotli
+multidict
+Pillow

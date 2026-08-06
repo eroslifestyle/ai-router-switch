@@ -4,8 +4,10 @@ import time
 import json
 import threading
 
-CONTEXT_ALERTS_LOG = os.path.expanduser("~/.claude/logs/context-alerts.log")
-PENDING_DIR = "/tmp/ai-router-ctx-alert"
+import paths
+
+CONTEXT_ALERTS_LOG = str(paths.log_file("context-alerts.log"))
+PENDING_DIR = str(paths.trim_state_dir().parent / "ai-router-ctx-alert")
 ALERT_MIN_INTERVAL_SEC = 120
 
 _last_alert = {}

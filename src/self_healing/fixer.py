@@ -10,14 +10,15 @@ from pathlib import Path
 from urllib.request import urlopen
 from urllib.error import URLError
 
+import paths
 
 # Contratti esterni
 from self_healing.auto_fixer import load_bug_catalog, recurring_bugs, make_ticket
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-STATE_DIR = Path.home() / ".claude" / "self-fix"
-USAGE_SIDECAR = Path.home() / ".claude" / "logs" / "router-usage.jsonl"
-LOG_FILE = Path.home() / ".claude" / "logs" / "self-fix.log"
+STATE_DIR = paths.config_home() / "self-fix"
+USAGE_SIDECAR = paths.log_file("router-usage.jsonl")
+LOG_FILE = paths.log_file("self-fix.log")
 PORTS = (8787, 8771, 8772, 8773, 8775, 8776, 8777, 8778)
 WORKTREE_BASE = REPO_ROOT / ".claude" / "worktrees"
 

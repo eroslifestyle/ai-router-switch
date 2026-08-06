@@ -21,6 +21,8 @@ import time
 import urllib.error
 import urllib.request
 
+import paths
+
 OLLAMA_BASE = os.environ.get("AIROUTER_OLLAMA_BASE", "http://127.0.0.1:11434")
 ORNITH_MODEL = os.environ.get("AIROUTER_ORNITH_MODEL", "ornith-35b")
 WARM_INTERVAL = int(os.environ.get("ORNITH_WARM_INTERVAL", "240"))   # ping ogni 4 min
@@ -30,7 +32,7 @@ GENERATIVE_PATTERN = os.environ.get(
     "ORNITH_GENERATIVE_PATTERN",
     "flux,sdxl,stable-diffusion,tts,whisper,wav2vec,reel,omnia,fal"
 )
-LOG_FILE = os.path.expanduser("~/.claude/logs/ornith-warmer.log")
+LOG_FILE = str(paths.log_file("ornith-warmer.log"))
 
 os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
 _gen_patterns = [p.strip().lower() for p in GENERATIVE_PATTERN.split(",") if p.strip()]

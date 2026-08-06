@@ -1,9 +1,9 @@
 import json
 import time
-from pathlib import Path
+import paths
 
 # Constants
-POLICY_FILE = Path.home() / ".claude" / "router-policy.json"
+POLICY_FILE = paths.policy_file()
 _CACHE_TTL = 5.0  # seconds
 _DEGRADE_THRESHOLD = 0.5
 

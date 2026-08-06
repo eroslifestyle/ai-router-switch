@@ -3,7 +3,13 @@ __pycache__/
 *.log
 *.bak-*
 .venv/
-secrets*
+# "secrets*" era troppo largo: escludeva anche src/secrets_provider.py, che è
+# codice e non contiene alcuna chiave. Si escludono i file e le directory di
+# segreti veri, non ogni nome che comincia per "secret".
+secrets/
+secrets.sh
+secrets.enc
+*secrets.env
 *.key
 .env
 graphify-out/

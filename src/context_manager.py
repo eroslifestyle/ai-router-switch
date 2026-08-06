@@ -164,11 +164,11 @@ class ContextManager:
         """Acquire rate limit slot per il modello. Unificato per backend."""
         provider = self._provider_for_model(model)
         if provider == 'minimax':
-            try:
-                from minimax_rate_limiter import MINIMAX_LIMITER
-                await MINIMAX_LIMITER.acquire(model, est_tokens, budget_sec)
-            except Exception:
-                pass
+            # Nessun rate limiter per MiniMax: il modulo minimax_rate_limiter non
+            # è mai esistito e l'import viveva dentro un except che lo ingoiava
+            # (rimosso il 2026-08-06). Le costanti MINIMAX_RATE_LIMITS restano in
+            # router_constants, usate altrove.
+            pass
         elif provider == 'glm':
             try:
                 from glm_backend import GLM_LIMITER

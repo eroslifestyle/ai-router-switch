@@ -14,10 +14,12 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Optional
 
+import paths
+
 # Constants for default paths
-DEFAULT_JSONL = Path.home() / ".claude" / "logs" / "router-usage.jsonl"
-DEFAULT_STATE = Path.home() / ".claude" / "router-learnings.json"
-DEFAULT_POLICY = Path.home() / ".claude" / "router-policy.json"
+DEFAULT_JSONL = paths.log_file("router-usage.jsonl")
+DEFAULT_STATE = paths.learnings_file()
+DEFAULT_POLICY = paths.policy_file()
 
 # Constants for outcome classification
 FAIL_OUTCOMES = frozenset({"empty", "truncated", "error"})

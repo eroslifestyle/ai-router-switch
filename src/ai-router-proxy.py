@@ -111,7 +111,6 @@ from pipeline_minimax import (
 _load_oauth_token()
 
 # ── Resilience module ──────────────────────────────────────────────────────────
-sys.path.insert(0, str(Path.home() / ".claude" / "scripts"))
 try:
     from ai_router_resilience import Resilience
     _RESILIENCE_AVAILABLE = True
@@ -119,9 +118,9 @@ except Exception as _rexc:
     Resilience = None
     _RESILIENCE_AVAILABLE = False
     # log() non è ancora disponibile qui (import successivo): scrittura diretta
-    # su stderr. Era una lambda usata una sola volta, subito sotto la sua
-    # definizione (finding audit 2026-07-17, BASSA).
-    print(f"[{time.strftime('%H:%M:%S')}] WARN: resilience module non disponibile: {_rexc}",
+    # su stderr. ERRORE e non WARN dal 2026-08-06: senza questo modulo il proxy
+    # perde la validazione OAuth e il crash dump, cioè gira degradato.
+    print(f"[{time.strftime('%H:%M:%S')}] ERRORE: resilience module non disponibile: {_rexc}",
           file=sys.stderr)
 
 RESILIENCE_INST = None
@@ -1011,7 +1010,13 @@ async def _run_multiport():
     loop = asyncio.get_running_loop()
     stop = asyncio.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, stop.set)
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except NotImplementedError:
+            # Windows: il loop non registra handler di segnale. Si ripiega su
+            # signal.signal, che li consegna comunque, usando call_soon_threadsafe
+            # perché il gestore gira fuori dal loop.
+            signal.signal(sig, lambda *_: loop.call_soon_threadsafe(stop.set))
 
     runners = []
     for port in LISTEN_PORTS:

@@ -1,27 +1,40 @@
 # ~80 lines
 """Auth utilities extracted from ai-router-proxy.py (~lines 973-1164)."""
-import asyncio
 import json
 import os
-import threading
-import time
-from pathlib import Path
+import subprocess
+import sys
 
-from router_constants import KEY_FILE
+import paths
+import secrets_provider
 from router_utils import log
 
-_CREDS_PATH = Path.home() / ".claude" / ".credentials.json"
+_CREDS_PATH = paths.credentials_file()
 _oauth_file_cache = {"token": "", "mtime": -1.0}
-_minimax_key_cache = {"key": None, "ts": 0}
-_key_cache_lock = threading.Lock()
+
+
+def _read_oauth_from_keychain() -> str:
+    """Legge il token OAuth dal Keychain macOS, dove Claude Code lo tiene invece che su file."""
+    if sys.platform != "darwin":
+        return ""
+    try:
+        out = subprocess.run(
+            ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode != 0:
+            return ""
+        return json.loads(out.stdout).get("claudeAiOauth", {}).get("accessToken", "")
+    except Exception:
+        return ""
 
 
 def _read_oauth_from_file() -> str:
-    """Legge il token OAuth dal file di credenziali Claude Code con cache mtime."""
+    """Token OAuth da file, con cache su mtime; su macOS ripiega sul Keychain."""
     try:
         mtime = _CREDS_PATH.stat().st_mtime
     except Exception:
-        return _oauth_file_cache["token"]
+        return _oauth_file_cache["token"] or _read_oauth_from_keychain()
     if mtime == _oauth_file_cache["mtime"]:
         return _oauth_file_cache["token"]
     try:
@@ -56,41 +69,7 @@ def _reload_oauth_token() -> bool:
 
 
 async def get_minimax_key() -> str:
-    """Cache-first minimax key: env > secrets.sh subprocess."""
-    now = time.time()
-    with _key_cache_lock:
-        cached = _minimax_key_cache["key"]
-        cached_ts = _minimax_key_cache["ts"]
-        if cached and now - cached_ts < 60:
-            return cached
-    key = os.environ.get("MINIMAX_API_KEY", "")
-    if not key:
-        try:
-            import subprocess
-            try:
-                # chiamata per l'EFFETTO: solleva RuntimeError se non c'e' un loop
-                # attivo, ed e' l'except RuntimeError qui sotto a gestire il caso
-                # sincrono. Il valore non serve: non assegnarlo evita di far credere
-                # il contrario a chi legge (e a ruff, che segnalava F841).
-                asyncio.get_running_loop()
-                proc = await asyncio.to_thread(
-                    lambda: subprocess.check_output(
-                        ["bash", str(KEY_FILE), "get", "minimax.api_key"],
-                        timeout=5, text=True,
-                    )
-                )
-                key = proc.strip() if isinstance(proc, str) else proc.decode().strip()
-            except RuntimeError:
-                proc = subprocess.check_output(
-                    ["bash", str(KEY_FILE), "get", "minimax.api_key"],
-                    text=True, timeout=5,
-                )
-                key = proc.strip()
-        except Exception as e:
-            log(f"ERR get key: {type(e).__name__}")
-            key = ""
-    with _key_cache_lock:
-        if not _minimax_key_cache["key"] or now - _minimax_key_cache["ts"] >= 60:
-            _minimax_key_cache["key"] = key
-            _minimax_key_cache["ts"] = now
-    return key
+    """Chiave MiniMax: env MINIMAX_API_KEY, poi la catena di secrets_provider."""
+    return await secrets_provider.get_secret_async(
+        "minimax.api_key", extra_env=("MINIMAX_API_KEY",),
+    )

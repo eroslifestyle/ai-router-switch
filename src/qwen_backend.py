@@ -23,12 +23,13 @@ import random
 import subprocess
 import time
 from collections import deque
-from pathlib import Path
 
 import aiohttp
 import aiohttp.web
 from aiohttp import ClientTimeout
 
+import paths
+import secrets_provider
 import debug_catalog
 import tool_isolation
 import qwen_tool_trim
@@ -58,8 +59,8 @@ def _non_stream_timeout():
     return ClientTimeout(total=None, sock_connect=15, sock_read=NON_STREAM_SOCK_READ_SEC)
 
 
-KEY_FILE = Path.home() / ".claude" / "secrets" / "secrets.sh"
-ALERT_LOG = Path.home() / ".claude" / "logs" / "qwen-alerts.log"
+KEY_FILE = paths.secrets_script()
+ALERT_LOG = paths.log_file("qwen-alerts.log")
 
 # Costanti di configurazione
 QWEN_REGION = os.environ.get("QWEN_REGION", "ap-southeast-1")
@@ -134,65 +135,19 @@ QWEN_RATE_LIMITS = {
 }
 QWEN_RATE_LIMITS_DEFAULT = (60, 1_000_000)  # Default prudente per modelli non elencati
 
-# Cache per le chiavi (60s)
-_qwen_key_cache = {"key": "", "ts": 0.0}
-_qwen_workspace_cache = {"workspace": "", "ts": 0.0}
-
 
 async def get_qwen_key() -> str:
-    """Ottiene la chiave API Qwen con cache 60s.
-
-    Ordine: QWEN_API_KEY env, poi DASHSCOPE_API_KEY env, poi secrets.sh.
-    """
-    global _qwen_key_cache
-    now = time.monotonic()
-    if now - _qwen_key_cache["ts"] < 60.0:
-        return _qwen_key_cache["key"]
-
-    key = os.environ.get("QWEN_API_KEY") or os.environ.get("DASHSCOPE_API_KEY", "")
-    if not key and KEY_FILE.exists():
-        try:
-            key = await asyncio.to_thread(
-                subprocess.run,
-                ["bash", str(KEY_FILE), "get", "qwen.api_key"],
-                capture_output=True, timeout=5, text=True
-            )
-            if key.returncode == 0:
-                key = key.stdout.strip()
-            else:
-                key = ""
-        except Exception:
-            key = ""
-
-    _qwen_key_cache = {"key": key, "ts": now}
-    return key
+    """Chiave Qwen: env QWEN_API_KEY o DASHSCOPE_API_KEY, poi la catena di secrets_provider."""
+    return await secrets_provider.get_secret_async(
+        "qwen.api_key", extra_env=("QWEN_API_KEY", "DASHSCOPE_API_KEY"),
+    )
 
 
 async def get_qwen_workspace() -> str:
-    """Ottiene l'ID workspace Qwen con cache 60s.
-
-    Ordine: QWEN_WORKSPACE_ID env, poi secrets.sh.
-    """
-    global _qwen_workspace_cache
-    now = time.monotonic()
-    if now - _qwen_workspace_cache["ts"] < 60.0:
-        return _qwen_workspace_cache["workspace"]
-
-    workspace = os.environ.get("QWEN_WORKSPACE_ID", "")
-    if not workspace and KEY_FILE.exists():
-        try:
-            result = await asyncio.to_thread(
-                subprocess.run,
-                ["bash", str(KEY_FILE), "get", "qwen.workspace_id"],
-                capture_output=True, timeout=5, text=True
-            )
-            if result.returncode == 0:
-                workspace = result.stdout.strip()
-        except Exception:
-            workspace = ""
-
-    _qwen_workspace_cache = {"workspace": workspace, "ts": now}
-    return workspace
+    """ID workspace Qwen: env QWEN_WORKSPACE_ID, poi la catena di secrets_provider."""
+    return await secrets_provider.get_secret_async(
+        "qwen.workspace_id", extra_env=("QWEN_WORKSPACE_ID",),
+    )
 
 
 async def qwen_upstream() -> str:

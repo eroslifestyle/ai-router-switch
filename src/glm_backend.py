@@ -27,8 +27,8 @@ import aiohttp
 import aiohttp.web
 from aiohttp import ClientTimeout
 from collections import deque
-from pathlib import Path
-from typing import Optional
+import paths
+import secrets_provider
 
 import tool_isolation
 import debug_catalog
@@ -120,36 +120,17 @@ except Exception:  # pragma: no cover - fail-safe: il backend non deve morire pe
         "glm-4.6V": 104_800, "glm-5V-Turbo": 160_000,
     }
 
-KEY_FILE = Path.home() / ".claude" / "secrets" / "secrets.sh"
-ALERT_LOG = Path.home() / ".claude" / "logs" / "glm-peak-alerts.log"
+KEY_FILE = paths.secrets_script()
+ALERT_LOG = paths.log_file("glm-peak-alerts.log")
 
 # ── API Key ──────────────────────────────────────────────────────────────────
 
-_glm_key_cache: dict = {"key": "", "ts": 0.0}
-
 
 async def get_glm_key() -> str:
-    """Legge la chiave GLM da secrets.sh, con cache 60s."""
-    now = time.time()
-    if _glm_key_cache["key"] and now - _glm_key_cache["ts"] < 60:
-        return _glm_key_cache["key"]
-
-    key = os.environ.get("GLM_API_KEY", "") or os.environ.get("ZAI_API_KEY", "")
-    if not key:
-        try:
-            proc = await asyncio.to_thread(
-                lambda: subprocess.check_output(
-                    ["bash", str(KEY_FILE), "get", "glm.api_key"],
-                    timeout=5, text=True,
-                )
-            )
-            key = proc.strip() if isinstance(proc, str) else proc.decode().strip()
-        except Exception:
-            key = ""
-
-    _glm_key_cache["key"] = key
-    _glm_key_cache["ts"] = now
-    return key
+    """Legge la chiave GLM: env GLM_API_KEY o ZAI_API_KEY, poi la catena di secrets_provider."""
+    return await secrets_provider.get_secret_async(
+        "glm.api_key", extra_env=("GLM_API_KEY", "ZAI_API_KEY"),
+    )
 
 
 # ── GLM Rate Limiter ─────────────────────────────────────────────────────────
