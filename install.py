@@ -128,17 +128,19 @@ def _write_systemd_service(repo_root: Path, wrapper: Path,
                 .replace("@WRAPPER@", str(wrapper))
                 .replace("@CONFIG_HOME@", str(cfg_home))
                 .replace("@PORTS@", PORTS_STR))
-    # Fallback minimo se manca il template
+    # Fallback minimo se manca il template. Allineato alla unit vera nei due
+    # punti che contano: cwd su src/ e Restart=always.
     return f"""[Unit]
 Description=AI Router Proxy
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-ExecStartPre=/bin/sleep 1
-ExecStart={sys.executable} -u {repo_root}/src/ai-router-proxy.py
-WorkingDirectory={repo_root}
-Environment=PYTHONPATH={repo_root}
-Restart=on-failure
+ExecStart={wrapper}
+WorkingDirectory={repo_root}/src
+EnvironmentFile=-{cfg_home}/.env
+Restart=always
+RestartSec=2
 
 [Install]
 WantedBy=default.target
@@ -166,7 +168,10 @@ def setup_linux_service(args: argparse.Namespace) -> None:
     wrapper.write_text(
         f"#!/bin/bash\n"
         f"export PYTHONPATH=\"{repo_root}\"\n"
-        f"cd \"$HOME/.config/ai-router\"\n"
+        # cwd su src/: alcuni moduli si importano per nome piatto e il proxy
+        # gira con WorkingDirectory=src. La versione precedente entrava in
+        # ~/.config/ai-router, che non esiste: il wrapper moriva subito.
+        f"cd \"{repo_root}/src\"\n"
         f"exec {sys.executable} -u \"{proxy}\" \"$@\"\n"
     )
     os.chmod(wrapper, 0o755)
