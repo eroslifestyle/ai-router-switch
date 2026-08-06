@@ -1,0 +1,31 @@
+[Unit]
+Description=llama.cpp — endpoint locale del modello di coding (porta 8083)
+Documentation=https://github.com/eroslifestyle/ai-router-switch
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=@LLAMA_BIN_DIR@
+# --alias deve combaciare con il campo "model" di litellm.config.yaml.
+# --host: 0.0.0.0 serve SOLO se LiteLLM gira in un container e deve raggiungere
+#   l'host via host.docker.internal. Espone il modello a tutta la rete locale:
+#   se LiteLLM gira fuori da Docker metti 127.0.0.1, altrimenti restringi con il
+#   firewall all'interfaccia del bridge Docker.
+# -ngl 99 scarica tutti i layer sulla GPU: abbassalo se la VRAM non basta.
+# -c è la finestra di contesto in token: costa memoria, tarala sul tuo hardware.
+ExecStart=@LLAMA_BIN_DIR@/llama-server \
+  -m @MODEL_PATH@ \
+  --alias @MODEL_ALIAS@ \
+  --host 0.0.0.0 --port 8083 \
+  -ngl 99 -c 131072 -fa on \
+  --cache-type-k q8_0 --cache-type-v q8_0 \
+  --jinja --no-webui
+Restart=always
+RestartSec=10
+TimeoutStartSec=600
+OOMPolicy=continue
+Nice=0
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,37 @@
+# litellm.config.example.yaml - Copia questo file come litellm.config.yaml
+# nella stessa directory del docker-compose.yml del router ai-router-switch.
+#
+# ATTENZIONE: il nome del modello DEVE essere "code-max". Questo è il valore
+# della costante LOCAL_MODEL_CODE in src/local_backend.py, usato dal router.
+# Non cambiarlo o il router non riuscirà a trovare il modello locale.
+#
+# L'api_base punta all'host dove gira llama.cpp, non a un container.
+# La porta 8083 è quella di default di llama-server.
+# Documentazione ufficiale: https://docs.litellm.ai/docs/proxy/configs
+
+model_list:
+  - model_name: code-max
+    litellm_params:
+      # openai/<alias> deve corrispondere all'argomento --alias passato a llama-server
+      # eseguendo: llama-server --alias qcnext-mxfp4 ...
+      model: openai/qcnext-mxfp4
+      # host.docker.internal è il modo in cui il container raggiunge i servizi sull'host.
+      # Fuori da Docker (senza container) usa http://127.0.0.1:8083/v1
+      api_base: http://host.docker.internal:8083/v1
+      # llama.cpp non richiede autenticazione, ma i client OpenAI pretendono
+      # comunque un api_key non vuoto. Il valore è ignorato.
+      api_key: dummy
+      # Disabilita streaming per compatibilità con alcuni client.
+      # Generazioni lunghe di modelli locali superano facilmente i timeout di default.
+      stream: false
+      timeout: 600
+
+general_settings:
+  # La master_key vera sta nel file litellm.env, mai qui in chiaro.
+  # Il proxy LiteLLM legge LITELLM_MASTER_KEY dall'ambiente.
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+# Per aggiungere altri modelli serviti da Ollama sulla stessa macchina,
+# aggiungi voci a model_list con la forma: model: ollama_chat/<nome-modello>
+# e api_base: http://host.docker.internal:11434 (o 127.0.0.1:11434 fuori da Docker).
+# Esempio: model: ollama_chat/llama3 per un modello Ollama già avviato.

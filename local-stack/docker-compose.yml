@@ -1,0 +1,58 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-litellm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-litellm}
+      POSTGRES_DB: ${POSTGRES_DB:-litellm}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - litellm-net
+    # Il database NON è esposto su nessuna porta: vi parla solo LiteLLM
+    # sulla rete interna, nessun accesso esterno necessario né sicuro.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-litellm}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    command: --config /app/config.yaml --port 4000 --num_workers 4
+    ports:
+      # La porta 4000 è pubblicata SOLO su 127.0.0.1: anche in caso di
+      # esposizione accidentale su reti pubbliche, LiteLLM resterebbe
+      # raggiungibile solo da localhost, proteggendo da accessi indesiderati.
+      - "127.0.0.1:4000:4000"
+    volumes:
+      - ./litellm.config.yaml:/app/config.yaml:ro
+      - ./litellm.env:/app/.env:ro
+    env_file:
+      - ./litellm.env
+    networks:
+      - litellm-net
+    depends_on:
+      db:
+        condition: service_healthy
+    # Il modello locale (llama.cpp o Ollama) gira sull'host, non in container.
+    # Questa mappatura permette a LiteLLM di raggiungere l'host al fine di
+    # chiamare l'API del modello locale. Nella config di LiteLLM la api_base
+    # del modello deve puntare a http://host.docker.internal:8083/v1
+    # per parlare con llama.cpp sull'host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:4000/health/liveliness"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+networks:
+  litellm-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
