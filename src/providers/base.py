@@ -5,8 +5,11 @@ import json
 import re
 
 # ── Status sets ──────────────────────────────────────────────────────────────
-FALLBACK_STATUSES = {401, 403, 408, 409, 413, 429, 500, 502, 503, 504, 529}
-MINIMAX_FALLBACK_STATUSES = FALLBACK_STATUSES - {429}
+# Queste non sono definizioni ma re-export dalla fonte unica in router_constants.
+# La copia locale di FALLBACK_STATUSES non conteneva il 404; reintrodurre quel
+# valore significava reintrodurre un bug già corretto (quello del "selected model").
+# router_constants non importa providers, quindi non si crea un ciclo.
+from router_constants import FALLBACK_STATUSES, MINIMAX_FALLBACK_STATUSES  # noqa: F401
 
 # ── T2 classification ─────────────────────────────────────────────────────────
 T2_KEYWORDS = (
@@ -37,11 +40,26 @@ def extract_last_user_text(data: dict) -> str:
     return ""
 
 def _text_from_message(data: dict) -> str:
-    """Estrae il testo dalla risposta message."""
-    try:
-        return data["content"][0]["text"]
-    except (KeyError, IndexError, TypeError):
-        return ""
+    """Estrae il testo da un message dict, inclusi i blocchi thinking.
+
+    La versione precedente leggeva solo content[0]["text"] e restituiva stringa
+    vuota quando la risposta cominciava con un blocco thinking: è la causa nota
+    delle risposte vuote. Allineata alle copie vive di pipeline_anthropic e
+    forward_anthropic, che sono identiche fra loro.
+    """
+    out = []
+    for b in (data or {}).get("content", []):
+        if isinstance(b, dict):
+            t = b.get("type", "")
+            if t == "text":
+                out.append(b.get("text", ""))
+            elif t == "thinking":
+                inner = b.get("thinking", {})
+                if isinstance(inner, dict):
+                    out.append(inner.get("thinking", ""))
+                elif isinstance(inner, str):
+                    out.append(inner)
+    return "".join(out)
 
 # ── Context checks ────────────────────────────────────────────────────────────
 def _is_context_too_large_for_minimax(body: bytes) -> bool:
@@ -55,19 +73,20 @@ def _is_context_too_large_for_minimax(body: bytes) -> bool:
     return len(body) > MINIMAX_CONTEXT_BYTE_LIMIT
 
 def _is_context_exceed_400(body: bytes) -> tuple[bool, str]:
-    """Rileva errore context window 400 upstream. Ritorna (is_context, snippet)."""
+    """Rileva errore context window 400 upstream. Ritorna (is_context, snippet).
+
+    I marker erano una copia locale, una delle quattro divergenti trovate il
+    2026-08-06: ora la lista è unica, in router_constants.
+    """
+    from router_constants import CONTEXT_EXCEED_MARKERS
     low = body.lower()
-    # Lista e' l'UNIONE dei marker delle due copie; too long e maximum context coprono
-    # l'errore reale di Anthropic sul prompt troppo lungo
-    markers = [b"context window", b"reached its context", b"context_exceeded",
-               b"context limit", b"exceeds limit", b"2013",
-               b"context_length", b"too long", b"maximum context"]
-    for m in markers:
+    for m in CONTEXT_EXCEED_MARKERS:
         idx = low.find(m)
         if idx >= 0:
-            snippet = body[max(0, idx-20):idx+80].decode("utf-8", errors="replace")
+            snippet = body[max(0, idx - 20):idx + 80].decode("utf-8", errors="replace")
             return True, snippet
     return False, ""
+
 
 # ── Body manipulation ────────────────────────────────────────────────────────
 def _body_has_images(orig: dict) -> bool:

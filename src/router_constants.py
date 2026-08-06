@@ -138,6 +138,37 @@ FALLBACK_STATUSES = {401, 403, 404, 408, 409, 413, 429, 500, 502, 503, 504, 529}
 # era il finding audit 2026-07-17, MEDIA.)
 MINIMAX_FALLBACK_STATUSES = FALLBACK_STATUSES - {429}
 
+# ── Marker context-exceeded ───────────────────────────────────────────────────
+# Questi marker riconoscono nel corpo di un errore 400 il caso in cui il prompt
+# supera la finestra di contesto. Esistevano in quattro copie divergenti, due
+# vive (dentro forward_anthropic e in ContextManager._is_context_error) e due
+# usate solo dai test (providers.base e pipeline_anthropic). La lista di
+# forward_anthropic non conteneva "too long", quindi non riconosceva l'errore
+# più frequente di Anthropic, che nei log di produzione si presenta come "prompt
+# is too long: 232125 tokens > 200000 maximum": dieci occorrenze su dodici. Il
+# retry che rimuove le immagini e ritenta non scattava mai per quel caso. Questa
+# è la lista unica, unione di tutte e quattro, in byte minuscoli perché il
+# confronto avviene sul corpo grezzo già portato a minuscolo.
+CONTEXT_EXCEED_MARKERS = (
+    b"context window",
+    b"context_window_exceeded",
+    b"reached its context",
+    b"context_exceeded",
+    b"context limit",
+    b"context_length",
+    b"exceeds limit",
+    b"maximum context",
+    b"too long",
+    b"2013",
+)
+
+def is_context_exceeded_body(body: bytes) -> bool:
+    """True se il corpo dell'errore contiene uno dei marker di contesto esaurito."""
+    if not body:
+        return False
+    low = body.lower() if isinstance(body, bytes) else str(body).lower().encode()
+    return any(m in low for m in CONTEXT_EXCEED_MARKERS)
+
 # ── Generative paths ──────────────────────────────────────────────────────────
 _GENERATIVE_PATHS = {
     "m3-image": "/v1/image_generation",

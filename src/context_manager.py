@@ -127,18 +127,11 @@ class ContextManager:
 
     def _is_context_error(self, body: bytes) -> bool:
         """Rileva errore context window nella risposta upstream."""
-        low = body.lower() if isinstance(body, bytes) else body.lower()
-        markers = (
-            b"context window",
-            b"reached its context",
-            b"context_exceeded",
-            b"context_window_exceeded",
-            b"context limit",
-            b"exceeds limit",
-            b"2013",
-            b"too long",
-        )
-        return any(m in low for m in markers)
+        # I marker erano definiti qui in una copia locale, una delle quattro
+        # divergenti trovate il 2026-08-06: questa non conteneva "context_length"
+        # né "maximum context". Ora la lista è unica, in router_constants.
+        from router_constants import is_context_exceeded_body
+        return is_context_exceeded_body(body)
 
     # ── Reassign (AQ-6) ───────────────────────────────────────────────────────
 

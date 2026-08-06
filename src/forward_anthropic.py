@@ -9,7 +9,7 @@ import cache_optimizer
 
 from router_constants import (
     ANTHROPIC_UPSTREAM, ANTHROPIC_DIRECT_URL, HOP_HEADERS,
-    ANTHROPIC_UNSUPPORTED_FIELDS,
+    ANTHROPIC_UNSUPPORTED_FIELDS, is_context_exceeded_body,
 )
 from router_utils import (
     _analyze_body_structure, SENT_ANALYSIS, _DEBUG_LAST_SENT, log,
@@ -257,10 +257,11 @@ async def forward_anthropic(request, body, session):
                 raw_err = b""
             await up.release()
             log(f"[forward_anthropic] 400 body: {_readable_err(raw_err)[:300]}")
-            low = raw_err.lower()
-            is_ctx = (b"context window" in low or b"reached its context" in low
-                      or b"context_exceeded" in low or b"context limit" in low
-                      or b"exceeds limit" in low)
+            # I marker vivevano qui in una copia che non conteneva "too long",
+            # quindi l'errore più frequente di Anthropic, "prompt is too long:
+            # N tokens > M maximum", non veniva riconosciuto e il retry senza
+            # immagini non scattava mai. Ora la lista è unica, in router_constants.
+            is_ctx = is_context_exceeded_body(raw_err)
             if is_ctx:
                 from providers.base import strip_images_body
                 stripped = strip_images_body(safe_body)
