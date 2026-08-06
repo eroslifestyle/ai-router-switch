@@ -13,7 +13,6 @@ MINIMAX_MODEL = os.environ.get("AIROUTER_MINIMAX_MODEL", "MiniMax-M3")
 # MINIMAX_ORCHESTRATOR_MODEL e MINIMAX_EXECUTORS rimossi il 2026-08-07: erano
 # residui della pipeline THINK/ACT tolta dal proxy il 2026-07-25, mai letti da
 # nessuno da allora. Il ruolo lo decide role_routing.resolve_route.
-MIXED_EXECUTOR_MODEL = os.environ.get("AIROUTER_MIXED_EXECUTOR", "MiniMax-M2.7")
 # NEW_PIPELINE rimosso il 2026-08-06: era il flag che sceglieva fra la pipeline
 # THINK/ACT/VERIFY e il path legacy. La pipeline non esiste piu' dal 2026-07-25,
 # quindi il flag non aveva piu' un lettore: solo la propria definizione.
@@ -71,12 +70,9 @@ MINIMAX_CONCURRENCY = int(os.environ.get("AIROUTER_MINIMAX_SEMAPHORE", "8"))
 MINIMAX_BACKOFF_STEPS = (5, 10, 20, 40, 60)
 MINIMAX_ALERTS_LOG = str(paths.log_file("minimax-alerts.log"))
 MINIMAX_RETRY_BUDGET_SHORT = float(os.environ.get("AIROUTER_MINIMAX_RETRY_SHORT_SEC", "8"))
-# Fix 2026-07-21: allineato a pipelines/primitives.py (512) — 200 troncava i piani.
-THINK_MAX_TOKENS = int(os.environ.get("AIROUTER_THINK_MAX_TOKENS", "512"))
 # THINK_MODEL / THINK_MODEL_ANTHROPIC rimossi: il router usa SEMPRE orig_model
 # (il modello scelto dalla config globale del client). La gerarchia THINK/exec/escalation
 # vive SOLO nella config globale ~/.claude/CLAUDE.md, mai nel router (tubo trasparente).
-THINK_TIMEOUT_SEC = float(os.environ.get("AIROUTER_THINK_TIMEOUT_SEC", "12"))
 # Timeout di lettura per le richieste NON-streaming (2026-07-28).
 # La sessione condivisa usa sock_read=120: su una risposta non-streaming l'upstream
 # non manda un solo byte finche' la generazione non e' conclusa, quindi quei 120s
@@ -174,8 +170,8 @@ _GENERATIVE_PATHS = {
     "m3-tts":   "/v1/t2a_v2",
 }
 
-# ── Claude Code OAuth marker ───────────────────────────────────────────────────
-CLAUDE_CODE_MARKER = "You are Claude Code, Anthropic's official CLI for Claude."
+# CLAUDE_CODE_MARKER rimossa il 2026-08-07: nessun lettore. L'autenticazione
+# legge il token OAuth da file o Keychain (router_auth.py), non dal system prompt.
 ANTHROPIC_UNSUPPORTED_FIELDS = ("context_management", "thinking", "output_config")
 
 # ── Health-check paths ─────────────────────────────────────────────────────────
