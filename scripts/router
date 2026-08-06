@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# La bash di Claude Code interpreta !router mix-am come comando shell,
+# quindi digitare !router mix-am nel CLI non raggiunge mai il proxy.
+# Questo comando imposta la modalità per la sessione corrente passando
+# dal parser vero, senza toccare il file di modalità globale, che
+# invece è quello che cambia ai-mode.
+# Uso: router <modalita>
+
+set -euo pipefail
+
+resolve_repo_root(){
+  local script_path="$1"
+  local dir
+  if command -v readlink &>/dev/null && readlink -f "$script_path" &>/dev/null; then
+    dir="$(dirname "$(readlink -f "$script_path")")"
+  else
+    while [ -L "$script_path" ]; do
+      local link; link="$(readlink "$script_path")" || break
+      case "$link" in
+        /*) script_path="$link" ;;
+        *)  script_path="$(dirname "$script_path")/$link" ;;
+      esac
+    done
+    dir="$(cd "$(dirname "$script_path")" && pwd -P)"
+  fi
+  dirname "$dir"
+}
+
+REPO_ROOT="$(resolve_repo_root "$0")"
+CLI="$REPO_ROOT/src/router_cli.py"
+
+if [ ! -f "$CLI" ]; then
+  echo "router_cli.py non trovato: $CLI" >&2
+  exit 1
+fi
+
+if command -v python3 &>/dev/null; then
+  PY=python3
+elif command -v python &>/dev/null; then
+  PY=python
+else
+  echo "Serve Python 3 per eseguire router_cli.py" >&2
+  exit 1
+fi
+
+exec "$PY" "$CLI" "$@"

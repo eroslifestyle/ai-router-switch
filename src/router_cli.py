@@ -58,6 +58,15 @@ def main():
         sys.exit(2)
 
     print(_router_reply_text(cmd_parsed, fp))
+
+    # Il parser risponde 'help' in due casi diversi: quando l'utente
+    # scrive esplicitamente 'help' e quando l'argomento passato non
+    # è riconosciuto. Qui distinguiamo usando sys.argv[1]: se non è
+    # 'help' significa che l'utente ha passato un argomento sbagliato
+    # e usciamo con codice 2. Altrimenti è una richiesta di aiuto
+    # legittima e usciamo con codice 0.
+    if cmd_parsed.get("action") == "help" and sys.argv[1] != "help":
+        sys.exit(2)
     sys.exit(0)
 
 

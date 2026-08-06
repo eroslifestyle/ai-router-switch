@@ -184,6 +184,15 @@ The proxy identifies the conversation from the Claude Code session fingerprint.
 `glm-minimax`, `anthropic-glm` that `ai-mode` does accept — replies with the help
 text and **changes nothing**.
 
+**From the terminal, for a single session**
+
+```bash
+scripts/router qwen   # sets qwen only for this session
+scripts/router        # lists the accepted modes
+```
+
+The command exists because a leading exclamation mark is intercepted by the CLI shell and `!router …` never reaches the proxy; the session is identified by the `CLAUDE_CODE_SESSION_ID` environment variable and, if it is missing, the command reports it and suggests `ai-mode` for the global switch. Unlike `ai-mode`, `scripts/router` does not touch the global mode file, so it does not shift the other chats.
+
 > **Voice switching removed on 2026-07-26.** The proxy also recognised natural-language
 > phrases (*"usa solo claude"*), but it switched modes **without authorisation**: a
 > short message with a common verb plus a mode word anywhere in the text was enough,
