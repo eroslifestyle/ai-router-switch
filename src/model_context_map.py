@@ -79,6 +79,11 @@ MODEL_CONTEXT_MAP = {
     "qwen-flash": 1_000_000,       # dichiarato dal gateway
     "qwen3-vl-plus": 260_096,      # dichiarato dal gateway
     "qwen-max": 30_720,            # dichiarato dal gateway
+    # Modello locale servito da llama.cpp (unit llama-qcnext.service): il valore e'
+    # quello di -c nella unit, confermato dal backend vivo via /props. Senza questa
+    # voce ereditava il default 200.000 e il gate lasciava passare corpi che il
+    # backend non regge.
+    "code-max": 131_072,
 }
 
 BUFFER_PERCENT = 20  # 20% libero per output
