@@ -181,7 +181,7 @@ Il proxy riconosce il fingerprint della conversazione dalla sessione Claude Code
 !router help           # help inline
 ```
 
-**Argomenti accettati:** i 6 nomi canonici più gli alias `mixam`/`mixag`/`mixgm`.
+**Argomenti accettati:** i 9 nomi canonici più gli alias `mixam`/`mixag`/`mixgm`.
 Qualsiasi altro argomento — inclusi i legacy `mixed`, `glm-minimax`, `anthropic-glm`,
 che pure `ai-mode` accetta — risponde con l'help **senza cambiare nulla**.
 
@@ -326,7 +326,7 @@ Testato: `kill -9` su tutti i servizi → ripristino completo in <10 secondi.
 
 - **Non killare** il servizio senza piano di ripristino immediato
 - **Non modificare** manualmente i file unit systemd senza capire le conseguenze
-- **Non puntare** direttamente a `:8790` o `:8791` — usare sempre `:8787` o le porte fisse
+- **Endpoint diretti**: non puntare le applicazioni direttamente agli endpoint dei provider, ma sempre alla porta `8787` oppure a una delle porte fisse per modalità, altrimenti si salta il routing.
 - **Non cambiare** modalità in produzione senza prima provarla su una porta fissa
 - **Non ignorare** gli allarmi del watchdog
 
@@ -340,8 +340,8 @@ Testato: `kill -9` su tutti i servizi → ripristino completo in <10 secondi.
 | Modalità non cambia | Connessioni persistenti (~2s) | Aspetta 2 secondi |
 | GLM mode ritorna 500 | `GLM_API_KEY` non impostata | `export GLM_API_KEY=...` |
 | Proxy non risponde | Servizio non avviato | `systemctl --user start ai-router.service` |
-| `!router <modo>` risponde con l'help | Argomento non riconosciuto (es. `inverse`, rimossa il 2026-07-26) | Usa uno dei sette nomi canonici, gli alias `mixam`/`mixag`/`mixgm`, oppure gli storici `mixed`/`glm-minimax`/`anthropic-glm`, accettati e normalizzati dal 2026-08-04 |
-| Modalità scritta a mano non applicata | Il file di stato accetta solo i 7 nomi canonici | Usa `ai-mode`, che normalizza gli alias |
+| `!router <modo>` risponde con l'help | Argomento non riconosciuto (es. `inverse`, rimossa il 2026-07-26) | Usa uno dei nove nomi canonici, gli alias `mixam`/`mixag`/`mixgm`, oppure gli storici `mixed`/`glm-minimax`/`anthropic-glm`, accettati e normalizzati dal 2026-08-04 |
+| Modalità scritta a mano non applicata | Il file di stato accetta solo i 9 nomi canonici | Usa `ai-mode`, che normalizza gli alias |
 
 ### Debug
 
@@ -366,20 +366,27 @@ curl http://127.0.0.1:8787/__router_health
 | Variabile | Default | Descrizione |
 |-----------|---------|------------|
 | `AIROUTER_PORT` | `8787` | Porta base |
-| `AIROUTER_ANTHROPIC_UPSTREAM` | `http://127.0.0.1:8791` | Backend Anthropic |
-| `AIROUTER_MINIMAX_UPSTREAM` | `http://127.0.0.1:8790` | Backend MiniMax |
 | `AIROUTER_LISTEN_HOST` | `127.0.0.1` | Interfaccia di ascolto |
-| `AIROUTER_MINIMAX_MODEL` | `MiniMax-M2.7` | Modello MiniMax per l'ACT |
-| `AIROUTER_NEW_PIPELINE` | `1` | Abilita il path di routing corrente |
-| `AIROUTER_TRANSITION_FILTERS` | `1` | Filtri di transizione MiniMax (drop-in systemd) |
-| `GLM_API_KEY` | — | Chiave z.ai per modalità GLM |
-| `AIROUTER_DEBUG_TOKEN` | — | credenziali per le rotte `/debug/`, richieste solo se l'ascolto non è su loopback |
+| `AIROUTER_ANTHROPIC_UPSTREAM` | `https://api.anthropic.com` | Endpoint Anthropic |
+| `AIROUTER_MINIMAX_UPSTREAM` | `https://api.minimaxi.chat/anthropic` | Endpoint MiniMax |
+| `AIROUTER_MINIMAX_MODEL` | `MiniMax-M3` | Modello MiniMax di destinazione predefinito |
+| `AIROUTER_MIXED_EXECUTOR` | `MiniMax-M2.7` | Esecutore MiniMax nelle modalità miste |
+| `AIROUTER_TRANSITION_FILTERS` | `0` | Filtri di transizione MiniMax; la unit systemd del progetto lo porta a 1 |
+| `GLM_API_KEY` | — | Chiave z.ai per le modalità GLM |
+| `AIROUTER_DEBUG_TOKEN` | — | Credenziali per le rotte /debug/ e /admin/, richieste solo se l'ascolto non è su loopback |
 
 **Rotte /debug/ ed esposizione di rete**: le rotte con prefisso `/debug/` restituiscono il contenuto delle richieste che attraversano il router, e in particolare `/debug/trace` include il corpo integrale dell'ultima richiesta inoltrata all'upstream, quindi system prompt e conversazione, mentre `/debug/errors` arriva a 2000 caratteri del corpo di errore dell'upstream. Finché `AIROUTER_LISTEN_HOST` resta su loopback quelle rotte non sono raggiungibili dalla rete e restano libere. Appena viene impostato un indirizzo non-loopback, il router pretende `AIROUTER_DEBUG_TOKEN`: senza token configurato ogni rotta `/debug/` risponde 404, con il token configurato lo si presenta nell'header `X-Airouter-Debug-Token`, come `Authorization: Bearer <token>`, oppure come parametro `?token=`. La rotta `/__router_health` non è interessata. Lo stesso guard copre anche le rotte con prefisso `/admin/`, fra cui `/admin/mode/<modo>` che riscrive la modalità globale del router; senza il guard, un router esposto in rete permetterebbe a chiunque di dirottare la modalità di tutte le chat. Il guard è un middleware aiohttp in `src/router_debug.py`, coperto da `sviluppo/tests/test_debug_auth.py`.
 
-Verificate una per una contro il codice il 2026-07-26. Sono state rimosse dalla
-tabella `AIROUTER_MIXED_PRIMARY` e `AIROUTER_VERIFY_MODEL`: **nessuna delle due ha
-un lettore nel sorgente**, erano residui di pipeline non più esistenti.
+Verificate una per una contro il codice il 2026-08-06, leggendo i valori dal
+modulo invece che dalla memoria: tre default erano invecchiati (i due upstream
+puntavano ancora a `127.0.0.1:8791` e `127.0.0.1:8790`, che nel codice non
+compaiono più, e il modello MiniMax era fermo a `MiniMax-M2.7`). Per
+`AIROUTER_TRANSITION_FILTERS` la colonna diceva `1`, che è il valore imposto
+dalla unit systemd, non il default del codice, che è `0`.
+
+Rimosse dalla tabella `AIROUTER_MIXED_PRIMARY`, `AIROUTER_VERIFY_MODEL` e, dal
+2026-08-06, `AIROUTER_NEW_PIPELINE`: **nessuna delle tre ha un lettore nel
+sorgente**, erano residui di pipeline non più esistenti.
 
 ---
 

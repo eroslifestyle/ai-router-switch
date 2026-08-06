@@ -179,7 +179,7 @@ The proxy identifies the conversation from the Claude Code session fingerprint.
 !router help           # inline help
 ```
 
-**Accepted arguments:** the 6 canonical names plus the aliases
+**Accepted arguments:** the 9 canonical names plus the aliases
 `mixam`/`mixag`/`mixgm`. Any other argument — including the legacy `mixed`,
 `glm-minimax`, `anthropic-glm` that `ai-mode` does accept — replies with the help
 text and **changes nothing**.
@@ -324,7 +324,7 @@ Tested: `kill -9` on all services → full restore in <10 seconds.
 
 - **Don't kill** the service without an immediate recovery plan
 - **Don't edit** systemd unit files manually without understanding the consequences
-- **Don't point** directly to `:8790` or `:8791` — always use `:8787` or fixed ports
+- **Direct endpoints**: do not point applications directly at the provider endpoints; always use port `8787` or one of the fixed per-mode ports, otherwise routing is bypassed.
 - **Don't change** mode in production without first trying it on a fixed port
 - **Don't ignore** watchdog alarms
 
@@ -337,12 +337,9 @@ Tested: `kill -9` on all services → full restore in <10 seconds.
 | All responses 401 | Anthropic key expired/absent | Switch to `minimax` or `glm`, or update secrets |
 | Mode doesn't change | Persistent connections (~2s) | Wait 2 seconds |
 | GLM mode returns 500 | `GLM_API_KEY` not set | `export GLM_API_KEY=...` |
-| `AIROUTER_DEBUG_TOKEN` | — | credentials for the `/debug/` routes, required only when not listening on loopback |
-
-**The /debug/ routes and network exposure**: routes prefixed with `/debug/` return the contents of the requests passing through the router, and in particular `/debug/trace` includes the full body of the last request forwarded to the upstream, that is system prompt and conversation, while `/debug/errors` returns up to 2000 characters of the upstream error body. As long as `AIROUTER_LISTEN_HOST` stays on loopback those routes are not reachable from the network and stay open. As soon as a non-loopback address is set, the router requires `AIROUTER_DEBUG_TOKEN`: with no token configured every `/debug/` route answers 404, with the token configured it is presented in the `X-Airouter-Debug-Token` header, as `Authorization: Bearer <token>`, or as the `?token=` query parameter. The `/__router_health` route is not affected. The same guard also covers routes prefixed with `/admin/`, including `/admin/mode/<mode>` which rewrites the router's global mode; without it, a network-exposed router would let anyone hijack the mode of all chats. The guard is an aiohttp middleware in `src/router_debug.py`, covered by `sviluppo/tests/test_debug_auth.py`.
 | Proxy doesn't respond | Service not started | `systemctl --user start ai-router.service` |
-| `!router <mode>` replies with help | Unrecognised argument (e.g. `inverse`, removed on 2026-07-26) | Use one of the seven canonical names, the `mixam`/`mixag`/`mixgm` aliases, or the historical `mixed`/`glm-minimax`/`anthropic-glm`, accepted and normalised since 2026-08-04 |
-| Hand-written mode not applied | The state file only accepts the 6 canonical names | Use `ai-mode`, which normalises aliases |
+| `!router <mode>` replies with help | Unrecognised argument (e.g. `inverse`, removed on 2026-07-26) | Use one of the nine canonical names, the `mixam`/`mixag`/`mixgm` aliases, or the historical `mixed`/`glm-minimax`/`anthropic-glm`, accepted and normalised since 2026-08-04 |
+| Hand-written mode not applied | The state file only accepts the 9 canonical names | Use `ai-mode`, which normalises aliases |
 
 ### Debug
 
@@ -367,17 +364,27 @@ curl http://127.0.0.1:8787/__router_health
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AIROUTER_PORT` | `8787` | Base port |
-| `AIROUTER_ANTHROPIC_UPSTREAM` | `http://127.0.0.1:8791` | Anthropic backend |
-| `AIROUTER_MINIMAX_UPSTREAM` | `http://127.0.0.1:8790` | MiniMax backend |
 | `AIROUTER_LISTEN_HOST` | `127.0.0.1` | Listen interface |
-| `AIROUTER_MINIMAX_MODEL` | `MiniMax-M2.7` | MiniMax model for ACT |
-| `AIROUTER_NEW_PIPELINE` | `1` | Enables the current routing path |
-| `AIROUTER_TRANSITION_FILTERS` | `1` | MiniMax transition filters (systemd drop-in) |
+| `AIROUTER_ANTHROPIC_UPSTREAM` | `https://api.anthropic.com` | Anthropic endpoint |
+| `AIROUTER_MINIMAX_UPSTREAM` | `https://api.minimaxi.chat/anthropic` | MiniMax endpoint |
+| `AIROUTER_MINIMAX_MODEL` | `MiniMax-M3` | Default MiniMax target model |
+| `AIROUTER_MIXED_EXECUTOR` | `MiniMax-M2.7` | MiniMax executor in mixed modes |
+| `AIROUTER_TRANSITION_FILTERS` | `0` | MiniMax transition filters; the project systemd unit sets it to 1 |
 | `GLM_API_KEY` | — | z.ai key for GLM modes |
+| `AIROUTER_DEBUG_TOKEN` | — | Credentials for `/debug/` and `/admin/` routes, required only if not listening on loopback |
 
-Checked one by one against the source on 2026-07-26. `AIROUTER_MIXED_PRIMARY` and
-`AIROUTER_VERIFY_MODEL` were dropped from this table: **neither has a reader in the
-codebase**, both were leftovers from pipelines that no longer exist.
+**The /debug/ routes and network exposure**: routes prefixed with `/debug/` return the contents of the requests passing through the router, and in particular `/debug/trace` includes the full body of the last request forwarded to the upstream, that is system prompt and conversation, while `/debug/errors` returns up to 2000 characters of the upstream error body. As long as `AIROUTER_LISTEN_HOST` stays on loopback those routes are not reachable from the network and stay open. As soon as a non-loopback address is set, the router requires `AIROUTER_DEBUG_TOKEN`: with no token configured every `/debug/` route answers 404, with the token configured it is presented in the `X-Airouter-Debug-Token` header, as `Authorization: Bearer <token>`, or as the `?token=` query parameter. The `/__router_health` route is not affected. The same guard also covers routes prefixed with `/admin/`, including `/admin/mode/<mode>` which rewrites the router's global mode; without it, a network-exposed router would let anyone hijack the mode of all chats. The guard is an aiohttp middleware in `src/router_debug.py`, covered by `sviluppo/tests/test_debug_auth.py`.
+
+Checked one by one against the source on 2026-08-06, reading the values from the
+module rather than from memory: three defaults were stale (both upstreams still
+pointed at `127.0.0.1:8791` and `127.0.0.1:8790`, which no longer appear in the
+code, and the MiniMax model was still `MiniMax-M2.7`). For
+`AIROUTER_TRANSITION_FILTERS` the column said `1`, which is the value the systemd
+unit forces, not the code default, which is `0`.
+
+`AIROUTER_MIXED_PRIMARY`, `AIROUTER_VERIFY_MODEL` and, since 2026-08-06,
+`AIROUTER_NEW_PIPELINE` were dropped from this table: **none of the three has a
+reader in the codebase**, all were leftovers from pipelines that no longer exist.
 
 ---
 
