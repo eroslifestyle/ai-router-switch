@@ -414,10 +414,16 @@ curl http://127.0.0.1:8787/__router_health
 | `AIROUTER_ANTHROPIC_UPSTREAM` | `https://api.anthropic.com` | Endpoint Anthropic |
 | `AIROUTER_MINIMAX_UPSTREAM` | `https://api.minimaxi.chat/anthropic` | Endpoint MiniMax |
 | `AIROUTER_MINIMAX_MODEL` | `MiniMax-M3` | Modello MiniMax di destinazione predefinito |
-| `AIROUTER_MIXED_EXECUTOR` | `MiniMax-M2.7` | Esecutore MiniMax nelle modalità miste |
 | `AIROUTER_TRANSITION_FILTERS` | `0` | Filtri di transizione MiniMax; la unit systemd del progetto lo porta a 1 |
 | `GLM_API_KEY` | — | Chiave z.ai per le modalità GLM |
 | `AIROUTER_DEBUG_TOKEN` | — | Credenziali per le rotte /debug/ e /admin/, richieste solo se l'ascolto non è su loopback |
+| `AIROUTER_MINIMAX_CONTEXT_LIMIT` | `750000` | Limite in BYTE del contesto della richiesta, non in token |
+| `AIROUTER_NON_STREAM_SOCK_READ_SEC` | `600` | Tetto di lettura per le risposte non-streaming; lo streaming non lo usa |
+| `AIROUTER_MINIMAX_SEMAPHORE` | `8` | Richieste concorrenti massime verso MiniMax (analoghe: `AIROUTER_GLM_SEMAPHORE`, `AIROUTER_QWEN_SEMAPHORE`) |
+| `AIROUTER_LOCAL_TIMEOUT_SEC` | `240` | Timeout del backend locale, usato dalle modalità `local` e `mix-al` |
+| `AIROUTER_TOOLS_TELEMETRY` | `0` | Misura il peso del blocco `tools` di ogni richiesta e lo scrive nel sidecar |
+| `AIROUTER_CATALOG_PATH` | — | Sposta il `BUG-CATALOG.jsonl`; la suite di test lo punta a una tmpdir per non scrivere in quello di produzione |
+| `AIROUTER_DEEP_DEBUG` | `0` | Diagnostica estesa sul percorso caldo |
 
 **Rotte /debug/ ed esposizione di rete**: le rotte con prefisso `/debug/` restituiscono il contenuto delle richieste che attraversano il router, e in particolare `/debug/trace` include il corpo integrale dell'ultima richiesta inoltrata all'upstream, quindi system prompt e conversazione, mentre `/debug/errors` arriva a 2000 caratteri del corpo di errore dell'upstream. Finché `AIROUTER_LISTEN_HOST` resta su loopback quelle rotte non sono raggiungibili dalla rete e restano libere. Appena viene impostato un indirizzo non-loopback, il router pretende `AIROUTER_DEBUG_TOKEN`: senza token configurato ogni rotta `/debug/` risponde 404, con il token configurato lo si presenta nell'header `X-Airouter-Debug-Token`, come `Authorization: Bearer <token>`, oppure come parametro `?token=`. La rotta `/__router_health` non è interessata. Lo stesso guard copre anche le rotte con prefisso `/admin/`, fra cui `/admin/mode/<modo>` che riscrive la modalità globale del router; senza il guard, un router esposto in rete permetterebbe a chiunque di dirottare la modalità di tutte le chat. Il guard è un middleware aiohttp in `src/router_debug.py`, coperto da `sviluppo/tests/test_debug_auth.py`.
 
@@ -431,6 +437,12 @@ dalla unit systemd, non il default del codice, che è `0`.
 Rimosse dalla tabella `AIROUTER_MIXED_PRIMARY`, `AIROUTER_VERIFY_MODEL` e, dal
 2026-08-06, `AIROUTER_NEW_PIPELINE`: **nessuna delle tre ha un lettore nel
 sorgente**, erano residui di pipeline non più esistenti.
+
+Dal 2026-08-07 è caduta anche `AIROUTER_MIXED_EXECUTOR`, per lo stesso motivo:
+l'esecutore delle modalità miste lo decide `role_routing.resolve_route`, e la
+costante che leggeva quella variabile era rimasta senza lettori. La tabella elenca
+le variabili di uso comune, non tutte: l'elenco esaustivo è il codice, dove si
+trovano con `grep -rn AIROUTER_ src/`.
 
 ---
 

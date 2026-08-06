@@ -412,10 +412,16 @@ curl http://127.0.0.1:8787/__router_health
 | `AIROUTER_ANTHROPIC_UPSTREAM` | `https://api.anthropic.com` | Anthropic endpoint |
 | `AIROUTER_MINIMAX_UPSTREAM` | `https://api.minimaxi.chat/anthropic` | MiniMax endpoint |
 | `AIROUTER_MINIMAX_MODEL` | `MiniMax-M3` | Default MiniMax target model |
-| `AIROUTER_MIXED_EXECUTOR` | `MiniMax-M2.7` | MiniMax executor in mixed modes |
 | `AIROUTER_TRANSITION_FILTERS` | `0` | MiniMax transition filters; the project systemd unit sets it to 1 |
 | `GLM_API_KEY` | — | z.ai key for GLM modes |
 | `AIROUTER_DEBUG_TOKEN` | — | Credentials for `/debug/` and `/admin/` routes, required only if not listening on loopback |
+| `AIROUTER_MINIMAX_CONTEXT_LIMIT` | `750000` | Request context limit in BYTES, not tokens |
+| `AIROUTER_NON_STREAM_SOCK_READ_SEC` | `600` | Read ceiling for non-streaming responses; streaming does not use it |
+| `AIROUTER_MINIMAX_SEMAPHORE` | `8` | Max concurrent requests to MiniMax (see also `AIROUTER_GLM_SEMAPHORE`, `AIROUTER_QWEN_SEMAPHORE`) |
+| `AIROUTER_LOCAL_TIMEOUT_SEC` | `240` | Local backend timeout, used by the `local` and `mix-al` modes |
+| `AIROUTER_TOOLS_TELEMETRY` | `0` | Measures the weight of each request's `tools` block and records it in the sidecar |
+| `AIROUTER_CATALOG_PATH` | — | Relocates `BUG-CATALOG.jsonl`; the test suite points it at a tmpdir so it never writes to the production one |
+| `AIROUTER_DEEP_DEBUG` | `0` | Extended diagnostics on the hot path |
 
 **The /debug/ routes and network exposure**: routes prefixed with `/debug/` return the contents of the requests passing through the router, and in particular `/debug/trace` includes the full body of the last request forwarded to the upstream, that is system prompt and conversation, while `/debug/errors` returns up to 2000 characters of the upstream error body. As long as `AIROUTER_LISTEN_HOST` stays on loopback those routes are not reachable from the network and stay open. As soon as a non-loopback address is set, the router requires `AIROUTER_DEBUG_TOKEN`: with no token configured every `/debug/` route answers 404, with the token configured it is presented in the `X-Airouter-Debug-Token` header, as `Authorization: Bearer <token>`, or as the `?token=` query parameter. The `/__router_health` route is not affected. The same guard also covers routes prefixed with `/admin/`, including `/admin/mode/<mode>` which rewrites the router's global mode; without it, a network-exposed router would let anyone hijack the mode of all chats. The guard is an aiohttp middleware in `src/router_debug.py`, covered by `sviluppo/tests/test_debug_auth.py`.
 
@@ -425,6 +431,12 @@ pointed at `127.0.0.1:8791` and `127.0.0.1:8790`, which no longer appear in the
 code, and the MiniMax model was still `MiniMax-M2.7`). For
 `AIROUTER_TRANSITION_FILTERS` the column said `1`, which is the value the systemd
 unit forces, not the code default, which is `0`.
+
+On 2026-08-07 `AIROUTER_MIXED_EXECUTOR` was dropped too, for the same reason: the
+executor of the mixed modes is decided by `role_routing.resolve_route`, and the
+constant reading that variable had been left with no readers. This table lists the
+variables in common use, not all of them: the exhaustive list is the code itself,
+reachable with `grep -rn AIROUTER_ src/`.
 
 `AIROUTER_MIXED_PRIMARY`, `AIROUTER_VERIFY_MODEL` and, since 2026-08-06,
 `AIROUTER_NEW_PIPELINE` were dropped from this table: **none of the three has a
