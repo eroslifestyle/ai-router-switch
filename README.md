@@ -1,171 +1,96 @@
-# 🧭 AI Router Switch
+# ai-router-switch
 
-> Self-hosted routing proxy for Claude Code (and any Anthropic-format client).
-> Switch between **Claude**, **MiniMax**, and **GLM/z.ai** — with automatic failover,
-> context compression, per-chat isolation, and cross-model verification.
->
-> **One endpoint (`:8787`), seven modes, zero app restarts.**
+Self-hosted routing proxy for Claude Code and any client that speaks the Anthropic API format. One local endpoint at `http://127.0.0.1:8787`; switch the backend without restarting the application. MIT licensed.
 
----
-
-## What's in the box
+The router only selects the backend. It does not touch the client's settings, skills, agents, MCP servers, tools, or system prompt.
 
 ```
-App (VSCode / Claude Code / any Anthropic client)
-         │
-         │  ANTHROPIC_BASE_URL = http://127.0.0.1:8787
-         ▼
-    ai-router (:8787)  ──► mode selects the backend
-                                    │
-                     ┌──────────────┼──────────────┐
-                     ▼              ▼              ▼
-               Anthropic        MiniMax        GLM/z.ai
-              (api.anthropic)  (api.minimaxi)  (api.z.ai)
+client (VSCode / Claude Code / any Anthropic-format client)
+        │  ANTHROPIC_BASE_URL = http://127.0.0.1:8787
+        ▼
+   ai-router  ──►  the active mode decides the backend
+                        │
+   ┌──────────┬─────────┼─────────┬──────────┐
+   ▼          ▼         ▼         ▼          ▼
+Anthropic  MiniMax   GLM/z.ai   Qwen    local model
 ```
 
-**Golden rule — Non-interference:** the router picks the backend. It never touches
-your model's settings, skills, agents, MCP, tools, or system prompt.
+## Modes (source: VALID_MODES in src/router_constants.py)
 
----
+| Mode | THINK | execution |
+|---|---|---|
+| anthropic | Claude | Claude |
+| minimax | MiniMax | MiniMax |
+| glm | glm-5.2 | glm-4.7 |
+| qwen | qwen3.8-max | qwen3-coder-plus |
+| mix-am | Claude | MiniMax |
+| mix-ag | Claude | GLM |
+| mix-gm | GLM | MiniMax |
+| mix-al | Claude | local model (code-max) |
+| local | local model | local model |
 
-## Modes (7)
+Legacy aliases accepted: `mixed` = mix-am, `glm-minimax` = mix-gm, `anthropic-glm` = mix-ag, plus the short forms `mixam`, `mixag`, `mixgm`, `mixal`.
 
-### Core (Claude + MiniMax)
+## Ports (source: PORT_MODE in src/router_constants.py)
 
-| Mode | Behaviour |
-|---|---|
-| `anthropic` | Claude only — no fallback |
-| `minimax` | MiniMax-M3 only (no weekly limit, cheap) |
-| `mix-am` | Claude THINK → MiniMax ACT (alias: `mixed`) |
+8787 is dynamic and tracks the current mode. One fixed port per mode: 8771 anthropic, 8772 minimax, 8773 mix-am, 8774 mix-al, 8775 glm, 8776 mix-gm, 8777 mix-ag, 8778 qwen, 8779 local.
 
-### GLM / z.ai (Anthropic-compatible endpoint `api.z.ai/api/anthropic`)
+## Switching the backend
 
-| Mode | Behaviour |
-|---|---|
-| `glm` | Role-based: `glm-5.2` THINK → `glm-4.7` ACT |
-| `mix-gm` | GLM-5.2 THINK → MiniMax M2.7 ACT (alias: `glm-minimax`) |
-| `mix-ag` | Claude THINK → `glm-4.7` ACT (alias: `anthropic-glm`) |
+- Globally, for every application: `ai-mode <mode>`. Other subcommands: `ai-mode status`, `log`, `start`, `stop`, `restart`, `update`.
+- Per-chat, scoped to the conversation: send `!router <mode>` inside the chat. Also available: `!router status`, `!router reset`, `!router help`. Natural-language routing was removed on 2026-07-26 because ordinary sentences were switching modes without the user asking; only the explicit `!router` form is intercepted.
+- Per fixed port: point `ANTHROPIC_BASE_URL` at the port of the desired mode.
 
-### Qwen (Alibaba Model Studio, Anthropic-compatible endpoint)
+## Installation
 
-| Mode | Behaviour |
-|---|---|
-| `qwen` | Pure: `qwen3.8-max` THINK → `qwen3-coder-plus` ACT |
+Requirements: Python 3.10 or later. Runtime dependencies are `aiohttp`, `brotli`, `multidict`, and `Pillow` (see requirements.txt). `PySide6` is needed only for the optional GUI panel.
 
-**GLM cost control:** peak window `14:00–18:00 Asia/Shanghai` (~08:00–12:00 Italy summer).
-In peak, `glm-5.2` / `glm-5-turbo` cost 3× → router automatically downgrades to `glm-4.7`
-(THINK runs on `glm-4.7` too). Off-peak: no downgrade, 1× promo pricing until 2026-09-30.
+Steps:
 
-Fallback chain on error/quota: GLM → MiniMax → Claude.
+1. Clone the repository.
+2. Run `python3 install.py`.
 
----
+The installer checks Python and the dependencies, creates the configuration directory, copies `.env.example` without ever overwriting an existing `.env`, and registers a service: a user systemd unit on Linux, a launchd plist on macOS, a startup-file plus instructions on Windows.
 
-## Ports (8)
+Options: `--dry-run`, `--no-service`, `--start`, `--yes`.
 
-| Port | Role |
-|---|---|
-| `8787` | Dynamic — follows `ai-mode` (default) |
-| `8771` | Forced: `anthropic` |
-| `8772` | Forced: `minimax` |
-| `8773` | Forced: `mix-am` |
-| `8775` | Forced: `glm` |
-| `8776` | Forced: `mix-gm` |
-| `8777` | Forced: `mix-ag` |
-| `8778` | Forced: `qwen` |
+Then set `"ANTHROPIC_BASE_URL": "http://127.0.0.1:8787"` in Claude Code's settings.json. A ready-to-use fragment is in `config/settings.anthropic.example.json`.
 
----
+## Where configuration lives
 
-## Switching modes
+The router resolves its configuration directory in this order: the `AIROUTER_HOME` environment variable; then `~/.claude` if it exists (backwards compatibility); then `~/.config/ai-router-switch` on Linux, `~/Library/Application Support/ai-router-switch` on macOS, `%APPDATA%\ai-router-switch` on Windows.
 
-**Global** (all apps connected to `:8787`):
+API keys go into the `.env` file in that directory. The router looks for them in order across: environment variables, the `.env` file, additional `.env` files specified, the `secrets.sh` script if present and bash is available, and finally the system keyring.
 
-```bash
-ai-mode anthropic      # or: minimax / mix-am / mix-ag / mix-gm / glm / qwen
-ai-mode status
-ai-mode log
-```
+For Anthropic no key is required: the OAuth token is handled by Claude Code, in `.credentials.json` or in the Keychain on macOS.
 
-**Per-chat** (isolated to this conversation, does NOT affect other chats):
+## Updating
 
-```
-!router minimax        # switch to minimax for this chat only
-!router anthropic      # back to Claude for this chat
-!router status         # show current mode + backends
-!router reset          # restore global mode from ai-mode
-```
+`ai-mode update` runs the following steps in order: refuse if there are uncommitted local changes (no automatic stash), `fetch`, `pull` in fast-forward only, the test suite, restart the service, wait for health, and verify all ten ports. If a step fails it rolls back to the previous commit and restarts. Options: `--check`, `--dry-run`, `--no-test`, `--no-restart`, `--yes`. A weekly timer exists; it is NOT installed by default.
 
-Only the explicit `!router` command switches modes. Natural-language switching was
-removed on 2026-07-26: a short message containing a common verb plus a mode word
-anywhere in the text used to change the mode, so ordinary sentences silently
-switched the chat.
-Per-chat commands are confined to the conversation fingerprint — no cross-talk between chats.
+## Local model
 
-**Fixed-port** (explicit, no file writes):
+The `local` and `mix-al` modes talk to an OpenAI-compatible endpoint on port 4000. The `local-stack` directory contains a docker-compose file, example configuration, and a llama.cpp systemd unit template. Model weights are not included.
 
-```bash
-export ANTHROPIC_BASE_URL=http://127.0.0.1:8772   # always minimax
-export ANTHROPIC_BASE_URL=http://127.0.0.1:8777   # always mix-ag
-```
+## Self-fixer (optional, off by default)
 
----
+A component exists that analyzes recurring errors and tries to propose a fix by having a model write it. It is off unless `AIROUTER_SELF_FIX_ENABLED` is set to `1`, and by default it never merges: it opens a branch and, if `gh` is available, a pull request. Automatic merging is opt-in via `--merge`. Turning it on means letting a model write to your own repository.
 
-## Quick start
+## Resilience
 
-```bash
-# 1. Point your client at the router
-#    ~/.claude/settings.json
-{ "env": { "ANTHROPIC_BASE_URL": "http://127.0.0.1:8787" } }
+The systemd service runs with `Restart=always`. A watchdog script lives in the `scripts` directory. A resilience module enters a degraded state when the OAuth token is missing or expired and exits it on its own as soon as the user logs in again.
 
-# 2. Run the router
-python3 src/ai-router-proxy.py
-#  or: systemctl --user start ai-router-proxy.service  (after setup)
+## Tests
 
-# 3. Switch mode
-ai-mode mix-am
-```
+366 tests. Run them with `python3 -m pytest -q` from the repository root.
 
-GLM modes need a z.ai key: `export GLM_API_KEY=...` or `secrets.sh set glm.api_key ...`.
+## What is NOT included
 
----
-
-## Resilience (triple defense)
-
-- **systemd** — `Restart=always`, `OOMScoreAdjust=-900`, linger enabled
-- **cron watchdog** (`scripts/ai-stack-guard.sh`) — restarts anything down every minute + `@reboot`
-- **SessionStart hook** — ensures the stack is up when your IDE starts
-
-Tested: `kill -9` on all services → fully restored in <10 s.
-
----
-
-## Roadmap
-
-| Phase | Status |
-|---|---|
-| Phase 1 — deterministic per-port isolation | ✅ Complete |
-| Phase 2 — per-chat independence via conversation fingerprint | ✅ Complete |
-| Phase 3 — in-chat commands (`!router`) + natural language | ✅ Complete |
-| Phase 4 — circuit breaker with cooldown | ✅ Complete |
-
----
+Model weights. API keys. Provider accounts. The router itself does not grant access to any model: it routes to services the user is already subscribed to.
 
 ## Documentation
 
-- 🇮🇹 [Manuale IT](docs/MANUAL.md) · [HTML](docs/manual-it.html)
-- 🇬🇧 [English Manual](docs/MANUAL.en.md) · [HTML](docs/manual-en.html)
-- 🗺️ [PIANO.md](docs/PIANO.md) — 44 design decisions & technical notes
-
----
-
-## Community
-
-- 💬 [GitHub Discussions](https://github.com/eroslifestyle/ai-router-switch/discussions)
-- 📚 [Wiki](https://github.com/eroslifestyle/ai-router-switch/wiki)
-- 🌐 [GitHub Pages](https://eroslifestyle.github.io/ai-router-switch/) — official docs site
-- 🐛 [Issues](https://github.com/eroslifestyle/ai-router-switch/issues)
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+- Italian manual: `docs/MANUAL.md`
+- English manual: `docs/MANUAL.en.md`
+- Project notes: `docs/PIANO.md`
+- Local stack: `local-stack/README.md`

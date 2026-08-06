@@ -2,10 +2,10 @@
 
 ## Overview
 
-Standalone control panel for the AI Router (`:8787`) with 7 orchestration modes. Provides both CLI and GUI interfaces to switch modes and monitor router health in real-time.
+Standalone control panel for the AI Router (`:8787`) with 9 orchestration modes. Provides both CLI and GUI interfaces to switch modes and monitor router health in real-time.
 
 **Location**: `~/.claude/router-mode/`  
-**Modes**: anthropic · minimax · glm · qwen · mix-am · mix-gm · mix-ag  
+**Modes**: anthropic · minimax · glm · qwen · mix-am · mix-gm · mix-ag · mix-al · local  
 **Proxy**: `:9988` (CORS bypass for browser fetch)
 
 ---
@@ -19,7 +19,7 @@ Standalone Python script for mode management and status queries.
 **Commands**:
 ```bash
 routestats status              # Show current mode + health OK/OFFLINE
-routestats modes               # List all 7 modes with executors
+routestats modes               # List all 9 modes with executors
 routestats switch <mode>       # Switch mode via proxy POST /admin/mode/{mode}
 routestats card                # Launch card.py GUI
 routestats json                # Output state as JSON

@@ -76,7 +76,11 @@ QWEN_TIER_MID = "MID"
 QWEN_TIER_CODER = "CODER"
 QWEN_TIER_VISION = "VISION"
 QWEN_MODEL_FOR_TIER = {
-    QWEN_TIER_TOP: os.environ.get("QWEN_MODEL_TOP", "qwen3.7-max"),
+    # Il THINK NON passa di qui: lo decide role_routing.QWEN_THINK ("qwen3.8-max",
+    # 905 richieste nel sidecar contro 1 su 3.7). L'unico chiamante di
+    # resolve_qwen_upstream_model è ai-router-proxy.py:840 e chiede sempre CODER.
+    # Il default resta allineato al modello vero per non ingannare chi legge.
+    QWEN_TIER_TOP: os.environ.get("QWEN_MODEL_TOP", "qwen3.8-max"),
     QWEN_TIER_MID: os.environ.get("QWEN_MODEL_MID", "qwen3.7-plus"),
     QWEN_TIER_CODER: os.environ.get("QWEN_MODEL_CODER", "qwen3-coder-plus"),
     QWEN_TIER_VISION: os.environ.get("QWEN_MODEL_VISION", "qwen3-vl-plus"),

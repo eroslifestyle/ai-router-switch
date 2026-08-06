@@ -36,3 +36,15 @@ router-mode/__pycache__/
 # worktree agenti Claude (mai tracciare)
 .claude/worktrees/
 *.bak
+
+# Note di lavoro personali: restano sul disco, fuori dal repo pubblico
+.claude/TODO.md
+.claude/WIKI.md
+docs/sessions/
+docs/articles/
+sviluppo/backup-20260806/
+
+# File generato per errore da ImageMagick il 2026-07-19 (5,9 MB di PostScript):
+# era il file più grande del repo. Il nome resta ignorato perché una redirezione
+# sbagliata verso "sys" è un incidente facile da ripetere.
+/sys
