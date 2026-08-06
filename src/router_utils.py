@@ -278,6 +278,10 @@ def log_exc(msg: str):
 # formato del sidecar. Si accende solo per una campagna di misura.
 TOOLS_TELEMETRY_ENABLED: bool = os.environ.get("AIROUTER_TOOLS_TELEMETRY", "") == "1"
 
+# Il body non-JSON è ricorrente e innocuo: si logga una volta sola per avvio, con
+# l'inizio del body, invece di ripetere una riga muta a ogni occorrenza.
+_TOOLS_TELEMETRY_PARSE_LOGGED: bool = False
+
 # I tool esposti da un server MCP si riconoscono dal nome: mcp__<server>__<tool>.
 MCP_TOOL_PREFIX = "mcp__"
 MCP_NAME_SEPARATOR = "__"
@@ -318,7 +322,19 @@ def collect_tools_stats(body: bytes) -> dict | None:
     try:
         data = json.loads(body.decode("utf-8"))
     except (ValueError, TypeError, UnicodeDecodeError) as e:
-        log(f"tools telemetry: parsing del body fallito - {type(e).__name__}: {e}")
+        # Una riga sola per avvio del processo, e con l'inizio del body dentro.
+        # Fino al 2026-08-07 questo log era nudo — solo il tipo di eccezione — e
+        # ne erano state scritte 168 in dieci giorni, circa 17 al giorno: non
+        # dicevano cosa fosse il body, quindi non erano diagnosticabili, ed erano
+        # esattamente il rumore che la docstring qui sopra dice di voler evitare.
+        # Il caso e' innocuo (si ritorna None e il relay prosegue), quindi conta
+        # sapere COSA arriva, non quante volte.
+        global _TOOLS_TELEMETRY_PARSE_LOGGED
+        if not _TOOLS_TELEMETRY_PARSE_LOGGED:
+            _TOOLS_TELEMETRY_PARSE_LOGGED = True
+            log(f"tools telemetry: parsing del body fallito - {type(e).__name__}: {e} "
+                f"- {len(body)} byte, inizio {body[:40]!r} "
+                f"(riga unica per avvio: le successive sono silenziose)")
         return None
 
     if not isinstance(data, dict):

@@ -256,3 +256,50 @@ def test_update_percorso_felice_non_fa_reset(monkeypatch, comandi):
     assert updater.update(argomenti()) == 0
     assert _ha(comandi, "pull", "--ff-only")
     assert not _ha(comandi, "reset")
+
+
+# ── coerenza fra le tre liste di porte ────────────────────────────────────────
+
+def test_le_tre_liste_di_porte_non_divergono():
+    """L'elenco delle porte è ripetuto in tre posti indipendenti: se uno cambia
+    senza gli altri, il difetto è silenzioso e si manifesta solo in produzione.
+
+    - `router_constants` è la fonte di verità: `PORT_MODE` mappa porta → modalità
+      e `LISTEN_PORTS` è ciò che il proxy apre davvero;
+    - `updater.PORTS` decide quali porte il controllo di salute interroga dopo un
+      aggiornamento: una porta assente non verrebbe mai verificata;
+    - `install.py` genera la `ExecStartPre` della unit systemd, che libera le porte
+      prima dell'avvio: una porta assente resta occupata da un processo orfano e
+      il riavvio fallisce solo su quella.
+
+    Il caso reale che ha motivato questo test: il 2026-08-07 la unit installata
+    elencava nove porte su dieci, senza la 8779 di `local`, aggiunta dopo che la
+    unit era stata generata.
+    """
+    import importlib.util
+    import pathlib
+    import sys
+
+    radice = pathlib.Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(radice / "src"))
+    from router_constants import LISTEN_PORTS, PORT_MODE, VALID_MODES
+
+    spec = importlib.util.spec_from_file_location("install_mod", radice / "install.py")
+    install_mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(install_mod)
+    except SystemExit:
+        pass  # install.py può uscire se invocato senza argomenti: le costanti bastano
+
+    attese = sorted(LISTEN_PORTS)
+    assert sorted(updater.PORTS) == attese, (
+        f"updater.PORTS {sorted(updater.PORTS)} diverge da LISTEN_PORTS {attese}"
+    )
+    assert sorted(install_mod.FIXED_PORTS + [install_mod.DYNAMIC_PORT]) == attese, (
+        "install.py genererebbe una ExecStartPre che non copre tutte le porte aperte"
+    )
+    # E ogni modalità dichiarata deve avere la sua porta fissa, altrimenti esiste
+    # una modalità raggiungibile solo dalla porta dinamica 8787.
+    assert sorted(PORT_MODE.values()) == sorted(VALID_MODES), (
+        f"PORT_MODE copre {sorted(PORT_MODE.values())}, VALID_MODES è {sorted(VALID_MODES)}"
+    )

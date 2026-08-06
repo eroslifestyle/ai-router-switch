@@ -212,3 +212,42 @@ def test_sidecar_arricchito_con_tools(tmp_path):
         assert line["tools_bytes"] == 1234, "tools_bytes deve essere 1234"
     finally:
         ru.USAGE_SIDECAR = original_sidecar
+
+
+def test_body_non_json_logga_una_volta_sola_e_con_il_contenuto():
+    """Il body non-JSON è ricorrente e innocuo: va loggato una volta, non sempre.
+
+    Il log nudo precedente — solo il tipo di eccezione — aveva prodotto 168 righe
+    in dieci giorni, circa 17 al giorno, senza dire cosa fosse il body: rumore non
+    diagnosticabile, cioè proprio ciò che la docstring di `collect_tools_stats`
+    dichiara di voler evitare. Ora la prima riga porta dimensione e inizio del
+    body, e le successive tacciono fino al riavvio del processo.
+    """
+    ru = _import_router_utils(flag_acceso=True)
+    righe = []
+    ru.log = lambda messaggio: righe.append(messaggio)
+
+    for _ in range(5):
+        assert ru.collect_tools_stats(b"non-json-body-abc") is None
+
+    assert len(righe) == 1, f"attesa una riga sola, ottenute {len(righe)}: {righe}"
+    assert "17 byte" in righe[0], "la riga deve dire quanto era grande il body"
+    assert "non-json-body-abc" in righe[0], "la riga deve mostrare l'inizio del body"
+
+
+def test_il_silenziamento_non_tocca_la_misura_dei_tools():
+    """Controprova: il flag di log una-tantum non deve alterare il risultato.
+
+    Serve a escludere che il silenziamento sia stato ottenuto uscendo prima dalla
+    funzione, il che spegnerebbe la telemetria invece del solo log.
+    """
+    ru = _import_router_utils(flag_acceso=True)
+    ru.log = lambda messaggio: None
+    ru.collect_tools_stats(b"non-json")  # consuma la riga una-tantum
+
+    body = json.dumps({"tools": [
+        {"name": "prova", "description": "d", "input_schema": {"type": "object"}}
+    ]}).encode()
+    risultato = ru.collect_tools_stats(body)
+    assert risultato is not None, "la misura deve funzionare anche dopo il silenziamento"
+    assert risultato.get("tools_count") == 1
