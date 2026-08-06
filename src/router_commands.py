@@ -3,7 +3,7 @@
 import re as _re
 
 from router_constants import VALID_MODES
-from router_mode import get_chat_mode, set_chat_mode, clear_chat_mode, get_file_mode, conversation_fingerprint
+from router_mode import get_chat_mode, set_chat_mode, clear_chat_mode, get_file_mode
 
 _ALIAS_MAP = {
     "mixam": "mix-am",

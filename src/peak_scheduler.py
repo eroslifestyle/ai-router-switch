@@ -6,7 +6,6 @@ Solo per decisione R3-#5: il task in corso finisce SEMPRE, il blocco
 riguarda solo l'inizio di nuovi task in fascia peak.
 """
 from datetime import datetime, timezone
-from dataclasses import dataclass
 
 TZ = "Asia/Shanghai"
 

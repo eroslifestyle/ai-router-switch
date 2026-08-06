@@ -4,13 +4,11 @@ Soglie: 80% warn / 90% compact / 100% error (AQ-3).
 Token counting: stima byte//4 (il campionamento AQ-8 non è mai stato completato, rimosso il 2026-08-04).
 Storage: SQLite per-chat, isolato per chat_fp + modo.
 """
-import json
 import sqlite3
 import threading
 import time
-from pathlib import Path
 
-from model_context_map import get_context_limit, get_safe_input_limit
+from model_context_map import get_context_limit
 
 WARN_PCT    = 0.80
 WARN2_PCT   = 0.88   # secondo alert, urgente: compressione (90%) imminente

@@ -3,14 +3,13 @@
 import json
 import os
 import time
-from pathlib import Path
 
 import tool_isolation
 import cache_optimizer
 
 from router_constants import (
     ANTHROPIC_UPSTREAM, ANTHROPIC_DIRECT_URL, HOP_HEADERS,
-    ANTHROPIC_UNSUPPORTED_FIELDS, CLAUDE_CODE_MARKER,
+    ANTHROPIC_UNSUPPORTED_FIELDS,
 )
 from router_utils import (
     _analyze_body_structure, SENT_ANALYSIS, _DEBUG_LAST_SENT, log,
@@ -172,7 +171,6 @@ def _text_from_message(j: dict) -> str:
 
 async def forward_anthropic(request, body, session):
     """Chiama api.anthropic.com con OAuth subscription Bearer."""
-    from router_auth import get_minimax_key as _unused  # bridge import for tool isolation
     from router_utils import _repair_message_sequence
 
     url = ANTHROPIC_UPSTREAM + request.path  # strip query string (Anthropic API uses body/headers, not query params)

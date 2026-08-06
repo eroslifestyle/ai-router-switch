@@ -20,7 +20,6 @@ Dopo un reset leobox / reboot:
 3. proxy (entro 30s) rilegge file → OAuth OK → esce da DEGRADED → operativo
 """
 import os
-import sys
 import json
 import time
 import signal

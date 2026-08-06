@@ -1,19 +1,18 @@
 # ~440 lines
 """Anthropic pipeline and body builders extracted from ai-router-proxy.py (~lines 1705-2796)."""
-import asyncio
-import json
 import os
 
 from router_constants import (
-    MINIMAX_CONTEXT_BYTE_LIMIT, ANTHROPIC_HAIKU_CONTEXT_BYTE_LIMIT,
-    SUMMARY_BUDGET,
+    MINIMAX_CONTEXT_BYTE_LIMIT,
 )
+# pipeline_minimax importa _repair_message_sequence, SHRINK_KEEP_TAIL e
+# build_shrink_summary DA QUI e non dai moduli originali; toglierli come
+# import inutilizzati romperebbe quel modulo con un ImportError latente; stessa
+# ragione del re-export di _body_has_images poco sotto.
 from router_utils import (
-    log, _analyze_body_structure,
-    debug_capture, _repair_message_sequence,
+    log, debug_capture, _repair_message_sequence,  # noqa: F401 (re-export)
 )
-from trim_smart import SHRINK_KEEP_TAIL, build_shrink_summary
-from forward_anthropic import forward_anthropic, forward_anthropic_direct
+from trim_smart import SHRINK_KEEP_TAIL, build_shrink_summary  # noqa: F401 (re-export)
 # Ri-esportato: pipeline_minimax importa _body_has_images DA QUI, non da
 # providers.base. Rimuoverlo come "import inutilizzato" rompe la gestione
 # immagini di MiniMax con un ImportError latente, visibile solo quando

@@ -16,7 +16,6 @@ Modelli "generativi" (omnia/media): pattern configurabile via env ORNITH_GENERAT
 import json
 import os
 import signal
-import sys
 import time
 import urllib.error
 import urllib.request

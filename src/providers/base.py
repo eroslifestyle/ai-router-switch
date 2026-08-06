@@ -3,8 +3,6 @@
 import asyncio
 import json
 import re
-import time
-from pathlib import Path
 
 # ── Status sets ──────────────────────────────────────────────────────────────
 FALLBACK_STATUSES = {401, 403, 408, 409, 413, 429, 500, 502, 503, 504, 529}

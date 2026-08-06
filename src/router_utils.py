@@ -8,14 +8,13 @@ import random
 import time
 import traceback
 from collections import deque
-from pathlib import Path
 
-from aiohttp import web, ClientTimeout
+from aiohttp import ClientTimeout
 
 from router_constants import (
     MINIMAX_RATE_LIMITS, MINIMAX_RATE_LIMITS_DEFAULT, MINIMAX_SAFETY,
     MINIMAX_BACKOFF_STEPS, MINIMAX_ALERTS_LOG,
-    MINIMAX_RETRY_CAP_SEC, USAGE_SIDECAR, NON_STREAM_SOCK_READ_SEC,
+    USAGE_SIDECAR, NON_STREAM_SOCK_READ_SEC,
 )
 
 

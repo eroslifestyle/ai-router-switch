@@ -7,8 +7,7 @@ from aiohttp import web  # usato nei rami d'errore (righe ~65 e ~98): senza ques
                          # rispondeva 500 "Server got itself in trouble" opaco.
 
 from router_constants import (
-    MINIMAX_MODEL, MINIMAX_ORCHESTRATOR_MODEL, MINIMAX_EXECUTORS,
-    MINIMAX_CONTEXT_BYTE_LIMIT,
+    MINIMAX_MODEL, MINIMAX_CONTEXT_BYTE_LIMIT,
 )
 from router_utils import log, log_router_usage, _request_orig_model
 import debug_catalog

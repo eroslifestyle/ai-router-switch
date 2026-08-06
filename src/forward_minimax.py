@@ -6,7 +6,6 @@ import os
 import time
 from typing import TYPE_CHECKING
 
-from aiohttp import ClientTimeout
 
 if TYPE_CHECKING:  # solo per le annotazioni delle rotte generative in fondo al file
     from aiohttp import ClientSession, web
@@ -17,13 +16,12 @@ from router_debug import dl
 from router_constants import (
     MINIMAX_UPSTREAM, MINIMAX_MODEL, MINIMAX_GENERATIVE_HOST,
     MINIMAX_RETRY_CAP_SEC, MINIMAX_RETRY_BUDGET_SHORT,
-    MINIMAX_CONTEXT_BYTE_LIMIT, _GENERATIVE_PATHS, HOP_HEADERS,
+    _GENERATIVE_PATHS, HOP_HEADERS,
 )
 from router_utils import (
     MINIMAX_LIMITER, _MINIMAX_SEM, RateLimitExhausted,
-    _classify_429, _analyze_body_structure, SENT_ANALYSIS,
-    _DEBUG_LAST_SENT, _minimax_alert, log,
-    _request_orig_model, upstream_timeout_for,
+    _classify_429, _minimax_alert, log,
+    upstream_timeout_for,
 )
 from router_mode import _resolve_chat_fingerprint
 from router_auth import get_minimax_key
@@ -94,7 +92,6 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
         Se None, usa MINIMAX_MODEL (default). Inoltrato a remap_body_for_minimax come target_model."""
     from minimax_body import remap_body_for_minimax
     from router_utils import _repair_message_sequence
-    from context_rewrite import rewrite_for_context
     from router_utils import log as _log
 
     if retry_budget_sec is None:
