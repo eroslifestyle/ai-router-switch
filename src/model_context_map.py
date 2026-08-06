@@ -171,10 +171,5 @@ def get_safe_input_limit(model: str, max_output: int | None = None) -> int:
     return max(1, ctx - buf)
 
 # Dimensione riassunto per modello
-SUMMARY_BUDGET_MAP = {
-    "opus": 15_000, "sonnet": 10_000, "haiku": 8_000,
-    "MiniMax-M3": 10_000, "MiniMax-M2.7": 10_000,
-    "glm-5-turbo": 15_000, "glm-4": 8_000,
-}
-def get_summary_budget(model: str) -> int:
-    return SUMMARY_BUDGET_MAP.get(model.lower(), 10_000)
+# SUMMARY_BUDGET_MAP e get_summary_budget rimosse il 2026-08-07: nessun lettore,
+# e la mappa era ferma a glm-5-turbo e glm-4, modelli usciti dal tiering.

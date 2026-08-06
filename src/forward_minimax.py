@@ -15,7 +15,7 @@ from router_debug import dl
 
 from router_constants import (
     MINIMAX_UPSTREAM, MINIMAX_MODEL, MINIMAX_GENERATIVE_HOST,
-    MINIMAX_RETRY_CAP_SEC, MINIMAX_RETRY_BUDGET_SHORT,
+    MINIMAX_RETRY_CAP_SEC,
     _GENERATIVE_PATHS, HOP_HEADERS,
 )
 from router_utils import (
@@ -222,10 +222,6 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
                   note=f"backoff {step}s, budget {budget_left:.0f}s", mode="minimax",
                   severity="block")
 
-
-async def _fwd_minimax_short(request, body, session):
-    """forward_minimax con budget di retry corto, per le chiamate non-streaming."""
-    return await forward_minimax(request, body, session, retry_budget_sec=MINIMAX_RETRY_BUDGET_SHORT)
 
 
 async def _forward_minimax_generative(request, body: bytes, session,

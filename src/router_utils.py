@@ -6,7 +6,6 @@ import json
 import os
 import random
 import time
-import traceback
 from collections import deque
 
 from aiohttp import ClientTimeout
@@ -269,9 +268,7 @@ def log(msg: str):
         pass
 
 
-def log_exc(msg: str):
-    log(f"{msg}\n{traceback.format_exc()}")
-
+# log_exc rimossa il 2026-08-07: nessun chiamante. Era `log(msg + traceback)`.
 
 # Telemetria del blocco `tools`. Default SPENTO: il riavvio che introduce questa
 # funzione non deve cambiare nulla di osservabile, ne' nel comportamento ne' nel

@@ -1,13 +1,11 @@
 import os
 import sys
 import time
-import json
 import threading
 
 import paths
 
 CONTEXT_ALERTS_LOG = str(paths.log_file("context-alerts.log"))
-PENDING_DIR = str(paths.trim_state_dir().parent / "ai-router-ctx-alert")
 ALERT_MIN_INTERVAL_SEC = 120
 
 _last_alert = {}
@@ -15,7 +13,7 @@ _lock = threading.Lock()
 
 
 def notify_context_threshold(fp: str, mode: str, pct: float, est_tokens: int, limit: int, kind: str) -> None:
-    """kind e' warn (80%) o warn2 (88%). Throttle+dedup per (fp, kind). Canali: log+bell, banner in-chat."""
+    """kind e' warn (80%) o warn2 (88%). Throttle+dedup per (fp, kind). Canale: log dedicato + bell su stderr."""
     try:
         now = time.monotonic()
         with _lock:
@@ -45,73 +43,15 @@ def notify_context_threshold(fp: str, mode: str, pct: float, est_tokens: int, li
         except Exception:
             pass
 
-        # Canale 2: banner pending
-        banner_text = f"⚠ Context a {pct_str}: compressione automatica imminente. Crea un checkpoint ora (lavoro a rischio)."
-        _write_pending_banner(fp, banner_text)
+        # Il "Canale 2: banner pending" viveva qui. Rimosso il 2026-08-07: scriveva
+        # un file che NESSUNO leggeva, perche' maybe_prepend_banner — l'unica
+        # funzione che lo consegnava al client — non era chiamata da nessun punto
+        # del proxy. Misura: 134 alert reali fino al 2026-08-02, altrettanti banner
+        # mai visti dall'utente. Non e' stato ricablato perche' andrebbe contro la
+        # decisione del 2026-07-26, quando il gate di contesto e' diventato un
+        # osservatore proprio per non iniettare piu' contenuti sintetici nelle
+        # risposte (riscrivere uno stream SSE a valle spezza la numerazione dei
+        # content_block). Resta il Canale 1: log dedicato piu' bell su stderr.
 
     except Exception:
         pass
-
-
-def _write_pending_banner(fp: str, text: str) -> None:
-    """Scrive il banner in PENDING_DIR/{fp}.txt. Salta se fp vuoto."""
-    try:
-        if not fp:
-            return
-        os.makedirs(PENDING_DIR, exist_ok=True)
-        with open(os.path.join(PENDING_DIR, f"{fp}.txt"), "w", encoding="utf-8") as f:
-            f.write(text)
-    except Exception:
-        pass
-
-
-def pop_pending_banner(fp: str) -> str | None:
-    """Legge e cancella il banner pending. None se assente. Salta se fp vuoto."""
-    try:
-        if not fp:
-            return None
-        path = os.path.join(PENDING_DIR, f"{fp}.txt")
-        if not os.path.exists(path):
-            return None
-        with open(path, "r", encoding="utf-8") as f:
-            text = f.read().strip()
-        os.remove(path)
-        return text
-    except Exception:
-        return None
-
-
-def maybe_prepend_banner(response_bytes: bytes, fp: str, is_stream: bool) -> bytes:
-    """Antepone banner pending alla risposta. Stream: ri-scrive come pending. Fail-safe."""
-    banner = pop_pending_banner(fp)
-    if banner is None:
-        return response_bytes
-
-    if is_stream:
-        # Non riscriviamo lo stream; ri-scrivi banner come pending per prossimo turno non-stream
-        _write_pending_banner(fp, banner)
-        return response_bytes
-
-    try:
-        resp = json.loads(response_bytes.decode("utf-8"))
-        banner_with_newline = banner + "\n\n"
-
-        if isinstance(resp, dict) and "content" in resp and isinstance(resp["content"], list):
-            inserted = False
-            for block in resp["content"]:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    block["text"] = banner_with_newline + block.get("text", "")
-                    inserted = True
-                    break
-            if not inserted:
-                resp["content"].insert(0, {"type": "text", "text": banner_with_newline})
-            return json.dumps(resp, ensure_ascii=False).encode("utf-8")
-        else:
-            # Struttura inattesa: ri-scrivi banner come pending
-            _write_pending_banner(fp, banner)
-            return response_bytes
-
-    except Exception:
-        # Fail-safe: ri-scrivi banner come pending per non perderlo
-        _write_pending_banner(fp, banner)
-        return response_bytes

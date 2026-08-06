@@ -69,7 +69,9 @@ MINIMAX_RETRY_CAP_SEC = float(os.environ.get("AIROUTER_MINIMAX_RETRY_CAP_SEC", "
 MINIMAX_CONCURRENCY = int(os.environ.get("AIROUTER_MINIMAX_SEMAPHORE", "8"))
 MINIMAX_BACKOFF_STEPS = (5, 10, 20, 40, 60)
 MINIMAX_ALERTS_LOG = str(paths.log_file("minimax-alerts.log"))
-MINIMAX_RETRY_BUDGET_SHORT = float(os.environ.get("AIROUTER_MINIMAX_RETRY_SHORT_SEC", "8"))
+# MINIMAX_RETRY_BUDGET_SHORT rimossa il 2026-08-07 con _fwd_minimax_short, il
+# suo unico lettore: il wrapper serviva alle chiamate non-streaming della
+# pipeline, che non esiste piu' dal 2026-07-25.
 # THINK_MODEL / THINK_MODEL_ANTHROPIC rimossi: il router usa SEMPRE orig_model
 # (il modello scelto dalla config globale del client). La gerarchia THINK/exec/escalation
 # vive SOLO nella config globale ~/.claude/CLAUDE.md, mai nel router (tubo trasparente).

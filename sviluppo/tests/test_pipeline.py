@@ -24,7 +24,7 @@ def test_imports():
 
     attesi = ("FALLBACK_STATUSES", "MINIMAX_FALLBACK_STATUSES", "extract_last_user_text",
               "_is_context_too_large_for_minimax", "_is_context_exceed_400", "strip_images_body",
-              "call_full", "T2_KEYWORDS", "trim_old_messages")
+              "call_full", "trim_old_messages")
 
     for nome in attesi:
         assert hasattr(base, nome), f"Atteso: providers.base espone {nome}, Ottenuto: assente"

@@ -11,16 +11,10 @@ import json
 from router_constants import FALLBACK_STATUSES, MINIMAX_FALLBACK_STATUSES  # noqa: F401
 
 # ── T2 classification ─────────────────────────────────────────────────────────
-T2_KEYWORDS = (
-    "quant", "quando", "data", "prezzo", "costo", "percentual", "formula",
-    "calcol", "converti", "differenza tra", "versione", "compatibil",
-    "sicurezz", "security", "vulnerab", "password", "credenzial", "token",
-    "produzione", "production", "deploy", "migrazione", "migration",
-    "irreversibil", "cancell", "delete", "drop ", "rm -rf", "truncate",
-    "legale", "medic", "fiscal", "contratt", "normativ",
-    "esatt", "preciso", "accurat", "verifica", "corretto", "sicuro che",
-    "sei sicuro", "è vero che", "dimostra", "prova che",
-)
+# T2_KEYWORDS e classify_t2 rimosse il 2026-08-07. L'audit del 2026-07-03 le aveva
+# gia' dichiarate codice morto: classify_t2 faceva un json.loads dell'intero body
+# a ogni richiesta e il valore era sempre scartato, perche' il ramo T2 era
+# irraggiungibile. Quel ramo e' poi sparito del tutto con la pipeline, il 2026-07-25.
 
 # ── Text extraction ──────────────────────────────────────────────────────────
 def extract_last_user_text(data: dict) -> str:
@@ -161,25 +155,3 @@ async def call_full(fn, request, body, session, timeout: float = 120.0) -> tuple
         return 0, None
 
 # ── T2 classification helper ──────────────────────────────────────────────────
-def classify_t2(body: bytes) -> bool:
-    """True se la richiesta è 'critica' (T2) -> merita verifica Opus."""
-    import os
-    try:
-        data = json.loads(body)
-    except Exception:
-        return False
-    # Richieste agentiche (Claude Code/VSCode) contengono "tools" e si aspettano
-    # blocchi tool_use in risposta. La pipeline collaborativa T2 appiattisce la
-    # risposta a solo testo, distruggendo i tool_use -> l'agente non esegue nulla.
-    # Mai farle entrare in T2: vanno in passthrough rel() che preserva i tool.
-    if data.get("tools"):
-        return False
-    if os.environ.get("AIROUTER_FORCE_T2") == "1":
-        return True
-    text = extract_last_user_text(data)
-    low = text.lower()
-    if any(k in low for k in T2_KEYWORDS):
-        return True
-    if "?" in text and any(ch.isdigit() for ch in text):
-        return True
-    return False
