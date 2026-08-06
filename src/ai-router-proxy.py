@@ -17,14 +17,10 @@ Gestisce streaming SSE. Backend diretto (nessun proxy intermedio).
 import asyncio
 import json
 import os
-import random
 import signal
-import threading
 import time
-from collections import deque
 from pathlib import Path
 
-import tool_isolation
 import debug_catalog
 from aiohttp import web, ClientSession, ClientTimeout, TCPConnector
 
@@ -36,7 +32,6 @@ import sys as _sys
 _sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import sys  # for resilience module
 
-from fail_tracker import fail_tracker, mixed_fail_inc, mixed_fail_reset, mixed_anthropic_leads
 from streaming_relay import StreamingRelay
 from context_manager import ContextManager
 
@@ -44,67 +39,40 @@ from context_manager import ContextManager
 CTX = ContextManager()
 
 # ── Moduli condivisi (gia' estratti in file separati) ───────────────────────
-from minimax_body import remap_body_for_minimax, strip_server_tools_for_minimax
-from trim_smart import (SHRINK_KEEP_HEAD, SHRINK_KEEP_TAIL,
-                        build_shrink_summary, _smart_truncate, _smart_sample_middle)
-from model_context_map import get_safe_input_limit, get_context_limit, get_summary_budget
+from model_context_map import get_safe_input_limit
 from context_rewrite import rewrite_for_context
-from context_alert import notify_context_threshold, maybe_prepend_banner
-from providers.base import (
-    FALLBACK_STATUSES, MINIMAX_FALLBACK_STATUSES,
-    extract_last_user_text, _text_from_message as _pmsg_text,
-    strip_images_body, call_full,
-    T2_KEYWORDS, trim_old_messages,
-    _body_has_images,
-    classify_t2,
-)
-from sse_utils import _sse_events_from_message, _prepare_sse_response, _send_sse_message
+from context_alert import notify_context_threshold
+from sse_utils import _sse_events_from_message, _send_sse_message
 
 # ── Router modules (this refactoring) ─────────────────────────────────────────
 from router_constants import (
     LISTEN_HOST, LISTEN_PORT, LISTEN_PORTS,
     ANTHROPIC_UPSTREAM, MINIMAX_UPSTREAM, MINIMAX_MODEL,
-    MINIMAX_ORCHESTRATOR_MODEL, MINIMAX_EXECUTORS, MIXED_EXECUTOR_MODEL,
-    NEW_PIPELINE, VALID_MODES, GLM_AVAILABLE, QWEN_AVAILABLE,
-    MODE_FILE, KEY_FILE, LOG_FILE, SIDECAR, USAGE_SIDECAR,
-    CHAT_STORE, TRIM_STATE_DIR,
-    HOP_HEADERS, FALLBACK_STATUSES as _FS, MINIMAX_FALLBACK_STATUSES as _MFS,
-    MINIMAX_CONTEXT_BYTE_LIMIT, ANTHROPIC_HAIKU_CONTEXT_BYTE_LIMIT,
-    SUMMARY_BUDGET, TRIM_TARGET_BYTES, TRIM_MIN_MESSAGES,
-    PORT_MODE, _GENERATIVE_PATHS, THINK_TIMEOUT_SEC,
-    THINK_MAX_TOKENS, CLAUDE_CODE_MARKER,
-    _HEALTH_CHECK_PATHS,
-    trim_locks,
+    VALID_MODES, GLM_AVAILABLE, QWEN_AVAILABLE,
+    MODE_FILE, LOG_FILE, SIDECAR, HOP_HEADERS, PORT_MODE, _HEALTH_CHECK_PATHS,
 )
 from router_utils import (
-    log, log_exc, debug_capture, debug_errors, debug_last,
-    debug_stats, debug_trace, debug_catalog_endpoint, debug_catalog_entry,
-    MINIMAX_LIMITER, _MINIMAX_SEM,
-    _request_orig_model, log_router_usage,
+    log, MINIMAX_LIMITER, _request_orig_model, log_router_usage,
 )
 from router_debug import debug_auth_middleware, dl
 from router_mode import (
     get_file_mode, _current_mode, _err_response, get_mode,
     conversation_fingerprint, _resolve_chat_fingerprint,
-    get_chat_mode, set_chat_mode, clear_chat_mode,
-    _LEGACY_MODE_MAP,
+    get_chat_mode, set_chat_mode, _LEGACY_MODE_MAP,
 )
 from router_commands import (
     parse_router_command, _router_reply_text, _synthetic_message,
 )
 from router_auth import get_minimax_key, _reload_oauth_token, _load_oauth_token
-from forward_anthropic import forward_anthropic, forward_anthropic_direct
+from forward_anthropic import forward_anthropic
 from forward_minimax import (
-    forward_minimax, _fwd_minimax_short,
-    _route_v1_images, _route_v1_videos, _route_v1_music, _route_v1_audio_speech,
+    forward_minimax, _route_v1_images, _route_v1_videos, _route_v1_music, _route_v1_audio_speech,
 )
 from pipeline_anthropic import (
     _text_from_message,
-    _retry_forward,
-    _repair_message_sequence,
 )
 from pipeline_minimax import (
-    _pipeline_minimax_orchestrate, _try_shrink_body,
+    _pipeline_minimax_orchestrate,
 )
 
 # Load OAuth token at startup
@@ -241,8 +209,6 @@ ANTHROPIC_RETRY_MAX_SLEEP_SEC = float(os.environ.get("AIROUTER_ANTHROPIC_RETRY_M
 # leg Anthropic delle modalità MIX — riuso, non duplicazione). Questi thin-wrapper
 # restano per compatibilità con i call site anthropic puri.
 from pipeline_common import (
-    parse_retry_after as _parse_retry_after,
-    backoff_sleep_sec as _backoff_sleep_sec,
     anthropic_call_with_retry as _anthropic_call_with_retry,
 )
 
