@@ -120,7 +120,6 @@ except Exception:  # pragma: no cover - fail-safe: il backend non deve morire pe
         "glm-4.6V": 104_800, "glm-5V-Turbo": 160_000,
     }
 
-KEY_FILE = paths.secrets_script()
 ALERT_LOG = paths.log_file("glm-peak-alerts.log")
 
 # ── API Key ──────────────────────────────────────────────────────────────────

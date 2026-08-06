@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import re
 
 # ── Status sets ──────────────────────────────────────────────────────────────
 # Queste non sono definizioni ma re-export dalla fonte unica in router_constants.
@@ -116,8 +115,6 @@ def strip_images_body(body: bytes) -> bytes:
     return json.dumps(d).encode()
 
 # ── Context trim ──────────────────────────────────────────────────────────────
-_TRIM_RE = re.compile(r'("role":\s*"(?:user|assistant)".*?)("role":\s*"(?:user|assistant)")')
-
 def trim_old_messages(body: bytes, budget_tokens: int = 160_000) -> bytes:
     """Riduce i messaggi vecchi a ~budget_tokens token (stima byte//4)."""
     try:

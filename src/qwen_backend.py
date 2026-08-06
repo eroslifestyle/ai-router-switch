@@ -59,7 +59,6 @@ def _non_stream_timeout():
     return ClientTimeout(total=None, sock_connect=15, sock_read=NON_STREAM_SOCK_READ_SEC)
 
 
-KEY_FILE = paths.secrets_script()
 ALERT_LOG = paths.log_file("qwen-alerts.log")
 
 # Costanti di configurazione

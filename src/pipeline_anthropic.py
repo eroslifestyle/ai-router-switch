@@ -1,6 +1,5 @@
 # ~440 lines
 """Anthropic pipeline and body builders extracted from ai-router-proxy.py (~lines 1705-2796)."""
-import os
 
 from router_constants import (
     MINIMAX_CONTEXT_BYTE_LIMIT,
@@ -20,16 +19,11 @@ from trim_smart import SHRINK_KEEP_TAIL, build_shrink_summary  # noqa: F401 (re-
 # analisi AST degli import incrociati).
 from providers.base import _body_has_images  # noqa: F401  (re-export)
 
-# THINK su Sonnet (budget aumentato da 4s Haiku → 15s Sonnet).
-# ACT_MINIMAX_TIMEOUT_SEC resta 12s per evitare retry-storm lato client.
-MIX_AM_THINK_FAST_SEC = float(os.environ.get("AIROUTER_MIX_AM_THINK_FAST_SEC", "15"))
-MIX_AM_ACT_TIMEOUT_SEC = float(os.environ.get("AIROUTER_MIX_AM_ACT_TIMEOUT_SEC", "12"))
-
-# ── THINK backoff state per chat_fp ──────────────────────────────────────────
-_think_lock = __import__("threading").Lock()
-_think_count: dict[str, int] = {}
-_THINK_TIMEOUT_SEQUENCE = [15, 20, 25]   # Sonnet ci sta in 15s sulla maggior parte
-_THINK_SKIP_AFTER = 2
+# Qui vivevano i budget e lo stato di backoff della fase THINK: MIX_AM_THINK_FAST_SEC,
+# MIX_AM_ACT_TIMEOUT_SEC, _think_lock, _think_count, _THINK_TIMEOUT_SEQUENCE e
+# _THINK_SKIP_AFTER. Rimossi il 2026-08-07 perché nessuno li leggeva più: la pipeline
+# THINK/ACT è uscita dal proxy il 2026-07-25, quando il router è diventato un tunnel
+# trasparente e la gerarchia è passata interamente alla configurazione dell'agente.
 
 
 

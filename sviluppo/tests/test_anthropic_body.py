@@ -1,4 +1,9 @@
-import sys; import json; sys.path.insert(0, 'src'); from anthropic_body import sanitize_server_tool_ids, SRVTOOLU_ID_PATTERN
+import json
+import sys
+
+sys.path.insert(0, 'src')
+
+from anthropic_body import SRVTOOLU_ID_PATTERN, sanitize_server_tool_ids
 
 # Test 1: id non conforme viene corretto e riferimento associato aggiornato
 def test_id_non_conforme_viene_corretto():

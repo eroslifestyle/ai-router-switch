@@ -24,9 +24,9 @@ Ogni test in questa suite:
 import sys
 sys.path.insert(0, 'src')
 
-import os
 import importlib
 from pathlib import Path
+
 import pytest
 
 
@@ -146,3 +146,6 @@ class TestIsolamentoBugCatalog:
         assert percorso_annidato.parent.exists(), (
             "La directory padre non e' stata creata"
         )
+        # E che il modulo punti davvero li': senza questo il test passerebbe
+        # anche se la directory fosse stata creata da qualcun altro.
+        assert modulo.CATALOG_JSONL == percorso_annidato

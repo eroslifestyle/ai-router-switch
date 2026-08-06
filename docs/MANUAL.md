@@ -10,7 +10,7 @@ AI Router Proxy è un proxy **self-hosted** che si pone davanti a Claude Code (e
 Anthropic-format) e instrada il traffico verso **Claude**, **MiniMax**, o **GLM/z.ai** scegliendo
 il backend a seconda della modalità attiva.
 
-Il router è un **singolo processo Python/aiohttp** in ascolto su 7 porte:
+Il router è un **singolo processo Python/aiohttp** in ascolto su 10 porte:
 
 | Porta | Ruolo |
 |-------|-------|
@@ -18,11 +18,14 @@ Il router è un **singolo processo Python/aiohttp** in ascolto su 7 porte:
 | `8771` | Forzata: `anthropic` |
 | `8772` | Forzata: `minimax` |
 | `8773` | Forzata: `mix-am` |
+| `8774` | Forzata: `mix-al` |
 | `8775` | Forzata: `glm` |
 | `8776` | Forzata: `mix-gm` |
 | `8777` | Forzata: `mix-ag` |
+| `8778` | Forzata: `qwen` |
+| `8779` | Forzata: `local` |
 
-*(la `8774` esisteva per la modalità `inverse`, rimossa il 2026-07-26)*
+*(la `8774` era della modalità `inverse`, rimossa il 2026-07-26; dal 2026-08-04 è di `mix-al`)*
 
 **Regola aurea:** il router seleziona il backend. Non tocca impostazioni, skills,
 agenti, MCP, tools o system prompt del modello.
@@ -34,7 +37,7 @@ del client, non qui. La mappa è una tabella-dati in `src/role_routing.py`.
 
 ---
 
-## Le Sette Modalità
+## Le Nove Modalità
 
 Ogni modalità è una coppia di destinazioni: una per il modello che **pensa** (THINK)
 e una per il modello che **esegue** (ACT). Il router deduce il ruolo dal nome del
@@ -134,6 +137,38 @@ Endpoint Anthropic-compatible sull'host dedicato del workspace, `https://{Worksp
 Chiave: `secrets.sh get qwen.api_key`. Porta fissa: `8778`. Guida dedicata: `docs/MODALITA-QWEN.md`.
 
 **Uso:** contesti molto lunghi a basso costo — `qwen3-coder-plus` dichiara 1.048.576 token di input.
+
+---
+
+### 8. `mix-al` — Claude pensa, il modello locale esegue
+
+- **Fable 5 / Opus 5 / Sonnet 5** fanno il THINK e il VERIFY
+- **code-max**, in locale, esegue
+
+THINK e VERIFY restano su Anthropic (Fable 5, Opus 5 o Sonnet 5, scelti dall'utente); solo l'ACT va al modello locale `code-max`. Il provider "local" non ha un modello THINK proprio, quindi in `mix-al` la fase cognitiva non può uscire da Anthropic.
+
+Quando l'esecuzione locale fallisce, l'escalation risale lungo i tier Anthropic: Sonnet → Opus → Fable.
+
+Porta fissa: `8774`. Era la porta di `inverse`, modalità rimossa il 2026-07-26; il 2026-08-04 è stata riassegnata a `mix-al`.
+
+Il modello locale è esposto via LiteLLM, che parla il protocollo Anthropic nativo su `/v1/messages`. Chiave e base URL si leggono da `LOCAL_LLM_API_KEY` e `LOCAL_LLM_API_BASE`; in loro assenza il router carica `secrets/local-llm.env`. Timeout: `AIROUTER_LOCAL_TIMEOUT_SEC`, default 240 secondi. Retry: massimo 2.
+
+**Uso:** esecuzione a costo zero con il codice che non lascia la macchina, orchestrazione e ragionamento su Claude.
+
+---
+
+### 9. `local` — modello locale puro
+
+- **code-max** fa il THINK e il VERIFY
+- **code-max** esegue
+
+Modalità PURA: THINK e ACT vanno entrambi al modello locale `code-max`; non intervengono né Anthropic, né MiniMax, né GLM.
+
+Porta fissa: `8779`. Stesse chiavi (`LOCAL_LLM_API_KEY` / `LOCAL_LLM_API_BASE`, fallback `secrets/local-llm.env`), stesso timeout (`AIROUTER_LOCAL_TIMEOUT_SEC`, default 240 s) e stessi 2 retry di `mix-al`.
+
+Il router accetta solo `code-max`: qualsiasi altro modello richiesto viene ricondotto a quello. Prima dell'inoltro aggiunge un suggerimento di sistema al prompt.
+
+**Uso:** lavorare completamente offline, senza che alcun dato esca dalla macchina.
 
 ---
 
@@ -324,7 +359,7 @@ Le altre modalità continuano a funzionare normalmente.
    `OOMScoreAdjust=-900`, linger abilitato.
 
 2. **Cron watchdog** — `scripts/ai-stack-guard.sh` eseguito ogni 60 secondi
-   verifica che tutte le 8 porte siano in ascolto. Se una cade e systemd non
+   verifica che tutte le 10 porte siano in ascolto. Se una cade e systemd non
    la riavvia entro 4 secondi, la rilancia via nohup.
 
 3. **SessionStart hook** — verifica che lo stack sia attivo all'avvio dell'IDE.

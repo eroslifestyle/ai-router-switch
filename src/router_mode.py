@@ -92,10 +92,12 @@ def _load_chats() -> dict:
     changed = False
     for fp in list(d.keys()):
         if d[fp].get("ts", 0) < cutoff:
-            del d[fp]; changed = True
+            del d[fp]
+            changed = True
     if len(d) > CHAT_MAX_ENTRIES:
         for fp in sorted(d, key=lambda k: d[k].get("ts", 0))[: len(d) - CHAT_MAX_ENTRIES]:
-            del d[fp]; changed = True
+            del d[fp]
+            changed = True
     if changed:
         try:
             tmp = CHAT_STORE.with_suffix(".tmp")
@@ -138,7 +140,8 @@ def set_chat_mode(fp: str, mode: str):
 def clear_chat_mode(fp: str):
     d = _load_chats()
     if fp in d:
-        del d[fp]; _save_chats(d)
+        del d[fp]
+        _save_chats(d)
         log(f"chat {fp} -> reset")
 
 

@@ -71,8 +71,11 @@ async def _esegui(upstream, mode, final_override):
         # log_fn viene chiamato da StreamingRelay per registrare eventi
         logs.append(msg)
 
-    log_fn_usage = lambda *a, **k: None
-    log_fn_trim = lambda *a, **k: None
+    def log_fn_usage(*a, **k):
+        """Stub: il relay lo chiama ma il test non ne verifica gli argomenti."""
+
+    def log_fn_trim(*a, **k):
+        """Stub: come sopra."""
 
     # Sostituisco dl con un FakeDL per catturare le eventuali segnalazioni
     fake_dl = FakeDL()

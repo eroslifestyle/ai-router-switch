@@ -10,12 +10,9 @@ LISTEN_PORT = int(os.environ.get("AIROUTER_PORT", "8787"))
 ANTHROPIC_UPSTREAM = os.environ.get("AIROUTER_ANTHROPIC_UPSTREAM", "https://api.anthropic.com")
 MINIMAX_UPSTREAM = os.environ.get("AIROUTER_MINIMAX_UPSTREAM", "https://api.minimaxi.chat/anthropic")
 MINIMAX_MODEL = os.environ.get("AIROUTER_MINIMAX_MODEL", "MiniMax-M3")
-MINIMAX_ORCHESTRATOR_MODEL = os.environ.get("AIROUTER_MINIMAX_ORCHESTRATOR", "MiniMax-M3")
-MINIMAX_EXECUTORS = set(
-    m.strip() for m in os.environ.get(
-        "AIROUTER_MINIMAX_EXECUTORS", "MiniMax-M2,MiniMax-M2.5,MiniMax-M2.7"
-    ).split(",") if m.strip()
-)
+# MINIMAX_ORCHESTRATOR_MODEL e MINIMAX_EXECUTORS rimossi il 2026-08-07: erano
+# residui della pipeline THINK/ACT tolta dal proxy il 2026-07-25, mai letti da
+# nessuno da allora. Il ruolo lo decide role_routing.resolve_route.
 MIXED_EXECUTOR_MODEL = os.environ.get("AIROUTER_MIXED_EXECUTOR", "MiniMax-M2.7")
 # NEW_PIPELINE rimosso il 2026-08-06: era il flag che sceglieva fra la pipeline
 # THINK/ACT/VERIFY e il path legacy. La pipeline non esiste piu' dal 2026-07-25,
@@ -48,7 +45,8 @@ except Exception:
 # Risolti da paths.py: su questa macchina ~/.claude esiste e vince, quindi i
 # valori sono gli stessi di prima; altrove seguono XDG / APPDATA / Library.
 MODE_FILE = paths.mode_file()
-KEY_FILE = paths.secrets_script()
+# KEY_FILE rimossa il 2026-08-07: le chiavi passano da secrets_provider dal
+# 2026-08-06, e nessuno leggeva piu' questa costante.
 LOG_FILE = paths.log_file("ai-router.log")
 SIDECAR = paths.log_file("router-model-map.jsonl")
 USAGE_SIDECAR = paths.log_file("router-usage.jsonl")
@@ -58,7 +56,6 @@ TRIM_STATE_DIR = paths.ensure_dir(paths.trim_state_dir())
 
 # ── Limits & constants ─────────────────────────────────────────────────────────
 MINIMAX_CONTEXT_BYTE_LIMIT = int(os.environ.get("AIROUTER_MINIMAX_CONTEXT_LIMIT", "750000"))
-ANTHROPIC_HAIKU_CONTEXT_BYTE_LIMIT = 200 * 1024
 MINIMAX_RATE_LIMITS = {
     "MiniMax-M3": (200, 10_000_000),
     "MiniMax-M2.7": (500, 20_000_000),
@@ -90,9 +87,9 @@ THINK_TIMEOUT_SEC = float(os.environ.get("AIROUTER_THINK_TIMEOUT_SEC", "12"))
 # li' i chunk arrivano di continuo e sock_read=120 fa il suo mestiere.
 NON_STREAM_SOCK_READ_SEC = float(
     os.environ.get("AIROUTER_NON_STREAM_SOCK_READ_SEC", "600"))
-TRIM_TARGET_BYTES = MINIMAX_CONTEXT_BYTE_LIMIT // 2
-TRIM_MIN_MESSAGES = 4
-SUMMARY_BUDGET = MINIMAX_CONTEXT_BYTE_LIMIT * 3 // 4
+# TRIM_TARGET_BYTES, TRIM_MIN_MESSAGES e SUMMARY_BUDGET rimossi il 2026-08-07:
+# politiche superate. Lo shrink punta a MINIMAX_CONTEXT_BYTE_LIMIT pieno
+# (pipeline_minimax.py:71) e il budget del riassunto lo calcola ogni call site.
 CHAT_TTL_DAYS = 7
 CHAT_MAX_ENTRIES = 10000
 

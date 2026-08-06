@@ -215,9 +215,9 @@ def detect_foreign_tool_use(text: str, backend: str) -> list[str]:
         return []
     # Estrai tutti i match mantenendo l'ordine di apparizione
     matches = []
-    for regex in (_TOOL_USE_NAME_AFTER, _TOOL_USE_NAME_BEFORE):
-        for m in regex.finditer(text):
-            matches.append((m.start(), m.group(1)))
+    # Un solo passaggio: fino al 2026-08-07 questo ciclo era scritto due volte,
+    # identico. Il dedup su `seen` più sotto mascherava l'effetto — stesso
+    # risultato — ma ogni risposta veniva scandita due volte per nulla.
     for regex in (_TOOL_USE_NAME_AFTER, _TOOL_USE_NAME_BEFORE):
         for m in regex.finditer(text):
             matches.append((m.start(), m.group(1)))

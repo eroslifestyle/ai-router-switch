@@ -10,7 +10,7 @@ import sys
 import time
 import urllib.request
 import urllib.error
-from typing import Any, Optional
+from typing import Optional
 
 MODELLI_CANDIDATI = [
     "qwen3.8-max", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash",
@@ -141,7 +141,6 @@ def cerca_context_window(base_url: str, api_key: str, modello: str, delay: float
     # 1.500.000 token danno un corpo di circa 2,86 MB, sopra ogni limite noto e sotto
     # il tetto byte di 4,8 MB.
     OVERSHOOT_TOKEN = 1_500_000
-    OVERSHOOT_CHAR_PER_TOKEN = 2
     PATTERN_RANGE = re.compile(r"should be \[1,\s*(\d+)\]")
 
     sys.stderr.write(f"  Sonda a costo zero con {OVERSHOOT_TOKEN} token...\n")
@@ -162,7 +161,7 @@ def cerca_context_window(base_url: str, api_key: str, modello: str, delay: float
             sys.stderr.write(f"  -> Limite dichiarato dal gateway a costo zero: {limite_dichiarato} token\n")
             return {"tipo": "DICHIARATO", "valore": limite_dichiarato, "fonte": "limite dichiarato dal gateway in HTTP 400, misura a costo zero"}
         else:
-            sys.stderr.write(f"  HTTP 400 ma pattern non trovato, proseguo con scala\n")
+            sys.stderr.write("  HTTP 400 ma pattern non trovato, proseguo con scala\n")
     elif status_overshoot == 200:
         sys.stderr.write(f"  Attenzione: il modello ha accettato piu' di {OVERSHOOT_TOKEN} token, la sonda non e' conclusiva (costo input applicato)\n")
     else:
@@ -241,7 +240,7 @@ def testa_streaming(base_url: str, api_key: str, modello: str, delay: float) -> 
 
     if status == 200:
         righe = risposta.split("\n")
-        event_lines = [l for l in righe if l.startswith("event:")]
+        event_lines = [riga for riga in righe if riga.startswith("event:")]
         risultato = {"status": status, "esito": "OK", "righe_event": len(event_lines), "anteprima": risposta[:300]}
     else:
         risultato = {"status": status, "esito": "KO", "errore": risposta[:200]}

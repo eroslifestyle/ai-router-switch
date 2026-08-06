@@ -10,7 +10,7 @@ AI Router Proxy is a **self-hosted** proxy that sits in front of Claude Code (an
 Anthropic-format client) and routes traffic to **Claude**, **MiniMax**, or **GLM/z.ai**
 depending on the active mode.
 
-The router is a **single Python/aiohttp process** listening on 7 ports:
+The router is a **single Python/aiohttp process** listening on 10 ports:
 
 | Port | Role |
 |------|------|
@@ -18,11 +18,14 @@ The router is a **single Python/aiohttp process** listening on 7 ports:
 | `8771` | Forced: `anthropic` |
 | `8772` | Forced: `minimax` |
 | `8773` | Forced: `mix-am` |
+| `8774` | Forced: `mix-al` |
 | `8775` | Forced: `glm` |
 | `8776` | Forced: `mix-gm` |
 | `8777` | Forced: `mix-ag` |
+| `8778` | Forced: `qwen` |
+| `8779` | Forced: `local` |
 
-*(port `8774` served the `inverse` mode, removed on 2026-07-26)*
+*(port `8774` served the `inverse` mode, removed on 2026-07-26; since 2026-08-04 it serves `mix-al`)*
 
 **Golden rule:** the router selects the backend. It never touches model settings,
 skills, agents, MCP, tools, or system prompt.
@@ -34,7 +37,7 @@ configuration, not here. The map is a data table in `src/role_routing.py`.
 
 ---
 
-## The Seven Modes
+## The Nine Modes
 
 Each mode is a pair of destinations: one for the model that **thinks** (THINK) and
 one for the model that **executes** (ACT). The router infers the role from the
@@ -132,6 +135,38 @@ Anthropic-compatible endpoint on the workspace-dedicated host, `https://{Workspa
 Key: `secrets.sh get qwen.api_key`. Fixed port: `8778`. Dedicated guide: `docs/MODALITA-QWEN.md`.
 
 **Use when:** very long contexts at low cost — `qwen3-coder-plus` declares 1,048,576 input tokens.
+
+---
+
+### 8. `mix-al` — Claude thinks, the local model executes
+
+- **Fable 5 / Opus 5 / Sonnet 5** do THINK and VERIFY
+- **code-max**, local, executes
+
+THINK and VERIFY stay on Anthropic (Fable 5, Opus 5 or Sonnet 5, chosen by the user); only the ACT goes to the local `code-max` model. The "local" provider has no THINK model of its own, so in `mix-al` the cognitive phase cannot leave Anthropic.
+
+When local execution fails, the escalation climbs back up the Anthropic tiers: Sonnet → Opus → Fable.
+
+Fixed port: `8774`. It was the port of `inverse`, a mode removed on 2026-07-26; on 2026-08-04 it was reassigned to `mix-al`.
+
+The local model is exposed via LiteLLM, which speaks the native Anthropic protocol on `/v1/messages`. Key and base URL are read from `LOCAL_LLM_API_KEY` and `LOCAL_LLM_API_BASE`; if missing, the router loads `secrets/local-llm.env`. Timeout: `AIROUTER_LOCAL_TIMEOUT_SEC`, default 240 seconds. Retry: maximum 2.
+
+**Use:** zero-cost execution with code that never leaves the machine, orchestration and reasoning on Claude.
+
+---
+
+### 9. `local` — pure local model
+
+- **code-max** does THINK and VERIFY
+- **code-max** executes
+
+PURE mode: both THINK and ACT go to the local `code-max` model; neither Anthropic, nor MiniMax, nor GLM step in.
+
+Fixed port: `8779`. Same keys (`LOCAL_LLM_API_KEY` / `LOCAL_LLM_API_BASE`, fallback `secrets/local-llm.env`), same timeout (`AIROUTER_LOCAL_TIMEOUT_SEC`, default 240 s) and same 2 retries as `mix-al`.
+
+The router accepts only `code-max`: any other requested model is folded back to that one. Before forwarding, it appends a system hint to the prompt.
+
+**Use:** work fully offline, with no data leaving the machine.
 
 ---
 

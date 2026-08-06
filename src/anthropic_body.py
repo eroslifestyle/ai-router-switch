@@ -16,13 +16,6 @@ import re
 
 SRVTOOLU_ID_PATTERN = re.compile(r'^srvtoolu_[a-zA-Z0-9_]+$')
 
-_RESULT_BLOCK_TYPES = (
-    'web_search_tool_result',
-    'web_fetch_tool_result',
-    'code_execution_tool_result',
-)
-
-
 def sanitize_server_tool_ids(body: bytes) -> tuple[bytes, int]:
     """
     Sanifica i body che potrebbero contenere id ``server_tool_use`` non conformi.

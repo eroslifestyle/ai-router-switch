@@ -241,6 +241,8 @@ class ContextManager:
 
     def _provider_for_model(self, model: str) -> str:
         m = model.lower()
-        if 'glm' in m:   return 'glm'
-        if 'minimax' in m: return 'minimax'
+        if 'glm' in m:
+            return 'glm'
+        if 'minimax' in m:
+            return 'minimax'
         return 'anthropic'

@@ -13,7 +13,7 @@ from aiohttp import ClientTimeout
 
 from router_constants import (
     MINIMAX_RATE_LIMITS, MINIMAX_RATE_LIMITS_DEFAULT, MINIMAX_SAFETY,
-    MINIMAX_BACKOFF_STEPS, MINIMAX_ALERTS_LOG,
+    MINIMAX_BACKOFF_STEPS, MINIMAX_ALERTS_LOG, MINIMAX_CONCURRENCY,
     USAGE_SIDECAR, NON_STREAM_SOCK_READ_SEC,
 )
 
@@ -226,7 +226,11 @@ class MinimaxRateLimiter:
 
 
 MINIMAX_LIMITER = MinimaxRateLimiter()
-_MINIMAX_SEM = asyncio.Semaphore(int(os.environ.get("AIROUTER_MINIMAX_SEMAPHORE", "8")))
+# Fonte unica: MINIMAX_CONCURRENCY legge la stessa env var in router_constants.
+# Fino al 2026-08-07 qui c'era una seconda lettura di AIROUTER_MINIMAX_SEMAPHORE,
+# quindi la costante risultava non usata e i due valori potevano divergere se uno
+# dei due default fosse cambiato. Stesso schema di QWEN_CONCURRENCY in qwen_backend.
+_MINIMAX_SEM = asyncio.Semaphore(MINIMAX_CONCURRENCY)
 
 
 # ── Alert ──────────────────────────────────────────────────────────────────────
