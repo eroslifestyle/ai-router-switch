@@ -4,6 +4,7 @@ Self-healing fixer L2: auto-merge con auto-revert.
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -449,7 +450,38 @@ def cleanup_worktree(ticket_id):
         pass  # fail-open
 
 
-def process_ticket(ticket, dry_run=False):
+def open_pull_request(branch, ticket):
+    """Prova ad aprire una PR con gh; se non ce, dice come farlo a mano.
+
+    Non solleva mai: che la PR si apra o no, il ramo esiste comunque ed e quello
+    che conta. gh puo mancare, non essere autenticato, o il remoto non esserci.
+    """
+    titolo = f"self-fix: {ticket.get('kind', ticket['id'])}"
+    corpo = (
+        "Patch proposta automaticamente dal self-fixer L2.\n\n"
+        f"Ticket: {ticket['id']}\n"
+        f"Occorrenze osservate: {ticket.get('count', '?')}\n\n"
+        "Scritta da un modello, NON revisionata da una persona: leggere il diff "
+        "prima di fondere."
+    )
+    if not shutil.which("gh"):
+        _log(f"gh non disponibile: rivedere a mano il ramo {branch}")
+        return
+    try:
+        subprocess.run(
+            ["git", "push", "-u", "origin", branch],
+            cwd=REPO_ROOT, capture_output=True, timeout=120, check=True,
+        )
+        subprocess.run(
+            ["gh", "pr", "create", "--head", branch, "--title", titolo, "--body", corpo],
+            cwd=REPO_ROOT, capture_output=True, timeout=120, check=True,
+        )
+        _log(f"PR aperta per {branch}")
+    except Exception as exc:
+        _log(f"PR non aperta ({type(exc).__name__}): rivedere a mano il ramo {branch}")
+
+
+def process_ticket(ticket, dry_run=False, merge=False):
     """Orchestra processo di fix completo."""
     ticket_id = ticket["id"]
     state = load_state(ticket_id)
@@ -489,8 +521,18 @@ def process_ticket(ticket, dry_run=False):
         
         # Fase 3: commit (lo sha del merge, non questo, serve per il revert)
         commit_patch(worktree, ticket)
-        
-        # Fase 4: merge
+        # Fase 4: merge SOLO se richiesto esplicitamente con --merge.
+        # Il default e PR-only: il ramo resta li e lo valuta una persona.
+        if not merge:
+            cleanup_worktree(ticket_id)
+            outcome = "branch-pronto"
+            state["last_outcome"] = outcome
+            state["history"].append(outcome)
+            save_state(ticket_id, state)
+            _log(f"Ramo fix/{ticket_id} pronto per la revisione: nessun merge automatico")
+            open_pull_request(f"fix/{ticket_id}", ticket)
+            return 0
+
         try:
             merge_sha = merge_to_main(f"fix/{ticket_id}")
         except subprocess.CalledProcessError:
@@ -576,17 +618,29 @@ def process_ticket(ticket, dry_run=False):
 
 def main():
     parser = argparse.ArgumentParser(description="Self-healing fixer L2")
-    parser.add_argument("--auto", action="store_true", help="Modalità automatica con vincoli")
+    parser.add_argument("--auto", action="store_true", help="Modalita automatica con vincoli")
     parser.add_argument("--ticket", help="ID o tipo di ticket")
     parser.add_argument("--dry-run", action="store_true", help="Simula senza effetti")
     parser.add_argument("--min-count", type=int, default=3, help="Minimo conteggio bug")
-    
+    parser.add_argument(
+        "--merge", action="store_true",
+        help="Fonde la patch su main invece di fermarsi al ramo. Sconsigliato: "
+             "il diff lo ha scritto un modello, non una persona.",
+    )
+
     args = parser.parse_args()
-    
+
+    # Interruttore generale: senza AIROUTER_SELF_FIX_ENABLED=1 il fixer non fa nulla.
+    # Vale anche per --ticket, non solo per --auto: se e spento, e spento.
+    if os.environ.get("AIROUTER_SELF_FIX_ENABLED", "0") != "1":
+        _log("Self-fixer disattivato (AIROUTER_SELF_FIX_ENABLED diverso da 1)")
+        print("Self-fixer disattivato. Per abilitarlo: AIROUTER_SELF_FIX_ENABLED=1")
+        return 0
+
     if not args.auto and not args.ticket:
         parser.print_help()
         return 1
-    
+
     if args.auto:
         if router_is_busy():
             _log("Router occupato, skip automatico")
@@ -611,7 +665,7 @@ def main():
             _log(f"Ticket {args.ticket} non trovato")
             return 2
     
-    return process_ticket(ticket, dry_run=args.dry_run)
+    return process_ticket(ticket, dry_run=args.dry_run, merge=args.merge)
 
 
 if __name__ == "__main__":
