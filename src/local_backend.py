@@ -15,7 +15,11 @@ LOCAL_MODEL_CODE = 'code-max'
 # Nessun fallback: il modello locale ha una sola via, llama.cpp :8083 dietro LiteLLM.
 # L'alias Ollama code-max-ollama e' stato rimosso il 2026-08-04 (duplicazione da 48GB).
 LOCAL_MODEL_FALLBACK = LOCAL_MODEL_CODE
-LOCAL_TIMEOUT_SEC = int(os.environ.get('AIROUTER_LOCAL_TIMEOUT_SEC', 600))
+# Il client Claude Code taglia a API_TIMEOUT_MS (300s di default): il router DEVE
+# scadere PRIMA, altrimenti dopo l'abbandono del client la richiesta continua a
+# occupare uno slot GPU di llama.cpp e la saturazione si auto-alimenta.
+LOCAL_TIMEOUT_SEC = int(os.environ.get('AIROUTER_LOCAL_TIMEOUT_SEC', 240))
+# Retry solo su errori di connessione (rapidi). Su timeout NON si ritenta: vedi forward_local.
 LOCAL_MAX_RETRY = 2
 
 def _local_env_file():
@@ -368,10 +372,16 @@ async def forward_local(
             )
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             elapsed_ms = (asyncio.get_event_loop().time() - start) * 1000
-            if attempt < LOCAL_MAX_RETRY:
+            # Su TIMEOUT non si ritenta: la richiesta scaduta ha gia' consumato il
+            # budget del client e un nuovo tentativo occuperebbe un altro slot GPU
+            # mentre il client sta per abbandonare. Si ritenta solo la connessione.
+            _is_timeout = isinstance(e, asyncio.TimeoutError)
+            if attempt < LOCAL_MAX_RETRY and not _is_timeout:
                 log_fn(f"forward_local retry {attempt+1}: {type(e).__name__} elapsed={elapsed_ms:.0f}ms")
                 await asyncio.sleep(2)
                 continue
+            if _is_timeout:
+                log_fn(f"forward_local TIMEOUT dopo {elapsed_ms:.0f}ms (limite {LOCAL_TIMEOUT_SEC}s): nessun retry")
             log_fn(f"forward_local error: {type(e).__name__} elapsed={elapsed_ms:.0f}ms")
             err_msg = f'{{"type":"error","error":{{"type":"local_unavailable","message":"Local LLM backend unreachable: {e}"}}}}'
             if passthrough:
