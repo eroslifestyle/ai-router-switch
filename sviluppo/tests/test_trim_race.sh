@@ -7,6 +7,9 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# Il blocco python è dentro un heredoc quotato, quindi non interpola: la root
+# gli arriva per ambiente.
+export AIROUTER_REPO="$ROOT"
 PASS=0; FAIL=0
 ok(){ echo "  ✓ $*"; PASS=$((PASS+1)); }
 ko(){ echo "  ✗ $*"; FAIL=$((FAIL+1)); }
@@ -17,10 +20,10 @@ echo "═══ TEST TRIM RACE (atomico write+read+unlink) ═══"
 echo "── [1] Import codice trim ──"
 python3 - <<'PY'
 import sys, os, tempfile, threading, json, time
-sys.path.insert(0, "/mnt/backup/Dropbox/1 Programmazione/Progetti/ai-router-switch/src")
+sys.path.insert(0, os.environ["AIROUTER_REPO"] + "/src")
 # Leggi solo la logica pura: scrivi + leggi + unlink con lock
 # (non eseguiamo handle() che richiede aiohttp)
-exec(open("/mnt/backup/Dropbox/1 Programmazione/Progetti/ai-router-switch/src/ai-router-proxy.py")
+exec(open(os.environ["AIROUTER_REPO"] + "/src/ai-router-proxy.py")
      .read().split("def _trim_context_after_response")[0])
 # Verifica trim_locks esiste
 assert "trim_locks" in dir() or True, "trim_locks defined at module level"

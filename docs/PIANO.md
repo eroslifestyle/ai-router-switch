@@ -118,7 +118,7 @@ streaming diretto.
 ## 🚀 Deploy (aggiornato 2026-06-23)
 
 ### Symlink runtime → repo (anti-drift)
-Il servizio systemd `ai-router.service` punta a `/home/mrxxx/.claude/scripts/ai-router-proxy.py`.
+Il servizio systemd `ai-router.service` punta a `~/.claude/scripts/ai-router-proxy.py`.
 **Da oggi quel file è un symlink** a `src/ai-router-proxy.py` (repo). Vantaggi:
 - Commit a `src/` si propagano al servizio live al prossimo restart (no drift).
 - Una sola fonte di verità (`src/`).

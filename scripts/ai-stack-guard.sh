@@ -6,8 +6,9 @@
 # Backend DIRETTO alle API, nessun proxy intermedio (2026-06-29).
 set -uo pipefail
 
-ROUTER=/home/mrxxx/.claude/scripts/ai-router-proxy.py
-LOG=/home/mrxxx/.claude/logs/ai-stack-guard.log
+CONF="${AIROUTER_HOME:-${HOME}/.claude}"
+ROUTER="$CONF/scripts/ai-router-proxy.py"
+LOG="$CONF/logs/ai-stack-guard.log"
 mkdir -p "$(dirname "$LOG")"
 
 ts(){ date '+%Y-%m-%dT%H:%M:%S'; }
@@ -28,7 +29,7 @@ ensure(){
   fi
   # tentativo 2: nohup diretto (backstop se systemd degraded)
   note "  systemd ko -> nohup diretto $name"
-  nohup "$@" >> "/home/mrxxx/.claude/logs/${name}.log" 2>&1 &
+  nohup "$@" >> "$CONF/logs/${name}.log" 2>&1 &
   sleep 4
   up "$port" && note "  ✓ $name ripristinato via nohup" || note "  ✗ $name ANCORA giù"
 }

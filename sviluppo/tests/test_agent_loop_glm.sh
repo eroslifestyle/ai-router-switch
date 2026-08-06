@@ -10,7 +10,7 @@
 set -u
 MODE="${1:-mix-ag}"
 RPORT="${2:-18810}"
-SRC="/mnt/backup/Dropbox/1 Programmazione/Progetti/ai-router-switch"
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 FAKE_PORT="${FAKE_PORT:-9430}"
 
 cleanup() {

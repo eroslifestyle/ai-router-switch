@@ -4,7 +4,7 @@ After=ai-router.service
 
 [Service]
 Type=oneshot
-WorkingDirectory=/mnt/backup/Dropbox/1 Programmazione/Progetti/ai-router-switch/src
+WorkingDirectory=@PROJECT_ROOT@/src
 # Il modulo si risolve dalla WorkingDirectory: `python3 -m` antepone la cwd.
 # --auto: rispetta busy-window, max 2 tentativi per ticket, cooldown 6h, zona proibita.
 ExecStart=/usr/bin/python3 -m self_healing.fixer --auto

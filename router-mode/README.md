@@ -124,7 +124,7 @@ Read by:
 
 **Desktop entry**: `~/.local/share/applications/routestats.desktop`
 
-Exec: `/home/mrxxx/.claude/router-mode/routestats card`
+Exec: `~/.claude/router-mode/routestats card`
 
 Appears in GNOME applications menu as "AI Router Mode Panel" with 🔀 icon.
 

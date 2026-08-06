@@ -11,7 +11,7 @@ exec 9>"$LOCK_FILE"
 flock -n 9 || exit 0
 
 PORT=8787
-PROJECT_ROOT="/mnt/backup/Dropbox/1 Programmazione/Progetti/ai-router-switch"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 if ! ss -ltn 2>/dev/null | grep -q ":$PORT "; then
   nohup env "PYTHONPATH=$PROJECT_ROOT:$PROJECT_ROOT/src" \
     python3 "$PROJECT_ROOT/src/ai-router-proxy.py" \

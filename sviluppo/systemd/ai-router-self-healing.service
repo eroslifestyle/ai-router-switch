@@ -1,6 +1,6 @@
 [Unit]
 Description=AI Router self-healing watcher — aggrega gli outcome da router-usage.jsonl e produce router-policy.json
-Documentation=file:///mnt/backup/Dropbox/1%%20Programmazione/Progetti/ai-router-switch/.claude/TODO.md
+Documentation=https://github.com/eroslifestyle/ai-router-switch
 After=ai-router.service
 Wants=ai-router.service
 StartLimitIntervalSec=600
@@ -8,7 +8,7 @@ StartLimitBurst=10
 
 [Service]
 Type=simple
-WorkingDirectory=/mnt/backup/Dropbox/1 Programmazione/Progetti/ai-router-switch/src
+WorkingDirectory=@PROJECT_ROOT@/src
 
 # Il modulo si risolve dalla WorkingDirectory: `python3 -m` antepone la cwd a
 # sys.path, e self_healing/ sta dentro src/. Nessun wrapper necessario, a

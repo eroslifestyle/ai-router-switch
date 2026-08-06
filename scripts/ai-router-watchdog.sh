@@ -5,7 +5,8 @@ set -u
 PORT=8787
 URL="http://127.0.0.1:${PORT}/__router_health"
 STATE_FILE="/tmp/ai-router-watchdog.fails"
-LOG="/home/mrxxx/.claude/logs/ai-router-watchdog.log"
+CONF="${AIROUTER_HOME:-${HOME}/.claude}"
+LOG="$CONF/logs/ai-router-watchdog.log"
 TIMEOUT=5
 MAX_FAILS=2
 

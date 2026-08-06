@@ -26,7 +26,6 @@ logs/*.json
 .claude/codemap.json
 .claude/settings.json
 CLAUDE.md
-/mnt/backup/Dropbox/1 Programmazione/Progetti/ai-router-switch/src/graphify-out/
 src//graphify-out/
 
 # router-mode GUI runtime state
@@ -48,3 +47,8 @@ sviluppo/backup-20260806/
 # era il file più grande del repo. Il nome resta ignorato perché una redirezione
 # sbagliata verso "sys" è un incidente facile da ripetere.
 /sys
+
+# Generati da install.py per la macchina su cui gira, con path assoluti:
+# nel repo vivono solo i template (systemd/ai-router.service.in).
+/systemd/ai-router.service
+/scripts/ai-router-proxy-wrapper.sh

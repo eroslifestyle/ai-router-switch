@@ -9,7 +9,7 @@
 set -u
 MODE="${1:?mode richiesto}"
 RPORT="${2:?test port richiesto}"
-SRC="/mnt/backup/Dropbox/1 Programmazione/Progetti/ai-router-switch"
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 FAKE_PORT="${FAKE_PORT:-9429}"
 LOG="/tmp/mixretry-${MODE}-${RPORT}.log"
 FAKE_LOG="/tmp/fake429-${FAKE_PORT}.log"
