@@ -39,7 +39,7 @@ Legacy aliases accepted: `mixed` = mix-am, `glm-minimax` = mix-gm, `anthropic-gl
 
 - Globally, for every application: `ai-mode <mode>`. Other subcommands: `ai-mode status`, `log`, `start`, `stop`, `restart`, `update`.
 - Per-chat, scoped to the conversation: send `!router <mode>` inside the chat. Also available: `!router status`, `!router reset`, `!router help`. Natural-language routing was removed on 2026-07-26 because ordinary sentences were switching modes without the user asking; only the explicit `!router` form is intercepted.
-- From the terminal, scoped to one session: `scripts/router <mode>` passes through the same parser as the proxy and sets the mode only for the current session (identified by `CLAUDE_CODE_SESSION_ID`); it exists because an initial `!` is eaten by the CLI shell so `!router …` never reaches the proxy, and unlike `ai-mode` it does not rewrite the global mode file, leaving other chats untouched.
+- From the terminal, scoped to one session: `scripts/router <mode>` passes through the same parser as the proxy and sets the mode only for the current session (identified by `CLAUDE_CODE_SESSION_ID`); it exists because an initial `!` is eaten by the CLI shell so `!router …` never reaches the proxy, and unlike `ai-mode` it does not rewrite the global mode file, leaving other chats untouched. Install it like the other commands, by symlinking it into a directory on your `PATH`: `ln -s "$PWD/scripts/router" ~/.local/bin/router`.
 - Per fixed port: point `ANTHROPIC_BASE_URL` at the port of the desired mode.
 
 ## Installation
