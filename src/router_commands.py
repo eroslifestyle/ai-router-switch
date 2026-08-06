@@ -94,9 +94,12 @@ def _router_reply_text(action: dict, fp: str, fallback_fp: str = None) -> str:
             clear_chat_mode(fallback_fp)
         _gm = get_file_mode()
         return f"↺ Chat riportata al default: **{_INTERNAL_TO_DISPLAY.get(_gm, _gm)}**"
-    return ("🧭 Comandi: `!router <anthropic|minimax|mixam|mixag|mixgm|glm|qwen>` · "
+    # L'elenco si deriva da VALID_MODES: scritto a mano si disallinea (il 2026-08-04
+    # mancava 'qwen', poi 'mix-al' e 'local'), e l'utente non trova il comando che esiste.
+    _modes = '|'.join(VALID_MODES)
+    return (f"🧭 Comandi: `!router <{_modes}>` · "
             "`!router status` · `!router reset`.\n"
-            "Alias accettati: `mix-am`/`mix-ag`/`mix-gm` per esteso, e i nomi storici "
+            "Alias accettati: `mixam`/`mixag`/`mixgm` in forma breve, e i nomi storici "
             "`mixed`, `glm-minimax`, `anthropic-glm`, normalizzati al canonico.")
 
 
