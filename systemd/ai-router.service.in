@@ -1,0 +1,60 @@
+[Unit]
+Description=AI Router Proxy (porta 8787) — switcher fra le nove modalità, HARDENED
+Documentation=https://github.com/eroslifestyle/ai-router-switch
+After=network-online.target
+Wants=network-online.target
+# Permetti restart frequenti senza rate-limit
+StartLimitIntervalSec=600
+StartLimitBurst=20
+
+[Service]
+Type=simple
+WorkingDirectory=@PROJECT_ROOT@/src
+Environment=AIROUTER_PORT=8787
+Environment=AIROUTER_LISTEN_HOST=127.0.0.1
+Environment=AIROUTER_ANTHROPIC_UPSTREAM=https://api.anthropic.com
+# Il router NON sceglie il modello: la gerarchia sta nella configurazione del
+# client, il router riscrive solo il backend in base alla modalità attiva.
+Environment=AIROUTER_MINIMAX_UPSTREAM=https://api.minimaxi.chat/anthropic
+Environment=AIROUTER_MINIMAX_MODEL=MiniMax-M2.7
+Environment=AIROUTER_NEW_PIPELINE=1
+# Le chiavi API si leggono da qui. Il trattino iniziale rende il file
+# facoltativo: senza, il servizio non partirebbe finché non esiste.
+# PYTHONPATH lo imposta il wrapper, non Environment=, che troncherebbe i path
+# contenenti spazi.
+EnvironmentFile=-@CONFIG_HOME@/.env
+
+# Pre-start: libera le porte da eventuali processi orfani di un restart fallito.
+# Il trattino iniziale e i "|| true" rendono il passo innocuo dove fuser non c'è.
+ExecStartPre=-/bin/sh -c "for p in @PORTS@; do fuser -k -n tcp $p 2>/dev/null || true; done; sleep 1"
+
+ExecStart=@WRAPPER@
+
+# Stop: SIGTERM → 3s → SIGKILL (il proxy si blocca, non aspettare 90s default)
+KillMode=mixed
+KillSignal=SIGTERM
+# 8 s e non 3 (2026-07-26): lo stop tipico dura ~0,04 s misurati — il drain di
+# aiohttp (r.cleanup()) è già istantaneo senza stream aperti, quindi il timeout
+# morde SOLO quando c'è un SSE in corso, cioè esattamente quando il SIGKILL
+# tronca una risposta a metà. 8 s dà respiro a quegli stream senza bloccare i
+# restart per minuti. SendSIGKILL resta la rete di sicurezza.
+TimeoutStopSec=8
+SendSIGKILL=yes
+FinalKillSignal=SIGKILL
+
+# Resilience
+Restart=always
+RestartSec=2
+
+# Resource limits per stream SSE multipli
+LimitNOFILE=65536
+TasksMax=512
+MemoryHigh=512M
+MemoryMax=1G
+
+# OOM safety
+OOMScoreAdjust=-900
+OOMPolicy=continue
+
+[Install]
+WantedBy=default.target

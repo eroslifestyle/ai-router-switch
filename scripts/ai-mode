@@ -1,28 +1,98 @@
 #!/usr/bin/env bash
-# ai-mode — controlla il routing AI di Claude Code (proxy switcher porta 8789)
-# Uso: ai-mode [anthropic|minimax|mixed|status|start|stop|restart|log]
+# ai-mode — controlla il routing AI di Claude Code (proxy switcher porta 8787)
+# Uso: ai-mode [anthropic|minimax|mix-am|mix-ag|mix-gm|mix-al|glm|qwen|local|status|start|stop|restart|log|update]
 set -euo pipefail
 
-MODE_FILE="$HOME/.claude/ai-router-mode"
-PROXY="$HOME/.claude/scripts/ai-router-proxy.py"
-PIDFILE="$HOME/.claude/locks/ai-router.pid"
-LOG="$HOME/.claude/logs/ai-router.log"
-PORT=8787
+# Ricava REPO_ROOT risolvendo symlink (funziona anche su macOS BSD)
+resolve_repo_root(){
+  local script_path="$1"
+  local dir
+  if command -v readlink &>/dev/null && readlink -f "$script_path" &>/dev/null; then
+    dir="$(dirname "$(readlink -f "$script_path")")"
+  else
+    # Ripiego per macOS/BSD dove readlink -f non esiste
+    while [ -L "$script_path" ]; do
+      local link; link="$(readlink "$script_path")" || break
+      case "$link" in
+        /*) script_path="$link" ;;
+        *)  script_path="$(dirname "$script_path")/$link" ;;
+      esac
+    done
+    dir="$(cd "$(dirname "$script_path")" && pwd -P)"
+  fi
+  # lo script sta in scripts/, la root del repo è la directory padre
+  dirname "$dir"
+}
+
+REPO_ROOT="$(resolve_repo_root "$0")"
+
+# Trova python3
 PY="$(command -v python3)"
+
+# Configurazione portabile — replica la logica di src/paths.py
+config_home(){
+  if [ -n "${AIROUTER_HOME:-}" ]; then
+    echo "$AIROUTER_HOME"
+  elif [ -d "$HOME/.claude" ]; then
+    echo "$HOME/.claude"
+  elif [[ "$OSTYPE" == darwin* ]]; then
+    echo "$HOME/Library/Application Support/ai-router-switch"
+  else
+    echo "${XDG_CONFIG_HOME:-$HOME/.config}/ai-router-switch"
+  fi
+}
+
+CONF="$(config_home)"
+MODE_FILE="$CONF/ai-router-mode"
+PIDFILE="$CONF/locks/ai-router.pid"
+LOG="$CONF/logs/ai-router.log"
+PROXY="$REPO_ROOT/src/ai-router-proxy.py"
+PORT=8787
 
 mkdir -p "$(dirname "$PIDFILE")" "$(dirname "$LOG")"
 
-is_running(){ ss -ltn 2>/dev/null | grep -q ":$PORT "; }
+# Controlla se systemd è disponibile per questo servizio
+systemd_available(){
+  command -v systemctl &>/dev/null \
+    && systemctl --user list-unit-files ai-router.service &>/dev/null
+}
+
+# Helper per invocare systemd (start/stop/restart)
+systemd_control(){
+  local action="$1"
+  echo "→ systemd $action ai-router"
+  systemctl --user "$action" ai-router
+  return 0
+}
+
+is_running(){
+  if command -v ss &>/dev/null; then
+    ss -ltn 2>/dev/null | grep -q ":$PORT "
+  elif command -v lsof &>/dev/null; then
+    lsof -iTCP:"$PORT" -sTCP:LISTEN &>/dev/null
+  else
+    curl -s -o /dev/null -m 2 "http://127.0.0.1:$PORT/__router_health"
+  fi
+}
 
 start(){
   if is_running; then echo "già in esecuzione su :$PORT"; return; fi
-  nohup "$PY" "$PROXY" >>"$LOG" 2>&1 &
+  if systemd_available; then
+    systemd_control start
+    return 0
+  fi
+  # Avvio diretto con nohup + pidfile
+  PYTHONPATH="$REPO_ROOT" nohup "$PY" "$PROXY" >>"$LOG" 2>&1 &
   echo $! > "$PIDFILE"
   sleep 1.5
   is_running && echo "✓ avviato (pid $(cat "$PIDFILE")) su :$PORT" || { echo "✗ avvio fallito — vedi: ai-mode log"; exit 1; }
 }
 
 stop(){
+  if systemd_available; then
+    systemd_control stop
+    return 0
+  fi
   if [ -f "$PIDFILE" ]; then kill "$(cat "$PIDFILE")" 2>/dev/null || true; rm -f "$PIDFILE"; fi
   pkill -f "ai-router-proxy.py" 2>/dev/null || true
   echo "fermato."
@@ -34,33 +104,78 @@ status(){
   if is_running; then
     echo "proxy    : ✓ attivo su 127.0.0.1:$PORT"
     curl -s -m3 "http://127.0.0.1:$PORT/__router_health" 2>/dev/null \
-      | python3 -m json.tool 2>/dev/null || true
+      | "$PY" -m json.tool 2>/dev/null || true
   else
     echo "proxy    : ✗ NON attivo  (avvia con: ai-mode start)"
   fi
 }
 
+set_mode(){
+  # alias CLI → nome CANONICO (router_constants.VALID_MODES).
+  case "$1" in
+    mixgm|glm-minimax)    echo "mix-gm" ;;
+    mixag|anthropic-glm)   echo "mix-ag" ;;
+    mixam|mixed)           echo "mix-am" ;;
+    mixal)                 echo "mix-al" ;;
+    *)                     echo "$1" ;;
+  esac
+}
+
+apply_mode(){
+  local m; m="$(set_mode "$1")"
+  echo "$m" > "$MODE_FILE"
+  echo "modalità → $m"
+  if is_running; then
+    :
+  elif systemd_available; then
+    systemd_control start
+  else
+    echo "(proxy non attivo: avvio…)"
+    start
+  fi
+  echo "Nota: il cambio è immediato per le NUOVE richieste."
+  case "$m" in
+    glm|mix-gm|mix-ag)
+      echo "ℹ️  GLM/z.ai attivo. Fascia peak 14-18 Asia/Shanghai (08-12 IT estate):"
+      echo "    glm-5.2/glm-5-turbo bloccati (3x) → task complessi su Anthropic, semplici su glm-4.7."
+      ;;
+    mix-al)
+      echo "ℹ️  Mix-al attivo: THINK e VERIFY su Anthropic, esecuzione sul modello locale code-max."
+      ;;
+    local)
+      echo "ℹ️  Local puro attivo. THINK+ACT+VERIFY tutti su code-max (llama.cpp :8083)."
+      echo "    Isolamento totale: nessuna chiamata esterna, nessuna escalation remota."
+      ;;
+  esac
+}
+
+update(){
+  if [ -f "$REPO_ROOT/src/updater.py" ]; then
+    PYTHONPATH="$REPO_ROOT" "$PY" "$REPO_ROOT/src/updater.py" "$@"
+  else
+    echo "✗ $REPO_ROOT/src/updater.py non trovato"
+    exit 1
+  fi
+}
+
 case "${1:-status}" in
-  anthropic|minimax|mixed|interactive|glm|glm-minimax|anthropic-glm|mix-am|mix-ag|mix-gm|qwen)
-    echo "$1" > "$MODE_FILE"
-    echo "modalità → $1"
-    is_running || { echo "(proxy non attivo: avvio…)"; start; }
-    echo "Nota: il cambio è immediato per le NUOVE richieste."
-    case "$1" in
-      glm|glm-minimax|anthropic-glm)
-        echo "ℹ️  GLM/z.ai attivo. Fascia peak 14-18 Asia/Shanghai (08-12 IT estate):"
-        echo "    glm-5.2/glm-5-turbo bloccati (3x) → task complessi su Anthropic, semplici su glm-4.7."
-        ;;
-      qwen)
-        echo "ℹ️  Qwen/Alibaba Model Studio attivo. THINK=qwen3.7-max, ACT=qwen3-coder-plus."
-        echo "    Serve la chiave in ~/.claude/secrets/secrets.sh: qwen.api_key e qwen.workspace_id."
-        ;;
-    esac
+  anthropic|minimax|mix-am|mix-ag|mix-gm|mix-al|glm|qwen|local|\
+  mixed|mixam|mixgm|mixag|mixal|glm-minimax|anthropic-glm)
+    apply_mode "$1"
     ;;
   status) status ;;
   start)   start ;;
   stop)    stop ;;
-  restart) stop; sleep 1; start ;;
+  restart)
+    if systemd_available; then
+      systemd_control restart
+    else
+      stop; sleep 1; start
+    fi
+    ;;
   log)     tail -n 40 "$LOG" 2>/dev/null || echo "(nessun log)";;
-  *) echo "uso: ai-mode [anthropic|minimax|mix-am|mix-ag|mix-gm|glm|qwen|status|start|stop|restart|log]"; exit 1;;
+  update)  shift; update "$@" ;;
+  *) echo "uso: ai-mode [anthropic|minimax|mix-am|mix-ag|mix-gm|mix-al|glm|qwen|local|status|start|stop|restart|log|update]"
+     echo "     alias: mixam=mix-am  mixag=mix-ag  mixgm=mix-gm  mixal=mix-al  (legacy: mixed/glm-minimax/anthropic-glm)"
+     exit 1;;
 esac
