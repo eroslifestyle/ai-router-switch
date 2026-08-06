@@ -1,0 +1,14 @@
+[Unit]
+Description=Aggiornamento automatico di ai-router (pull, test, riavvio, rollback se fallisce)
+Documentation=https://github.com/eroslifestyle/ai-router-switch
+
+# Questa unit NON viene installata da install.py
+# Va abilitata a mano
+# Aggiorna il codice automaticamente senza intervento umano
+
+[Service]
+Type=oneshot
+WorkingDirectory=@PROJECT_ROOT@
+ExecStart=/usr/bin/python3 @PROJECT_ROOT@/src/updater.py --yes
+# --yes: senza, updater chiede conferma da tastiera e sotto systemd non c'è nessuno a rispondere
+TimeoutStartSec=1800

@@ -1,0 +1,17 @@
+[Unit]
+Description=Innesco settimanale dell'aggiornamento di ai-router
+# ATTENZIONE: Questo timer NON è installato di default.
+# Va abilitato consapevolmente con: systemctl --user enable --now ai-router-update.timer
+
+[Timer]
+OnCalendar=Sun 04:17
+# Orario scelto intenzionalmente: ora di basso traffico + minuto non tondo
+# per evitare accavallamenti con altri job pianificati comuni (es. cron.daily)
+Persistent=true
+# Recupera l'esecuzione mancata se il PC era spento
+RandomizedDelaySec=1800
+# Ritarda l'avvio di un valore casuale fra 0 e 30 minuti, così più macchine che
+# usano lo stesso timer non tirano tutte insieme sul remoto
+
+[Install]
+WantedBy=timers.target
