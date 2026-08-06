@@ -137,7 +137,7 @@ def main():
 
         if gen_active:
             _last_generative_seen = now
-            log(f"generativo attivo → ornith in standby (scarico OK se Ollama ha bisogno)")
+            log("generativo attivo → ornith in standby (scarico OK se Ollama ha bisogno)")
         else:
             # Nessun modello generativo: verifica ornith caldo
             idle_since = now - _last_generative_seen

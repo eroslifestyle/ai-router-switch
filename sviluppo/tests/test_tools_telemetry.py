@@ -5,7 +5,6 @@ import os
 import sys
 import importlib
 from pathlib import Path
-import pytest
 
 
 def _import_router_utils(flag_acceso: bool):

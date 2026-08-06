@@ -104,7 +104,6 @@ def test_ramo_errore_minimax_risponde_json():
     import sys
     import asyncio
     import json
-    import pathlib
 
     # Aggiunge SRC al path per poter importare pipeline_minimax
     # (SRC è già definito a livello di modulo come pathlib.Path della cartella src)

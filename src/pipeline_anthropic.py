@@ -111,7 +111,8 @@ def _shrink_images_in_messages(orig: dict, max_side: int = 1024, jpeg_quality: i
     ricevute dal modello (il flusso non riutilizza immagini ricevute)."""
     try:
         from PIL import Image
-        import io, base64
+        import io
+        import base64
     except Exception:
         return
     try:

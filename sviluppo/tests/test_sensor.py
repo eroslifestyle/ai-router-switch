@@ -1,4 +1,5 @@
-import sys, pathlib
+import sys
+import pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "src"))
 from self_healing.sensor import classify_outcome, classify_task
 

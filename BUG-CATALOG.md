@@ -2,11 +2,11 @@
 
 > Generato automaticamente da `scripts/generate_bug_report.py` a partire da `logs/BUG-CATALOG.jsonl`. Non modificare a mano — rilanciare lo script. Vedi `DEBUG-CATALOG-SPEC.md` per lo schema completo.
 
-**223 tipi distinti di bug/blocco/errore** · **31265 occorrenze totali** su 9 modalita'.
+**223 tipi distinti di bug/blocco/errore** · **31436 occorrenze totali** su 9 modalita'.
 
 ## Modalita': `anthropic`
 
-69 tipi distinti, 23240 occorrenze.
+69 tipi distinti, 23403 occorrenze.
 
 ### `rate_limit_429_exhausted` (429)
 
@@ -560,11 +560,11 @@
 
 - **Firma**: `7446f99926bbc6ef`
 - **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 14950
+- **Occorrenze**: 15113
 - **Prima volta**: 2026-07-26T17:54:14Z
-- **Ultima volta**: 2026-08-06T20:38:08+0200
+- **Ultima volta**: 2026-08-06T20:55:59+0200
 - **Modalita' coinvolte**: anthropic
-- **Esempio**: `stripped=['mcp__zai__web_search_prime'] kept=72/73`
+- **Esempio**: `stripped=['mcp__zai__web_search_prime'] kept=55/56`
 
 ### `tool_isolation_strip`
 
@@ -1132,15 +1132,15 @@
 
 ## Modalita': `minimax`
 
-15 tipi distinti, 2872 occorrenze.
+15 tipi distinti, 2875 occorrenze.
 
 ### `forward_exception`
 
 - **Firma**: `46cf435b9a06795b`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 279
+- **Occorrenze**: 282
 - **Prima volta**: 2026-07-26T10:06:51Z
-- **Ultima volta**: 2026-08-06T20:38:18+0200
+- **Ultima volta**: 2026-08-06T20:39:33+0200
 - **Modalita' coinvolte**: minimax
 - **Esempio**: `Timeout on reading data from socket`
 
@@ -1349,7 +1349,7 @@
 
 ## Modalita': `mix-am`
 
-61 tipi distinti, 1448 occorrenze.
+61 tipi distinti, 1452 occorrenze.
 
 ### `relay_error_400` (400)
 
@@ -1941,9 +1941,9 @@
 
 - **Firma**: `4e55ecf61db90635`
 - **Severita'**: info
-- **Occorrenze**: 656
+- **Occorrenze**: 660
 - **Prima volta**: 2026-07-26T20:35:53+0200
-- **Ultima volta**: 2026-08-06T20:32:55+0200
+- **Ultima volta**: 2026-08-06T20:51:21+0200
 - **Modalita' coinvolte**: mix-am
 
 ### `ctx_gate` (warn)
@@ -2136,7 +2136,7 @@
 
 ## Modalita': `qwen`
 
-11 tipi distinti, 1269 occorrenze.
+11 tipi distinti, 1270 occorrenze.
 
 ### `forward_exception`
 
@@ -2201,9 +2201,9 @@
 
 - **Firma**: `4ccd5828ee0b363a`
 - **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 427
+- **Occorrenze**: 428
 - **Prima volta**: 2026-08-04T03:41:20+0200
-- **Ultima volta**: 2026-08-06T19:59:34+0200
+- **Ultima volta**: 2026-08-06T20:39:40+0200
 - **Modalita' coinvolte**: qwen
 - **Esempio**: `stripped=2 kept=1/3`
 

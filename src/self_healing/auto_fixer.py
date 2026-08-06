@@ -259,9 +259,9 @@ def main():
         print(f"Branch: {ticket['branch']}")
         print(f"Suspected files: {', '.join(ticket['suspected_files'])}")
         print("Suggested commands (apply manually after review + test):")
-        print(f"  # Create a new worktree (optional):")
+        print("  # Create a new worktree (optional):")
         print(f"  # git worktree add ../fix-wt-{ticket['id']} -b {ticket['branch']}")
-        print(f"  # Edit suspected files, run tests, then merge via PR after review.")
+        print("  # Edit suspected files, run tests, then merge via PR after review.")
         print(
             "GATED: nessuna esecuzione automatica. "
             "Applica manualmente in worktree dopo review + test."

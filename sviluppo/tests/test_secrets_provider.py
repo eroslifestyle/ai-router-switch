@@ -5,10 +5,8 @@ import paths      # noqa: E402
 import secrets_provider as sp   # noqa: E402
 
 import asyncio
-import os
 import pytest
 import shutil
-import subprocess
 
 
 @pytest.fixture(autouse=True)

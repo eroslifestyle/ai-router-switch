@@ -1,5 +1,4 @@
 import sys
-import pytest
 sys.path.insert(0, 'src')
 from router_commands import (
     parse_router_command, _router_reply_text, _synthetic_message,
@@ -162,13 +161,13 @@ def test_help_elenca_tutte_le_modalita():
     Il testo dell'help deve contenere tutte le modalita e i nomi storici.
     """
     help_text = _router_reply_text({"action": "help"}, "fp-test")
-    assert "anthropic" in help_text, f"Atteso: 'anthropic' presente nell'help, Ottenuto: assente"
-    assert "minimax" in help_text, f"Atteso: 'minimax' presente nell'help, Ottenuto: assente"
-    assert "glm" in help_text, f"Atteso: 'glm' presente nell'help, Ottenuto: assente"
-    assert "qwen" in help_text, f"Atteso: 'qwen' presente nell'help, Ottenuto: assente"
-    assert "mix" in help_text, f"Atteso: almeno un alias 'mix' presente nell'help, Ottenuto: assente"
-    assert "mixed" in help_text, f"Atteso: nome storico 'mixed' presente nell'help, Ottenuto: assente"
-    assert "glm-minimax" in help_text, f"Atteso: nome storico 'glm-minimax' presente nell'help, Ottenuto: assente"
+    assert "anthropic" in help_text, "Atteso: 'anthropic' presente nell'help, Ottenuto: assente"
+    assert "minimax" in help_text, "Atteso: 'minimax' presente nell'help, Ottenuto: assente"
+    assert "glm" in help_text, "Atteso: 'glm' presente nell'help, Ottenuto: assente"
+    assert "qwen" in help_text, "Atteso: 'qwen' presente nell'help, Ottenuto: assente"
+    assert "mix" in help_text, "Atteso: almeno un alias 'mix' presente nell'help, Ottenuto: assente"
+    assert "mixed" in help_text, "Atteso: nome storico 'mixed' presente nell'help, Ottenuto: assente"
+    assert "glm-minimax" in help_text, "Atteso: nome storico 'glm-minimax' presente nell'help, Ottenuto: assente"
 
 
 def test_messaggio_sintetico_ben_formato():

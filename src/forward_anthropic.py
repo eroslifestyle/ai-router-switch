@@ -265,7 +265,7 @@ async def forward_anthropic(request, body, session):
                 from providers.base import strip_images_body
                 stripped = strip_images_body(safe_body)
                 if stripped != safe_body:
-                    log(f"[forward_anthropic] ctx-exceed 400 -> retry with images stripped")
+                    log("[forward_anthropic] ctx-exceed 400 -> retry with images stripped")
                     _kw_s = dict(data=stripped, headers=headers,
                                  allow_redirects=False)
                     _to_s = upstream_timeout_for(stripped)

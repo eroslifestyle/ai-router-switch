@@ -1,8 +1,6 @@
 import hashlib
 import json
 import sys
-import pytest
-from pathlib import Path
 
 sys.path.insert(0, 'src')
 from self_healing.auto_fixer import (

@@ -1,6 +1,5 @@
 import sys
 import json
-import os
 
 # Inserisce il percorso della directory src per consentire gli import relativi
 sys.path.insert(0, "src")

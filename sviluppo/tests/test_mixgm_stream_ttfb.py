@@ -3,7 +3,12 @@
 Serve a stabilire per prova, non per lettura del codice, se l'ACT viene bufferizzato:
 con un passthrough il primo byte arriva molto prima della fine della generazione.
 """
-import asyncio, importlib.util, os, pathlib, sys, time
+import asyncio
+import importlib.util
+import os
+import pathlib
+import sys
+import time
 
 import pytest
 
