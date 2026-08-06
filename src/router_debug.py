@@ -2,7 +2,9 @@
 """Sistema di debug centralizzato: cattura, persiste, deduplica errori.
 Sostituisce debug_capture() in router_utils.py."""
 import gzip
+import hmac
 import json
+import os
 import traceback
 from collections import deque
 from datetime import datetime
@@ -29,6 +31,63 @@ DEBUG_LAST_REQ = DEBUG_LAST_REQ  # noqa: F401
 
 MAX_DEQUE = 500
 MAX_JSONL_BYTES = 10 * 1024 * 1024
+
+# Le rotte /debug/* espongono il contenuto delle richieste (corpo integrale in
+# /debug/trace, 2000 caratteri di errore upstream in /debug/errors); con il
+# listener sul loopback non sono raggiungibili da rete e restano libere; se
+# AIROUTER_LISTEN_HOST viene aperto a un indirizzo non-loopback servono le
+# credenziali in AIROUTER_DEBUG_TOKEN, altrimenti le rotte rispondono 404.
+DEBUG_TOKEN_HEADER = "X-Airouter-Debug-Token"
+_LOOPBACK_HOSTS = frozenset({"localhost", "::1", "::ffff:127.0.0.1", ""})
+
+
+def _is_loopback_host(host: str) -> bool:
+    """Verifica se l'host è un indirizzo loopback."""
+    host = (host or "").strip().strip("[]").lower()
+    return host in _LOOPBACK_HOSTS or host.startswith("127.")
+
+
+def _listen_host() -> str:
+    """Restituisce l'host di ascolto, letto dinamicamente per essere testabile con monkeypatch."""
+    try:
+        from router_constants import LISTEN_HOST
+        return os.environ.get("AIROUTER_LISTEN_HOST") or LISTEN_HOST
+    except Exception:
+        return "127.0.0.1"
+
+
+def _debug_auth_ok(request) -> bool:
+    """Verifica l'autenticazione per gli endpoint di debug."""
+    if _is_loopback_host(_listen_host()):
+        return True
+
+    token_atteso = os.environ.get("AIROUTER_DEBUG_TOKEN", "").strip()
+    if not token_atteso:
+        return False
+
+    try:
+        headers = getattr(request, "headers", {})
+        query = getattr(request, "query", {})
+        presented = headers.get(DEBUG_TOKEN_HEADER, "")
+        if not presented:
+            auth = headers.get("Authorization", "")
+            if auth.startswith("Bearer "):
+                presented = auth[7:]
+        if not presented:
+            presented = query.get("token", "")
+        return hmac.compare_digest(presented.encode("utf-8"), token_atteso.encode("utf-8"))
+    except Exception:
+        return False
+
+@web.middleware
+async def debug_auth_middleware(request, handler):
+    """Protegge tutte le rotte con prefisso /debug/.
+    Risponde 404 e non 401 per non rivelare a chi scandaglia che la rotta esiste.
+    Sul loopback non cambia nulla, il guard entra in funzione solo se AIROUTER_LISTEN_HOST e aperto a un indirizzo non-loopback."""
+    path = getattr(request, "path", "")
+    if (path == "/debug" or path.startswith("/debug/")) and not _debug_auth_ok(request):
+        return web.Response(status=404, text="not found")
+    return await handler(request)
 
 
 class DebugLogger:

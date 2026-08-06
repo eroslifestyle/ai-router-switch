@@ -373,6 +373,9 @@ curl http://127.0.0.1:8787/__router_health
 | `AIROUTER_NEW_PIPELINE` | `1` | Abilita il path di routing corrente |
 | `AIROUTER_TRANSITION_FILTERS` | `1` | Filtri di transizione MiniMax (drop-in systemd) |
 | `GLM_API_KEY` | — | Chiave z.ai per modalità GLM |
+| `AIROUTER_DEBUG_TOKEN` | — | credenziali per le rotte `/debug/`, richieste solo se l'ascolto non è su loopback |
+
+**Rotte /debug/ ed esposizione di rete**: le rotte con prefisso `/debug/` restituiscono il contenuto delle richieste che attraversano il router, e in particolare `/debug/trace` include il corpo integrale dell'ultima richiesta inoltrata all'upstream, quindi system prompt e conversazione, mentre `/debug/errors` arriva a 2000 caratteri del corpo di errore dell'upstream. Finché `AIROUTER_LISTEN_HOST` resta su loopback quelle rotte non sono raggiungibili dalla rete e restano libere. Appena viene impostato un indirizzo non-loopback, il router pretende `AIROUTER_DEBUG_TOKEN`: senza token configurato ogni rotta `/debug/` risponde 404, con il token configurato lo si presenta nell'header `X-Airouter-Debug-Token`, come `Authorization: Bearer <token>`, oppure come parametro `?token=`. La rotta `/__router_health` non è interessata. Il guard è un middleware aiohttp in `src/router_debug.py`, coperto da `sviluppo/tests/test_debug_auth.py`.
 
 Verificate una per una contro il codice il 2026-07-26. Sono state rimosse dalla
 tabella `AIROUTER_MIXED_PRIMARY` e `AIROUTER_VERIFY_MODEL`: **nessuna delle due ha

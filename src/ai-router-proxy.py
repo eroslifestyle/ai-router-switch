@@ -82,7 +82,7 @@ from router_utils import (
     MINIMAX_LIMITER, _MINIMAX_SEM,
     _request_orig_model, log_router_usage,
 )
-from router_debug import dl
+from router_debug import debug_auth_middleware, dl
 from router_mode import (
     get_file_mode, _current_mode, _err_response, get_mode,
     conversation_fingerprint, _resolve_chat_fingerprint,
@@ -915,7 +915,8 @@ async def handle(request):
 
 # ── App & multiport ───────────────────────────────────────────────────────────
 def _make_app(session, forced_mode):
-    app = web.Application(client_max_size=1024 * 1024 * 100)
+    app = web.Application(client_max_size=1024 * 1024 * 100,
+                          middlewares=[debug_auth_middleware])
     app["session"] = session
     app["forced_mode"] = forced_mode
     if _RESILIENCE_AVAILABLE and RESILIENCE_INST is not None:
