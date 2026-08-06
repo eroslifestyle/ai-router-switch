@@ -2,19 +2,19 @@
 
 > Generato automaticamente da `scripts/generate_bug_report.py` a partire da `logs/BUG-CATALOG.jsonl`. Non modificare a mano — rilanciare lo script. Vedi `DEBUG-CATALOG-SPEC.md` per lo schema completo.
 
-**199 tipi distinti di bug/blocco/errore** · **19457 occorrenze totali** su 6 modalita'.
+**223 tipi distinti di bug/blocco/errore** · **31265 occorrenze totali** su 9 modalita'.
 
 ## Modalita': `anthropic`
 
-67 tipi distinti, 13768 occorrenze.
+69 tipi distinti, 23240 occorrenze.
 
 ### `rate_limit_429_exhausted` (429)
 
 - **Firma**: `9c7020f92cb35d8a`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 147
+- **Occorrenze**: 156
 - **Prima volta**: 2026-07-22T11:14:43Z
-- **Ultima volta**: 2026-08-01T11:09:26+0200
+- **Ultima volta**: 2026-08-04T00:53:05+0200
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `retry-after=?`
 
@@ -31,11 +31,11 @@
 
 - **Firma**: `a0c07b40348d36be`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 8
+- **Occorrenze**: 9
 - **Prima volta**: 2026-07-23T15:33:35Z
-- **Ultima volta**: 2026-07-30T10:52:50+0200
+- **Ultima volta**: 2026-08-04T00:42:35+0200
 - **Modalita' coinvolte**: anthropic
-- **Esempio**: `retry-after=97629`
+- **Esempio**: `retry-after=1`
 
 ### `relay_error_400` (400)
 
@@ -558,6 +558,16 @@
 
 ### `tool_isolation_strip`
 
+- **Firma**: `7446f99926bbc6ef`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 14950
+- **Prima volta**: 2026-07-26T17:54:14Z
+- **Ultima volta**: 2026-08-06T20:38:08+0200
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `stripped=['mcp__zai__web_search_prime'] kept=72/73`
+
+### `tool_isolation_strip`
+
 - **Firma**: `1b910b74f7b880e0`
 - **Severita'**: 🟡 Blocchi
 - **Occorrenze**: 7285
@@ -565,16 +575,6 @@
 - **Ultima volta**: 2026-07-28T07:58:11+0200
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `stripped=['mcp__MiniMax__understand_image', 'mcp__MiniMax__web_search', 'mcp__zai__web_search_prime'] kept=60/63`
-
-### `tool_isolation_strip`
-
-- **Firma**: `7446f99926bbc6ef`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 5512
-- **Prima volta**: 2026-07-26T17:54:14Z
-- **Ultima volta**: 2026-08-02T13:37:32+0200
-- **Modalita' coinvolte**: anthropic
-- **Esempio**: `stripped=['mcp__zai__web_search_prime'] kept=57/58`
 
 ### `tool_isolation_strip`
 
@@ -590,11 +590,11 @@
 
 - **Firma**: `e648db5b3f6e697e`
 - **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 292
+- **Occorrenze**: 312
 - **Prima volta**: 2026-07-22T13:08:58Z
-- **Ultima volta**: 2026-08-01T11:09:25+0200
+- **Ultima volta**: 2026-08-04T02:40:09+0200
 - **Modalita' coinvolte**: anthropic
-- **Esempio**: `anthropic 429: retry 2/2 retry-after=None sleep=0.56s`
+- **Esempio**: `anthropic 429: retry 2/2 retry-after=None sleep=0.72s`
 
 ### `burst_limiter_429` (429)
 
@@ -610,11 +610,11 @@
 
 - **Firma**: `500f69599f86d10e`
 - **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 16
+- **Occorrenze**: 18
 - **Prima volta**: 2026-07-23T15:31:34Z
-- **Ultima volta**: 2026-07-30T10:51:49+0200
+- **Ultima volta**: 2026-08-04T00:42:34+0200
 - **Modalita' coinvolte**: anthropic
-- **Esempio**: `anthropic 429: retry 2/2 retry-after=97690.0 sleep=60.00s`
+- **Esempio**: `anthropic 429: retry 2/2 retry-after=1.0 sleep=1.00s`
 
 ### `tool_isolation_strip`
 
@@ -646,6 +646,26 @@
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `attempt=2/2 retry-after=None sleep=0.60s`
 
+### `rate_limit_429`
+
+- **Firma**: `1b10f072fcd4c6c9`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-04T04:04:12+0200
+- **Ultima volta**: 2026-08-04T04:04:12+0200
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `anthropic EXC: retry 1/2 sleep=0.40s ([Errno 104] Connection reset by peer)`
+
+### `tool_isolation_strip`
+
+- **Firma**: `379bc13a99c2fc04`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-03T19:52:34+0200
+- **Ultima volta**: 2026-08-03T19:52:34+0200
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `stripped=['mcp__websearch__search', 'mcp__MiniMax__web_search', 'mcp__zai__web_search_prime'] kept=2/5`
+
 ### `tool_isolation_strip`
 
 - **Firma**: `9118774d9a6c02eb`
@@ -676,7 +696,7 @@
 
 ## Modalita': `glm`
 
-36 tipi distinti, 2082 occorrenze.
+38 tipi distinti, 2165 occorrenze.
 
 ### `forward_exception`
 
@@ -772,9 +792,9 @@
 
 - **Firma**: `84d2e99403a775b7`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 5
+- **Occorrenze**: 6
 - **Prima volta**: 2026-07-30T08:12:22+0200
-- **Ultima volta**: 2026-08-01T07:57:55+0200
+- **Ultima volta**: 2026-08-06T17:26:37+0200
 - **Modalita' coinvolte**: glm
 - **Esempio**: `Cannot write to closing transport`
 
@@ -842,11 +862,11 @@
 
 - **Firma**: `2cf1321f17c5adda`
 - **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 1186
+- **Occorrenze**: 1191
 - **Prima volta**: 2026-07-22T08:07:41Z
-- **Ultima volta**: 2026-08-01T10:46:36+0200
+- **Ultima volta**: 2026-08-06T17:26:05+0200
 - **Modalita' coinvolte**: glm
-- **Esempio**: `stripped=['WebFetch', 'WebSearch'] kept=56/58`
+- **Esempio**: `stripped=['WebFetch', 'WebSearch'] kept=54/56`
 
 ### `tool_isolation_strip`
 
@@ -890,6 +910,16 @@
 
 ### `glm_ratelimit_exhausted` (429)
 
+- **Firma**: `5d2ba46f12bd738f`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 40
+- **Prima volta**: 2026-07-22T10:37:17Z
+- **Ultima volta**: 2026-08-04T03:16:32+0200
+- **Modalita' coinvolte**: glm
+- **Esempio**: `model=glm-4.7 glm rate-limit: budget 8s esaurito (waited 6s)`
+
+### `glm_ratelimit_exhausted` (429)
+
 - **Firma**: `4ede846b53432b7d`
 - **Severita'**: 🟡 Blocchi
 - **Occorrenze**: 34
@@ -907,6 +937,26 @@
 - **Ultima volta**: 2026-07-22T13:33:15Z
 - **Modalita' coinvolte**: glm
 - **Esempio**: `attempt=1 backoff=60s model=claude-opus-4-8`
+
+### `glm_429_backoff` (429)
+
+- **Firma**: `f2484b535f2ec78c`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 26
+- **Prima volta**: 2026-07-22T08:44:25Z
+- **Ultima volta**: 2026-08-03T23:15:22+0200
+- **Modalita' coinvolte**: glm
+- **Esempio**: `attempt=1 backoff=5s model=glm-4.7`
+
+### `glm_429_rpm_tpm` (429)
+
+- **Firma**: `905bdf64f46d8ba0`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 19
+- **Prima volta**: 2026-08-03T23:50:35+0200
+- **Ultima volta**: 2026-08-04T03:16:32+0200
+- **Modalita' coinvolte**: glm
+- **Esempio**: `attempt=1 backoff=5s kind=rpm_tpm model=glm-4.7`
 
 ### `glm_429_backoff` (429)
 
@@ -938,16 +988,6 @@
 - **Modalita' coinvolte**: glm
 - **Esempio**: `attempt=2 backoff=40s model=claude-sonnet-5`
 
-### `glm_429_backoff` (429)
-
-- **Firma**: `f2484b535f2ec78c`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 7
-- **Prima volta**: 2026-07-22T08:44:25Z
-- **Ultima volta**: 2026-07-22T08:48:37Z
-- **Modalita' coinvolte**: glm
-- **Esempio**: `attempt=2 backoff=60s model=glm-5.2`
-
 ### `glm_ratelimit_exhausted` (429)
 
 - **Firma**: `2bc2ce001dc54653`
@@ -978,16 +1018,6 @@
 - **Modalita' coinvolte**: glm
 - **Esempio**: `attempt=2 backoff=60s model=claude-haiku-4-5-20251001`
 
-### `glm_ratelimit_exhausted` (429)
-
-- **Firma**: `5d2ba46f12bd738f`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 2
-- **Prima volta**: 2026-07-22T10:37:17Z
-- **Ultima volta**: 2026-07-22T10:37:27Z
-- **Modalita' coinvolte**: glm
-- **Esempio**: `model=glm-4.7 glm rate-limit: budget 8s esaurito (waited 0s)`
-
 ### `tool_isolation_strip`
 
 - **Firma**: `c04f3e9878f7fa6c`
@@ -997,6 +1027,16 @@
 - **Ultima volta**: 2026-07-22T06:53:48Z
 - **Modalita' coinvolte**: glm
 - **Esempio**: `stripped=['mcp__MiniMax__web_search'] kept=2/3`
+
+### `tool_isolation_strip`
+
+- **Firma**: `0b58ea9d1dfa75c4`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-03T19:52:34+0200
+- **Ultima volta**: 2026-08-03T19:52:34+0200
+- **Modalita' coinvolte**: glm
+- **Esempio**: `stripped=['mcp__websearch__search', 'mcp__MiniMax__web_search', 'web_search_20250305'] kept=2/5`
 
 ### `tool_isolation_strip`
 
@@ -1038,17 +1078,69 @@
 - **Modalita' coinvolte**: glm
 - **Esempio**: `stripped=['mcp__MiniMax__understand_image'] kept=0/1`
 
+## Modalita': `local`
+
+5 tipi distinti, 57 occorrenze.
+
+### `relay_error_500` (500)
+
+- **Firma**: `315e830d6f1146df`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 23
+- **Prima volta**: 2026-08-04T22:52:58+0200
+- **Ultima volta**: 2026-08-04T23:08:48+0200
+- **Modalita' coinvolte**: local
+- **Esempio**: `{"error":{"message":"litellm.InternalServerError: InternalServerError: OpenAIException - {\"error\":{\"code\":500,\"message\":\"image input is not supported - hint: if this is unexpected, you may need to provide the mmproj\",\"type\":\"server_error\"}}No fallback model group found for original model`
+
+### `forward_exception`
+
+- **Firma**: `e68e94708f150f4b`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 7
+- **Prima volta**: 2026-08-04T22:49:17+0200
+- **Ultima volta**: 2026-08-06T20:32:12+0200
+- **Modalita' coinvolte**: local
+- **Esempio**: `Cannot write to closing transport`
+
+### `ctx_gate` (error)
+
+- **Firma**: `cd581c096b40b2af`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 3
+- **Prima volta**: 2026-08-04T22:34:35+0200
+- **Ultima volta**: 2026-08-04T22:35:01+0200
+- **Modalita' coinvolte**: local
+
+### `relay_error_400` (400)
+
+- **Firma**: `863b15a6454e6a1c`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 2
+- **Prima volta**: 2026-08-04T22:34:38+0200
+- **Ultima volta**: 2026-08-04T22:34:41+0200
+- **Modalita' coinvolte**: local
+- **Esempio**: `{"error":{"message":"litellm.ContextWindowExceededError: litellm.BadRequestError: ContextWindowExceededError: OpenAIException - {\"error\":{\"code\":400,\"message\":\"request (158424 tokens) exceeds the available context size (32768 tokens), try increasing it\",\"type\":\"exceed_context_size_error\"`
+
+### `ctx_gate` (ok)
+
+- **Firma**: `70a910c52d76abb7`
+- **Severita'**: info
+- **Occorrenze**: 22
+- **Prima volta**: 2026-08-04T22:46:18+0200
+- **Ultima volta**: 2026-08-06T20:35:18+0200
+- **Modalita' coinvolte**: local
+
 ## Modalita': `minimax`
 
-14 tipi distinti, 2696 occorrenze.
+15 tipi distinti, 2872 occorrenze.
 
 ### `forward_exception`
 
 - **Firma**: `46cf435b9a06795b`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 104
+- **Occorrenze**: 279
 - **Prima volta**: 2026-07-26T10:06:51Z
-- **Ultima volta**: 2026-08-02T13:33:45+0200
+- **Ultima volta**: 2026-08-06T20:38:18+0200
 - **Modalita' coinvolte**: minimax
 - **Esempio**: `Timeout on reading data from socket`
 
@@ -1162,6 +1254,16 @@
 
 ### `tool_isolation_strip`
 
+- **Firma**: `a523d7b685872d06`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-03T19:52:34+0200
+- **Ultima volta**: 2026-08-03T19:52:34+0200
+- **Modalita' coinvolte**: minimax
+- **Esempio**: `stripped=['mcp__websearch__search', 'mcp__zai__web_search_prime', 'web_search_20250305'] kept=2/5`
+
+### `tool_isolation_strip`
+
 - **Firma**: `3a3b86a151e6a0af`
 - **Severita'**: 🟡 Blocchi
 - **Occorrenze**: 1
@@ -1221,19 +1323,53 @@
 - **Ultima volta**: 2026-07-22T08:43:23Z
 - **Modalita' coinvolte**: mix-ag
 
+## Modalita': `mix-al`
+
+2 tipi distinti, 2 occorrenze.
+
+### `relay_error_401` (401)
+
+- **Firma**: `4d884a51d70b2507`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-04T19:50:36+0200
+- **Ultima volta**: 2026-08-04T19:50:36+0200
+- **Modalita' coinvolte**: mix-al
+- **Esempio**: `{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"},"request_id":"req_011Cdi8c9KSQ1zK9KPCoqV2D"}`
+
+### `relay_error_401` (401)
+
+- **Firma**: `8dafb65f54f3d1b3`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-04T15:17:07+0200
+- **Ultima volta**: 2026-08-04T15:17:07+0200
+- **Modalita' coinvolte**: mix-al
+- **Esempio**: `{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"},"request_id":"req_011CdhmkY2TohbdDbgJgXSYp"}`
+
 ## Modalita': `mix-am`
 
-60 tipi distinti, 750 occorrenze.
+61 tipi distinti, 1448 occorrenze.
+
+### `relay_error_400` (400)
+
+- **Firma**: `7e8a25a070a650d4`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 245
+- **Prima volta**: 2026-08-04T03:57:55+0200
+- **Ultima volta**: 2026-08-04T04:57:24+0200
+- **Modalita' coinvolte**: mix-am
+- **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","message":"messages.3.content.0: Invalid `signature` in `thinking` block"},"request_id":"req_011CdgxVc8sNdXaRxtpWxFNR"}`
 
 ### `relay_error_529` (529)
 
 - **Firma**: `68be3329c4f78992`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 52
+- **Occorrenze**: 58
 - **Prima volta**: 2026-07-28T22:08:59+0200
-- **Ultima volta**: 2026-07-29T21:18:08+0200
+- **Ultima volta**: 2026-08-05T08:11:10+0200
 - **Modalita' coinvolte**: mix-am
-- **Esempio**: `{"type":"error","error":{"type":"overloaded_error","message":"The server cluster is currently under high load. Please retry after a short wait and thank you for your patience. (2064) (529)"},"request_id":"06b984f0cef4973519e96bde1c8e34ec"}`
+- **Esempio**: `{"type":"error","error":{"type":"overloaded_error","message":"The server cluster is currently under high load. Please retry after a short wait and thank you for your patience. (2064) (529)"},"request_id":"06c206fe3a99bc70899493e4da1b6861"}`
 
 ### `minimax_fallback_5xx` (404)
 
@@ -1289,9 +1425,9 @@
 
 - **Firma**: `4f58b6f250a6b49a`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 7
+- **Occorrenze**: 8
 - **Prima volta**: 2026-08-02T12:37:58+0200
-- **Ultima volta**: 2026-08-02T13:34:25+0200
+- **Ultima volta**: 2026-08-02T13:38:30+0200
 - **Modalita' coinvolte**: mix-am
 
 ### `mixed_rescue_502` (429)
@@ -1312,6 +1448,16 @@
 - **Ultima volta**: 2026-07-21T07:16:01Z
 - **Modalita' coinvolte**: mix-am
 - **Esempio**: `{"type":"error","error":{"type":"overloaded_error","message":"The server cluster is currently under high load. Please retry after a short wait and thank you for your patience. (2064) (529)"},"request_id":"06ae3391b50f3513a44220f22331796d"}`
+
+### `relay_error_401` (401)
+
+- **Firma**: `7f555ffef175ea17`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 2
+- **Prima volta**: 2026-07-28T16:39:33+0200
+- **Ultima volta**: 2026-08-04T19:05:11+0200
+- **Modalita' coinvolte**: mix-am
+- **Esempio**: `{"type":"error","error":{"type":"authentication_error","message":"OAuth access token has been revoked."},"request_id":null}`
 
 ### `relay_error_400` (400)
 
@@ -1732,16 +1878,6 @@
 - **Modalita' coinvolte**: mix-am
 - **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06b954800880ee608d7e144da144165e","type":"message","role":"assistant","content":[],"model":"MiniMax-M2.7","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":17708,"output_tokens":0}}}  event: ping data: {"type":"ping"}`
 
-### `relay_error_401` (401)
-
-- **Firma**: `7f555ffef175ea17`
-- **Severita'**: 🔴 Errori
-- **Occorrenze**: 1
-- **Prima volta**: 2026-07-28T16:39:33+0200
-- **Ultima volta**: 2026-07-28T16:39:33+0200
-- **Modalita' coinvolte**: mix-am
-- **Esempio**: `{"type":"error","error":{"type":"authentication_error","message":"OAuth access token has been revoked."},"request_id":null}`
-
 ### `relay_error_400` (400)
 
 - **Firma**: `351d784df2502cb2`
@@ -1805,9 +1941,9 @@
 
 - **Firma**: `4e55ecf61db90635`
 - **Severita'**: info
-- **Occorrenze**: 211
+- **Occorrenze**: 656
 - **Prima volta**: 2026-07-26T20:35:53+0200
-- **Ultima volta**: 2026-08-02T13:34:32+0200
+- **Ultima volta**: 2026-08-06T20:32:55+0200
 - **Modalita' coinvolte**: mix-am
 
 ### `ctx_gate` (warn)
@@ -1821,15 +1957,15 @@
 
 ## Modalita': `mix-gm`
 
-18 tipi distinti, 153 occorrenze.
+18 tipi distinti, 204 occorrenze.
 
 ### `relay_error_400` (400)
 
 - **Firma**: `577a16219018ae0d`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 50
+- **Occorrenze**: 101
 - **Prima volta**: 2026-07-26T20:47:42+0200
-- **Ultima volta**: 2026-08-02T13:33:52+0200
+- **Ultima volta**: 2026-08-06T19:50:21+0200
 - **Modalita' coinvolte**: mix-gm
 - **Esempio**: `{"error":"boom"}`
 
@@ -1997,3 +2133,115 @@
 - **Prima volta**: 2026-07-30T04:06:45+0200
 - **Ultima volta**: 2026-08-01T10:44:43+0200
 - **Modalita' coinvolte**: mix-gm
+
+## Modalita': `qwen`
+
+11 tipi distinti, 1269 occorrenze.
+
+### `forward_exception`
+
+- **Firma**: `3dd7ae26d5ea7416`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 2
+- **Prima volta**: 2026-08-03T21:34:48+0200
+- **Ultima volta**: 2026-08-04T03:18:05+0200
+- **Modalita' coinvolte**: qwen
+- **Esempio**: `Cannot write to closing transport`
+
+### `relay_error_502` (502)
+
+- **Firma**: `fff6b6e96db2df6e`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 2
+- **Prima volta**: 2026-08-03T20:48:22+0200
+- **Ultima volta**: 2026-08-03T20:53:33+0200
+- **Modalita' coinvolte**: qwen
+- **Esempio**: `{"type": "error", "error": {"type": "qwen_unavailable", "message": "qwen key missing"}}`
+
+### `relay_error_400` (400)
+
+- **Firma**: `fa87d598c192ba37`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-04T03:31:50+0200
+- **Ultima volta**: 2026-08-04T03:31:50+0200
+- **Modalita' coinvolte**: qwen
+- **Esempio**: `{"code":"InvalidParameter","message":"Required parameter \"model\" missing from request.","request_id":"6565b2ec-ef71-93eb-b766-05ddebf88c46"}`
+
+### `relay_error_502` (502)
+
+- **Firma**: `b2243ef32a570224`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-03T20:23:42+0200
+- **Ultima volta**: 2026-08-03T20:23:42+0200
+- **Modalita' coinvolte**: qwen
+
+### `forward_exception`
+
+- **Firma**: `92ed741733190a3d`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-03T20:23:42+0200
+- **Ultima volta**: 2026-08-03T20:23:42+0200
+- **Modalita' coinvolte**: qwen
+- **Esempio**: `'Response' object has no attribute 'release'`
+
+### `tool_isolation_strip`
+
+- **Firma**: `1418176599f956bc`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 779
+- **Prima volta**: 2026-08-04T02:27:56+0200
+- **Ultima volta**: 2026-08-04T11:12:05+0200
+- **Modalita' coinvolte**: qwen
+- **Esempio**: `stripped=['WebFetch', 'WebSearch', 'mcp__zai__web_search_prime'] kept=300/303`
+
+### `heavy_connector_strip`
+
+- **Firma**: `4ccd5828ee0b363a`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 427
+- **Prima volta**: 2026-08-04T03:41:20+0200
+- **Ultima volta**: 2026-08-06T19:59:34+0200
+- **Modalita' coinvolte**: qwen
+- **Esempio**: `stripped=2 kept=1/3`
+
+### `qwen_429_backoff` (429)
+
+- **Firma**: `303e54f4ad58feb1`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 42
+- **Prima volta**: 2026-08-03T20:46:18+0200
+- **Ultima volta**: 2026-08-04T09:08:06+0200
+- **Modalita' coinvolte**: qwen
+- **Esempio**: `backoff 5s`
+
+### `tool_isolation_strip`
+
+- **Firma**: `ece54103702c420c`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 6
+- **Prima volta**: 2026-08-04T04:05:10+0200
+- **Ultima volta**: 2026-08-04T04:07:10+0200
+- **Modalita' coinvolte**: qwen
+- **Esempio**: `stripped=['WebFetch', 'WebSearch'] kept=19/21`
+
+### `tool_isolation_strip`
+
+- **Firma**: `23762303131b59d6`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-03T19:52:34+0200
+- **Ultima volta**: 2026-08-03T19:52:34+0200
+- **Modalita' coinvolte**: qwen
+- **Esempio**: `stripped=['mcp__MiniMax__web_search', 'mcp__zai__web_search_prime', 'web_search_20250305'] kept=2/5`
+
+### `ctx_gate` (ok)
+
+- **Firma**: `632bb88617021f96`
+- **Severita'**: info
+- **Occorrenze**: 7
+- **Prima volta**: 2026-08-04T04:02:30+0200
+- **Ultima volta**: 2026-08-04T11:10:18+0200
+- **Modalita' coinvolte**: qwen
