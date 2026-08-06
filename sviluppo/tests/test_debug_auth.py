@@ -241,3 +241,39 @@ async def test_middleware_passa_col_token_giusto(monkeypatch):
     )
     atteso = "PASSATO"
     assert resp == atteso, f"Atteso: {atteso}, Ottenuto: {resp}"
+
+
+@pytest.mark.asyncio
+async def test_middleware_blocca_admin_quando_esposto(monkeypatch):
+    """
+    POST /admin/mode/<modo> riscrive il file di modalita globale del router.
+    Esposto in rete senza guard, chiunque potrebbe dirottare la modalita
+    di tutte le chat verso un provider a sua scelta.
+    """
+    monkeypatch.setenv("AIROUTER_LISTEN_HOST", "0.0.0.0")
+    monkeypatch.delenv("AIROUTER_DEBUG_TOKEN", raising=False)
+
+    for p in ("/admin/mode/minimax", "/admin/mode/anthropic", "/admin", "/admin/qualsiasi/cosa"):
+        risultato = await debug_auth_middleware(FakeRequest(path=p), _handler_ok)
+        assert risultato.status == 404, f"Atteso: 404 per '{p}', Ottenuto: {risultato.status}"
+
+    monkeypatch.setenv("AIROUTER_DEBUG_TOKEN", "segreto-di-prova")
+    risultato = await debug_auth_middleware(
+        FakeRequest(path="/admin/mode/minimax", headers={DEBUG_TOKEN_HEADER: "segreto-di-prova"}),
+        _handler_ok
+    )
+    assert risultato == "PASSATO", f"Atteso: PASSATO per '/admin/mode/minimax', Ottenuto: {risultato}"
+
+
+@pytest.mark.asyncio
+async def test_middleware_non_confonde_i_prefissi(monkeypatch):
+    """
+    Il prefisso deve essere esatto, path che cominciano con le stesse lettere
+    ma sono altre rotte non vanno intercettati.
+    """
+    monkeypatch.setenv("AIROUTER_LISTEN_HOST", "0.0.0.0")
+    monkeypatch.delenv("AIROUTER_DEBUG_TOKEN", raising=False)
+
+    for p in ("/debugger", "/debugging/x", "/administrator", "/admins", "/adminX", "/v1/messages", "/__router_health"):
+        risultato = await debug_auth_middleware(FakeRequest(path=p), _handler_ok)
+        assert risultato == "PASSATO", f"Atteso: PASSATO per '{p}', Ottenuto: {risultato}"

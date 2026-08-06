@@ -81,11 +81,15 @@ def _debug_auth_ok(request) -> bool:
 
 @web.middleware
 async def debug_auth_middleware(request, handler):
-    """Protegge tutte le rotte con prefisso /debug/.
-    Risponde 404 e non 401 per non rivelare a chi scandaglia che la rotta esiste.
-    Sul loopback non cambia nulla, il guard entra in funzione solo se AIROUTER_LISTEN_HOST e aperto a un indirizzo non-loopback."""
+    """Protegge le rotte con prefisso /debug/ e con prefisso /admin/.
+    Le prime restituiscono il contenuto delle richieste; la seconda
+    riscrive la modalita globale del router. Risponde 404 e non 401
+    per non rivelare a chi scandaglia che la rotta esiste. Sul loopback
+    non cambia nulla, il guard entra in funzione solo se
+    AIROUTER_LISTEN_HOST e aperto a un indirizzo non-loopback."""
     path = getattr(request, "path", "")
-    if (path == "/debug" or path.startswith("/debug/")) and not _debug_auth_ok(request):
+    protetto = any(path == p or path.startswith(p + "/") for p in ("/debug", "/admin"))
+    if protetto and not _debug_auth_ok(request):
         return web.Response(status=404, text="not found")
     return await handler(request)
 

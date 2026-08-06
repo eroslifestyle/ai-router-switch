@@ -86,7 +86,7 @@ By default the router binds to 127.0.0.1, which is the recommended configuration
 
 The routes prefixed with `/debug/` echo back the contents of requests passing through the router. `/debug/trace` includes the full body of the most recent request forwarded to the upstream, therefore the system prompt and the conversation, while `/debug/errors` includes up to 2000 characters of the error body returned by the upstream. On the loopback interface these routes are not reachable from the network and stay open, which makes local diagnostics convenient.
 
-If `AIROUTER_LISTEN_HOST` is set to a non-loopback address those routes stop being local, and from that point on the router requires `AIROUTER_DEBUG_TOKEN`. Without a configured token every `/debug/` route responds with 404. With a token configured, the token has to be presented in the `X-Airouter-Debug-Token` header, or as `Authorization: Bearer <token>`, or as a `?token=` query parameter. The `/__router_health` route is unaffected, so monitoring keeps working.
+If `AIROUTER_LISTEN_HOST` is set to a non-loopback address those routes stop being local, and from that point on the router requires `AIROUTER_DEBUG_TOKEN`. Without a configured token every `/debug/` route responds with 404. With a token configured, the token has to be presented in the `X-Airouter-Debug-Token` header, or as `Authorization: Bearer <token>`, or as a `?token=` query parameter. The `/__router_health` route is unaffected, so monitoring keeps working. The same guard also covers routes prefixed with `/admin/`, including `/admin/mode/<mode>` which rewrites the router's global mode; without it, a network-exposed router would let anyone hijack the mode of all chats.
 
 ## Tests
 
