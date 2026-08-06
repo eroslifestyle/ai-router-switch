@@ -12,7 +12,10 @@ secrets.enc
 *secrets.env
 *.key
 .env
-graphify-out/
+# Senza lo slash finale: la forma "graphify-out/" matcha solo le directory vere,
+# e alla radice graphify-out e' un symlink a src/graphify-out, quindi restava
+# fuori e compariva come untracked.
+graphify-out
 src/graphify-out/
 logs/*.jsonl
 logs/*.json
