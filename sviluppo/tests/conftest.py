@@ -16,14 +16,43 @@ e riceveva 502. Scaricare i moduli di `src/` prima di ogni avvio li obbliga a
 rileggere l'ambiente corrente.
 """
 
+import os
 import pathlib
+import shutil
 import sys
+import tempfile
 
 import pytest
 import pytest_asyncio
 
 # Il conftest vive in sviluppo/tests/, quindi parents[2] è la root del repo.
 SRC = pathlib.Path(__file__).resolve().parents[2] / "src"
+
+
+# ── Isolamento del BUG-CATALOG ───────────────────────────────────────────────
+# `debug_catalog` ancora il percorso alla root del repo e lo risolve UNA volta,
+# all'import: senza override ogni test che importa il modulo scrive nel catalogo
+# di PRODUZIONE. Misurato il 2026-08-06: 7 eventi aggiunti a ogni esecuzione
+# della suite e, soprattutto, l'`example_snippet` delle entry reali sovrascritto
+# da esempi sintetici — `tool_isolation_strip` era passato da "kept=72/73" di
+# produzione a "kept=0/1" di test. Il campo esempio è ciò che rende il catalogo
+# diagnostico: la contaminazione non era cosmetica, cancellava l'informazione.
+#
+# Perché al TOP-LEVEL e non in una fixture: `test_tool_isolation_cache.py` e
+# `test_qwen_tool_trim.py` importano i moduli di `src/` a livello di modulo,
+# quindi durante la COLLECTION, che precede l'esecuzione di qualunque fixture —
+# anche di una autouse con scope=session. Una fixture arrivava troppo tardi e
+# due contatori continuavano a muoversi. La conftest viene invece importata
+# prima dei moduli di test, quindi qui la variabile è già pronta.
+_CATALOGO_TMP = tempfile.mkdtemp(prefix="bug-catalog-test-")
+os.environ["AIROUTER_CATALOG_PATH"] = str(
+    pathlib.Path(_CATALOGO_TMP) / "BUG-CATALOG.jsonl"
+)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Rimuove la tmpdir del catalogo isolato a fine sessione."""
+    shutil.rmtree(_CATALOGO_TMP, ignore_errors=True)
 
 
 def _purge_src_modules():

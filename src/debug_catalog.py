@@ -3,14 +3,34 @@
 Vedi DEBUG-CATALOG-SPEC.md per schema, algoritmo firma e punti di chiamata."""
 import hashlib
 import json
+import os
 import time
 from pathlib import Path
 
+# AIROUTER_CATALOG_PATH sposta il catalogo altrove. Senza questo override il
+# percorso è ancorato alla root del repo, quindi OGNI test che importa il modulo
+# scrive nel catalogo di PRODUZIONE. Misurato il 2026-08-06: la suite aggiungeva
+# 7 eventi per esecuzione e soprattutto SOVRASCRIVEVA l'example_snippet delle
+# entry reali con esempi sintetici — tool_isolation_strip era passato da
+# "kept=72/73" di produzione a "kept=0/1" di test — cioè proprio il campo che
+# rende il catalogo diagnostico. La conftest lo punta a una tmpdir.
 _CATALOG_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _CATALOG_LOGS_DIR = _CATALOG_PROJECT_ROOT / "logs"
-_CATALOG_LOGS_DIR.mkdir(exist_ok=True)
 
-CATALOG_JSONL = _CATALOG_LOGS_DIR / "BUG-CATALOG.jsonl"
+_catalog_override = os.environ.get("AIROUTER_CATALOG_PATH", "").strip()
+if _catalog_override:
+    CATALOG_JSONL = Path(_catalog_override)
+    _CATALOG_LOGS_DIR = CATALOG_JSONL.parent
+else:
+    CATALOG_JSONL = _CATALOG_LOGS_DIR / "BUG-CATALOG.jsonl"
+
+# mkdir non deve mai impedire l'import: se la directory non è creabile fallirà la
+# scrittura, che è già gestita dove avviene. parents=True perché un override può
+# puntare a una directory annidata non ancora esistente.
+try:
+    _CATALOG_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
 
 SNIPPET_MAX_CHARS = 300
 # "info" (2026-07-26): eventi osservativi, non anomalie — es. l'heartbeat del

@@ -48,7 +48,9 @@ def strip_heavy_connectors(body: bytes) -> bytes:
         return body
     
     record_event(
-        severity='block',
+        # "info" e non "block": lo strip dei connettori pesanti è il comportamento
+        # previsto, non un'anomalia. Stessa correzione fatta a tool_isolation_strip.
+        severity='info',
         category='qwen',
         kind='heavy_connector_strip',
         snippet=f'stripped={len(tools)-len(kept)} kept={len(kept)}/{len(tools)}'

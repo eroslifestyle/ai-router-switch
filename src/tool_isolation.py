@@ -130,7 +130,10 @@ def filter_tools_for_backend(body: bytes, backend: str) -> bytes:
         return body
     stripped_names = [t.get("name", "?") for t in tools if t not in kept]
     debug_catalog.record_event(
-        severity="block", category=backend, kind="tool_isolation_strip",
+        # "info" e non "block": è l'esito NORMALE dell'isolamento in modalità pura,
+        # non un'anomalia. Con "block" faceva 16.174 occorrenze, da solo metà del
+        # catalogo, e seppelliva i tre o quattro errori veri sotto il rumore (2026-08-06).
+        severity="info", category=backend, kind="tool_isolation_strip",
         snippet=f"stripped={stripped_names[:10]} kept={len(kept)}/{len(tools)}",
     )
     if kept:
