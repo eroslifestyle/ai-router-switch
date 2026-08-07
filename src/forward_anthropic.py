@@ -137,16 +137,7 @@ def strip_unsupported_fields(raw: bytes, fields: tuple) -> bytes:
         return raw
 
 
-def _log_original_model(orig: str, final: str, chat_id: str) -> None:
-    """Log modello originale prima del remap a MiniMax."""
-    from router_constants import SIDECAR
-    try:
-        SIDECAR.parent.mkdir(parents=True, exist_ok=True)
-        entry = {"ts": int(time.time()), "chat": chat_id, "orig": orig, "final": final}
-        with open(SIDECAR, "a") as f:
-            f.write(json.dumps(entry) + "\n")
-    except Exception:
-        pass
+# _log_original_model rimossa il 2026-08-07: nessun chiamante, sidecar fermo dal 2026-07-25
 
 
 # _force_no_stream e stata rimossa il 2026-08-03 perche mai chiamata

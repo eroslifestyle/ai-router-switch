@@ -47,7 +47,10 @@ MODE_FILE = paths.mode_file()
 # KEY_FILE rimossa il 2026-08-07: le chiavi passano da secrets_provider dal
 # 2026-08-06, e nessuno leggeva piu' questa costante.
 LOG_FILE = paths.log_file("ai-router.log")
-SIDECAR = paths.log_file("router-model-map.jsonl")
+# SIDECAR (router-model-map.jsonl) rimossa il 2026-08-07: l'unico scrittore era
+# _log_original_model, senza chiamanti dal refactor a tunnel del 2026-07-25, e
+# l'unico lettore era il relay, che ricostruiva da quel file fermo una mappa
+# orig->final poi sostituita da resolve_route. Il dato vive in router-usage.jsonl.
 USAGE_SIDECAR = paths.log_file("router-usage.jsonl")
 CHAT_STORE = paths.chat_store()
 

@@ -49,7 +49,7 @@ from router_constants import (
     LISTEN_HOST, LISTEN_PORT, LISTEN_PORTS,
     ANTHROPIC_UPSTREAM, MINIMAX_UPSTREAM, MINIMAX_MODEL,
     VALID_MODES, GLM_AVAILABLE, QWEN_AVAILABLE,
-    MODE_FILE, LOG_FILE, SIDECAR, HOP_HEADERS, PORT_MODE, _HEALTH_CHECK_PATHS,
+    MODE_FILE, LOG_FILE, HOP_HEADERS, PORT_MODE, _HEALTH_CHECK_PATHS,
 )
 from router_utils import (
     log, MINIMAX_LIMITER, _request_orig_model, log_router_usage,
@@ -107,15 +107,7 @@ CTX_GATE_HEARTBEAT_SEC = int(os.environ.get("AIROUTER_CTX_HEARTBEAT_SEC", "300")
 # per (modalità, azione) e il throttle resta a 300 s per chat.
 CTX_GATE_HEARTBEAT_PCT = float(os.environ.get("AIROUTER_CTX_HEARTBEAT_PCT", "0.30"))
 
-# Aliases for backward compat with pipeline modules
-def _log_original_model(orig: str, final: str, chat_id: str) -> None:
-    try:
-        SIDECAR.parent.mkdir(parents=True, exist_ok=True)
-        entry = {"ts": int(time.time()), "chat": chat_id, "orig": orig, "final": final}
-        with open(SIDECAR, "a") as f:
-            f.write(json.dumps(entry) + "\n")
-    except Exception:
-        pass
+# _log_original_model rimossa il 2026-08-07: nessun chiamante dal refactor a tunnel del 2026-07-25, e il sidecar che alimentava era fermo da allora. Il dato orig/final e' gia' in router-usage.jsonl.
 
 
 
@@ -666,7 +658,6 @@ async def handle(request):
         request=request, body=body, mode=mode, orig=orig,
         request_orig_model=_request_orig_model,
         hop_headers=HOP_HEADERS,
-        sidecar_path=SIDECAR,
         minimax_model=MINIMAX_MODEL,
         log_fn=log,
         log_router_usage_fn=log_router_usage,
@@ -1023,7 +1014,6 @@ async def _run_multiport():
 
 def main():
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SIDECAR.parent.mkdir(parents=True, exist_ok=True)
     if not MODE_FILE.exists():
         MODE_FILE.write_text("anthropic\n")
     log(f"START ai-router-proxy multi-port {LISTEN_PORTS}")

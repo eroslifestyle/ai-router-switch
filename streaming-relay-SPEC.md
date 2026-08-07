@@ -17,13 +17,12 @@ La closure `relay` legge queste variabili definite PRIMA della closure in `handl
 | `orig` | `dict\|None` | debug_capture |
 | `_request_orig_model` | `dict` | pop orig_model per rewrite |
 | `HOP_HEADERS` | `set[str]` | filtra headers |
-| `SIDECAR` | `Path` | rimap index |
 | `MINIMAX_MODEL` | `str` | log_router_usage |
 
 **Funzioni globali** (già importate/moduli esistenti):
 - `log()`, `debug_capture()`, `log_router_usage()`, `_trim_context_after_response()` — passate al costruttore
 - `MINIMAX_MODEL` — passato come costante
-- `HOP_HEADERS`, `SIDECAR` — passati come costanti/config
+- `HOP_HEADERS` — passato come costante/config (`SIDECAR` rimosso il 2026-08-07 insieme al parametro `sidecar_path`: il relay ricostruiva da quel file una mappa `orig->final` ferma dal 2026-07-25, ora la dà `resolve_route`)
 - `_request_orig_model` — dict mutabile passato al costruttore (riferimento)
 
 ## Interfaccia classe
@@ -143,7 +142,6 @@ class StreamingRelay:
        orig=orig,
        request_orig_model=_request_orig_model,
        hop_headers=HOP_HEADERS,
-       sidecar_path=SIDECAR,
        minimax_model=MINIMAX_MODEL,
        log_fn=log,
        debug_capture_fn=debug_capture,

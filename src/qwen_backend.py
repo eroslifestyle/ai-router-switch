@@ -42,13 +42,10 @@ from synthetic_response import synthetic_error, synthetic_rate_limit
 # QWEN_AVAILABLE=False in SILENZIO.
 
 
-def _log_usage(**kw):
-    """Import lazy di router_utils.log_router_usage."""
-    try:
-        from router_utils import log_router_usage
-        log_router_usage(**kw)
-    except Exception:
-        pass
+# _log_usage rimossa il 2026-08-07: nessun chiamante, come la gemella in
+# glm_backend. Era un wrapper con import lazy di router_utils.log_router_usage;
+# il motivo dell'import lazy (ciclo router_constants -> backend -> router_utils)
+# resta documentato accanto a _non_stream_timeout in glm_backend.py.
 
 
 def _non_stream_timeout():

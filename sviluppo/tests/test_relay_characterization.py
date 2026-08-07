@@ -90,7 +90,6 @@ async def _esegui(upstream, extra=None):
             None,                # orig
             {},                  # request_orig_model
             set(),               # hop_headers
-            None,                # sidecar_path
             'MiniMax-M2.7',      # minimax_model
             lambda *a, **k: None,  # log_fn
             lambda *a, **k: None,  # log_router_usage_fn

@@ -48,7 +48,6 @@ async def _run(with_at_eof: bool):
             None,
             {},
             set(),
-            None,
             'MiniMax-M2.7',
             lambda msg, *a, **k: logs.append(str(msg)),
             lambda *a, **k: None,

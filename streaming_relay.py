@@ -23,7 +23,6 @@ class StreamingRelay:
         orig: dict | None,          # debug capture dict
         request_orig_model: dict,  # riferimento al dict globale (mutabile)
         hop_headers: set[str],
-        sidecar_path,
         minimax_model: str,
         log_fn,
         log_router_usage_fn,
@@ -35,7 +34,9 @@ class StreamingRelay:
         self.orig = orig
         self.request_orig_model = request_orig_model
         self.hop_headers = hop_headers
-        self.sidecar_path = sidecar_path
+        # sidecar_path rimosso il 2026-08-07: il relay lo leggeva per ricostruire
+        # una mappa orig->final da un file fermo dal 2026-07-25. Ora l'instradamento
+        # lo dà resolve_route, che è la fonte di verità.
         self.minimax_model = minimax_model
         self.log_fn = log_fn
         self.log_router_usage_fn = log_router_usage_fn
@@ -391,24 +392,21 @@ class StreamingRelay:
                     # già loggati inline da _glm_execute_with_chain (x-glm-cost-mult).
                     _final = f"glm-mode:{self.mode}"
                 elif self.mode in ("mixed", "mix-am"):
+                    # Il file sidecar non viene piu' scritto dal 2026-07-25 (funzione
+                    # _log_original_model rimasta senza chiamanti dopo refactor router).
+                    # L'indice ricostruito ha sole 25 voci da 75.683 righe e produce
+                    # attribuzioni errate (es. claude-opus-5 -> MiniMax-M2.7).
+                    # Il fallback a 'claude-direct' genera false attribuzioni
+                    # (es. claude-haiku in mix-am registrato come claude-direct 6/31).
+                    # Ora si usa resolve_route come fonte di verita' dell'instradamento.
                     try:
-                        _remap_idx = self.request_orig_model.get("__remap__") or {}
-                        if not _remap_idx:
-                            # costruisci al volo dal sidecar (cache 60s gia' presente altrove)
-                            _idx = {}
-                            try:
-                                with open(self.sidecar_path, "r") as _sf:
-                                    for _sl in _sf:
-                                        _so = json.loads(_sl) if _sl.strip() else None
-                                        if _so and _so.get("orig") and _so.get("final"):
-                                            _so_o = _so["orig"]
-                                            if _so_o not in _idx:
-                                                _idx[_so_o] = _so["final"]
-                            except Exception:
-                                pass
-                            self.request_orig_model["__remap__"] = _idx
-                            _remap_idx = _idx
-                        _final = _remap_idx.get(_orig, "claude-direct") if _orig != "?" else "?"
+                        if _orig == "?":
+                            _final = "?"
+                        else:
+                            from role_routing import resolve_route
+                            _mode_norm = 'mix-am' if self.mode == 'mixed' else self.mode
+                            _provider, _override = resolve_route(_mode_norm, _orig)
+                            _final = 'claude-direct' if _provider == 'anthropic' else _override or _orig
                     except Exception:
                         _final = "?"
                 else:

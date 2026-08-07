@@ -35,28 +35,18 @@ import debug_catalog
 from synthetic_response import synthetic_error, synthetic_rate_limit
 
 
-def _log_usage(**kw):
-    """Import LAZY di router_utils.log_router_usage.
-
-    NON importare router_utils a livello di modulo: router_constants importa
-    glm_backend (riga ~28) PRIMA di aver definito le proprie costanti, e
-    router_utils importa router_constants. Un import a livello di modulo crea
-    il ciclo router_constants -> glm_backend -> router_utils -> router_constants
-    (incompleto): l'ImportError finisce nell'except di router_constants, che
-    silenziosamente imposta GLM_AVAILABLE=False e manda TUTTE le modalità GLM
-    in fallback Anthropic senza errori visibili (regressione 2026-07-25).
-    """
-    try:
-        from router_utils import log_router_usage
-        log_router_usage(**kw)
-    except Exception:
-        pass
+# _log_usage rimossa il 2026-08-07: nessun chiamante. Il ciclo di import che documentava resta valido e vale per _non_stream_timeout qui sotto:
+# NON importare router_utils a livello di modulo, perche' router_constants importa glm_backend prima di aver definito le proprie costanti
+# e router_utils importa router_constants; un import a livello di modulo crea il ciclo
+# router_constants -> glm_backend -> router_utils -> router_constants incompleto, il cui ImportError finisce nell'except di
+# router_constants, che silenziosamente imposta GLM_AVAILABLE=False e manda TUTTE le modalita' GLM in fallback Anthropic senza
+# errori visibili (regressione del 2026-07-25).
 
 
 def _non_stream_timeout():
     """Timeout di lettura per le richieste NON-streaming.
 
-    Import LAZY per lo stesso ciclo descritto in `_log_usage`. Qui NON si
+    Import LAZY per lo stesso ciclo descritto nel commento qui sopra. Qui NON si
     intercetta l'ImportError: a runtime `router_constants` e' gia' caricato, e
     un except silenzioso reintrodurrebbe la classe di regressione del 2026-07-25
     (fallback muto invece di un errore visibile). Il valore vive in un posto solo.

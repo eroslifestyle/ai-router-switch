@@ -90,7 +90,6 @@ async def _esegui(upstream, mode, final_override):
                 None,
                 {},
                 set(),
-                None,
                 'MiniMax-M2.7',
                 log_fn,
                 log_fn_usage,
