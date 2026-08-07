@@ -30,21 +30,9 @@ from providers.base import _body_has_images  # noqa: F401  (re-export)
 
 
 
-# ── Text extraction ────────────────────────────────────────────────────────────
-def _text_from_message(j: dict) -> str:
-    out = []
-    for b in (j or {}).get("content", []):
-        if isinstance(b, dict):
-            t = b.get("type", "")
-            if t == "text":
-                out.append(b.get("text", ""))
-            elif t == "thinking":
-                inner = b.get("thinking", {})
-                if isinstance(inner, dict):
-                    out.append(inner.get("thinking", ""))
-                elif isinstance(inner, str):
-                    out.append(inner)
-    return "".join(out)
+# ── Text extraction ─────────────────────────────────────────────────────────
+# Re-export: la definizione viveva anche qui, identica. Fonte unica in providers/base.py; il proxy importa questo nome DA QUI, quindi il re-export va mantenuto.
+from providers.base import _text_from_message  # noqa: F401 (re-export)
 
 
 

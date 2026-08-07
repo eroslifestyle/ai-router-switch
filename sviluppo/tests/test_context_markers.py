@@ -76,26 +76,35 @@ def test_tutte_le_copie_riconoscono_lo_stesso_insieme():
             f"Atteso: router={risultato_router} == context_manager={risultato_cm}, Ottenuto: divergenza per {errore}"
 
 
-def test_estrattore_testo_allineato_fra_i_moduli():
-    """providers.base._text_from_message leggeva solo il primo blocco e restituiva vuoto
-    quando la risposta cominciava con un blocco thinking, la causa nota delle risposte
-    vuote; ora deve dare lo stesso risultato delle copie vive."""
+def test_estrattore_testo_fonte_unica():
+    """
+    Verifica che _text_from_message abbia una sola fonte in providers.base.
+
+    La versione arretrata leggeva solo il primo blocco e restituiva stringa vuota
+    quando la risposta cominciava con un blocco thinking, causa nota delle risposte vuote.
+    Ora esiste una sola definizione e il test sorveglia che resti una sola.
+    """
     import providers.base as base
     import pipeline_anthropic
     import forward_anthropic
 
     risposta = {
-        "content": [
-            {"type": "thinking", "thinking": {"thinking": "ragiono"}},
-            {"type": "text", "text": "risposta"},
+        'content': [
+            {'type': 'thinking', 'thinking': {'thinking': 'ragiono'}},
+            {'type': 'text', 'text': 'risposta'}
         ]
     }
 
-    testo_base = base._text_from_message(risposta)
-    testo_pipeline = pipeline_anthropic._text_from_message(risposta)
-    testo_forward = forward_anthropic._text_from_message(risposta)
+    risultato = base._text_from_message(risposta)
+    atteso = 'ragionorisposta'
+    assert risultato == atteso, f"Estrazione testo fallita: atteso {atteso!r}, ottenuto {risultato!r}"
 
-    atteso = "ragiono" + "risposta"
-    assert testo_base == atteso, f"Atteso: {atteso}, Ottenuto: {testo_base}"
-    assert testo_base == testo_pipeline, f"Atteso: base={testo_base} == pipeline={testo_pipeline}, Ottenuto: divergenza"
-    assert testo_base == testo_forward, f"Atteso: base={testo_base} == forward={testo_forward}, Ottenuto: divergenza"
+    assert pipeline_anthropic._text_from_message is base._text_from_message, (
+        "pipeline_anthropic._text_from_message deve essere re-export di base._text_from_message, "
+        "non una copia separata"
+    )
+
+    assert not hasattr(forward_anthropic, '_text_from_message'), (
+        "forward_anthropic non deve avere piu' _text_from_message: "
+        "la copia morta e' stata rimossa il 2026-08-07 e non va reintrodotta"
+    )

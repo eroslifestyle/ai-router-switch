@@ -152,21 +152,7 @@ def _log_original_model(orig: str, final: str, chat_id: str) -> None:
 # _force_no_stream e stata rimossa il 2026-08-03 perche mai chiamata
 
 
-def _text_from_message(j: dict) -> str:
-    """Estrae testo puro da un message dict Anthropic."""
-    out = []
-    for b in (j or {}).get("content", []):
-        if isinstance(b, dict):
-            t = b.get("type", "")
-            if t == "text":
-                out.append(b.get("text", ""))
-            elif t == "thinking":
-                inner = b.get("thinking", {})
-                if isinstance(inner, dict):
-                    out.append(inner.get("thinking", ""))
-                elif isinstance(inner, str):
-                    out.append(inner)
-    return "".join(out)
+# _text_from_message rimossa il 2026-08-07: copia morta, nessun chiamante. Fonte unica in providers/base.py
 
 
 async def forward_anthropic(request, body, session):

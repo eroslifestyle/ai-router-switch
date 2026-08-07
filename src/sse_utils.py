@@ -1,20 +1,24 @@
 """SSE (Server-Sent Events) utilities — Anthropic-compatible streaming.
 
-_text_from_message: funzione estrattore testo dal message dict.
-Deve essere passata dal chiamante (definita nel modulo proxy).
+_text_from_message: funzione estrattore testo dal message dict. Il chiamante
+può passarla per sovrascrivere il default; se non la passa vale quella di
+providers.base, che è la fonte unica.
+
+Prima qui c'era `_text_extractor = None`, mai assegnato da nessuno in tutto il
+repo: il fallback `text = fn(j) if fn else ""` consegnava quindi al client un
+testo VUOTO in silenzio ogni volta che l'estrattore non arrivava. In produzione
+non mordeva solo perché il proxy patchava `__defaults__`, ma importando questo
+modulo da solo un messaggio con testo reale usciva vuoto — verificato.
 """
 import json
 from aiohttp import web
-
-# Default stub — sostituito dal chiamante se necessario.
-# Il modulo proxy definisce _text_from_message nel proprio global scope.
-_text_extractor = None
+from providers.base import _text_from_message as _default_text_extractor
 
 
 def _sse_events_from_message(j: dict, verified: str, _text_from_message=None) -> list:
     """Ritorna lista di eventi SSE Anthropic-compat (per invio progressivo con flush)."""
-    fn = _text_from_message or _text_extractor
-    text = fn(j) if fn else ""
+    fn = _text_from_message or _default_text_extractor
+    text = fn(j)
     mid = j.get("id", "msg_router")
     model = j.get("model", "unknown")
     usage = j.get("usage", {})
