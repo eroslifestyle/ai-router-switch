@@ -1,0 +1,22 @@
+[200] codegen/baseline run-0: OK
+[200] codegen/baseline run-1: OK
+[200] codegen/baseline run-2: OK
+[200] codegen/baseline run-3: OK
+[200] codegen/effort_low run-0: OK
+[200] codegen/effort_low run-1: OK
+[200] codegen/effort_low run-2: OK
+[200] codegen/effort_low run-3: OK
+[200] codegen/effort_medium run-0: OK
+[200] codegen/effort_medium run-1: OK
+[200] codegen/effort_medium run-2: OK
+[200] codegen/effort_medium run-3: OK
+[200] codegen/effort_high run-0: OK
+[200] codegen/effort_high run-1: OK
+[200] codegen/effort_high run-2: OK
+[200] codegen/effort_high run-3: OK
+[200] codegen/effort_xhigh run-0: OK
+[200] codegen/effort_xhigh run-1: OK
+[200] codegen/effort_xhigh run-2: OK
+[200] codegen/effort_xhigh run-3: OK
+
+Risultati: results/fase1-codegen-n4.jsonl

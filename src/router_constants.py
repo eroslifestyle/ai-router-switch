@@ -177,7 +177,11 @@ _GENERATIVE_PATHS = {
 
 # CLAUDE_CODE_MARKER rimossa il 2026-08-07: nessun lettore. L'autenticazione
 # legge il token OAuth da file o Keychain (router_auth.py), non dal system prompt.
-ANTHROPIC_UNSUPPORTED_FIELDS = ("context_management", "thinking", "output_config")
+# Lo strip cieco dei tre campi e' stato sostituito da una whitelist PER MODELLO
+# in anthropic_capabilities.py: i modelli recenti supportano output_config.effort
+# e thinking (misurato: -40% di token in uscita a effort=low), i vecchi rispondono
+# 400. Il marker Claude Code, contrariamente al commento precedente, UN LETTORE CE
+# L'HA: senza di esso opus e sonnet rispondono 429 (verificato 2026-08-07); haiku no.
 
 # ── Health-check paths ─────────────────────────────────────────────────────────
 _HEALTH_CHECK_PATHS = frozenset({

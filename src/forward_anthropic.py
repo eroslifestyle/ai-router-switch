@@ -9,7 +9,7 @@ import cache_optimizer
 
 from router_constants import (
     ANTHROPIC_UPSTREAM, ANTHROPIC_DIRECT_URL, HOP_HEADERS,
-    ANTHROPIC_UNSUPPORTED_FIELDS, is_context_exceeded_body,
+    is_context_exceeded_body,
 )
 from router_utils import (
     _analyze_body_structure, SENT_ANALYSIS, _DEBUG_LAST_SENT, log,
@@ -20,6 +20,7 @@ from router_debug import dl
 # A livello modulo, MAI dentro le funzioni: un import locale renderebbe il nome
 # locale all'intera funzione (vedi test_module_names_resolved.py).
 from anthropic_body import sanitize_server_tool_ids
+import anthropic_capabilities
 
 # Deep-debug (analyze struttura body + dump _DEBUG_LAST_SENT su disco) è overhead
 # SINCRONO nel path caldo, eseguito ad ogni richiesta e scalante col body (deep-copy
@@ -123,18 +124,6 @@ def _emit_deep_debug(fn: str, request, safe_body: bytes) -> None:
         pass
 
 
-def strip_unsupported_fields(raw: bytes, fields: tuple) -> bytes:
-    """Rimuove campi non supportati dal body JSON. No-op se non è JSON."""
-    try:
-        data = json.loads(raw)
-        changed = False
-        for f in fields:
-            if f in data:
-                data.pop(f, None)
-                changed = True
-        return json.dumps(data).encode() if changed else raw
-    except Exception:
-        return raw
 
 
 # _log_original_model rimossa il 2026-08-07: nessun chiamante, sidecar fermo dal 2026-07-25
@@ -186,8 +175,23 @@ async def forward_anthropic(request, body, session):
         except Exception:
             pass
 
-    safe_body = strip_unsupported_fields(body, ANTHROPIC_UNSUPPORTED_FIELDS) \
-        if "/v1/messages" in request.path else body
+    # Whitelist PER MODELLO al posto dello strip cieco: i modelli recenti
+    # supportano output_config.effort (misurato: -40% di token in uscita) e
+    # thinking, i vecchi rispondono 400. In piu' garantisce il marker Claude
+    # Code sui modelli che senza di esso rispondono 429 (opus/sonnet).
+    if "/v1/messages" in request.path:
+        # inject_marker=False: MISURATO il 2026-08-07, iniettare il marker sul
+        # traffico del CLI cambia il system prompt e INVALIDA il prompt caching.
+        # Effetto osservato su traffico reale: rapporto cache_read/cache_creation
+        # crollato da 82,4 a 2,6 e cache_creation per richiesta salita da 4.167 a
+        # 52.513 (12,6x). Il rimedio costava piu' del male: il CLI il marker ce
+        # l'ha gia'. L'iniezione resta disponibile per le richieste sintetiche.
+        safe_body, _caps = anthropic_capabilities.prepare_body(body, inject_marker=False)
+        if _caps["stripped"] or _caps["marker_added"]:
+            log(f"[caps] {_caps['model']}: stripped={_caps['stripped']} "
+                f"marker_added={_caps['marker_added']}")
+    else:
+        safe_body = body
     safe_body = tool_isolation.filter_tools_for_backend(safe_body, "anthropic")
 
     if "/v1/messages" in request.path:
@@ -297,8 +301,23 @@ async def forward_anthropic_direct(request, body, session):
         headers["anthropic-beta"] = "oauth-2025-04-20"
     headers.setdefault("anthropic-version", "2023-06-01")
 
-    safe_body = strip_unsupported_fields(body, ANTHROPIC_UNSUPPORTED_FIELDS) \
-        if "/v1/messages" in request.path else body
+    # Whitelist PER MODELLO al posto dello strip cieco: i modelli recenti
+    # supportano output_config.effort (misurato: -40% di token in uscita) e
+    # thinking, i vecchi rispondono 400. In piu' garantisce il marker Claude
+    # Code sui modelli che senza di esso rispondono 429 (opus/sonnet).
+    if "/v1/messages" in request.path:
+        # inject_marker=False: MISURATO il 2026-08-07, iniettare il marker sul
+        # traffico del CLI cambia il system prompt e INVALIDA il prompt caching.
+        # Effetto osservato su traffico reale: rapporto cache_read/cache_creation
+        # crollato da 82,4 a 2,6 e cache_creation per richiesta salita da 4.167 a
+        # 52.513 (12,6x). Il rimedio costava piu' del male: il CLI il marker ce
+        # l'ha gia'. L'iniezione resta disponibile per le richieste sintetiche.
+        safe_body, _caps = anthropic_capabilities.prepare_body(body, inject_marker=False)
+        if _caps["stripped"] or _caps["marker_added"]:
+            log(f"[caps] {_caps['model']}: stripped={_caps['stripped']} "
+                f"marker_added={_caps['marker_added']}")
+    else:
+        safe_body = body
     safe_body = tool_isolation.filter_tools_for_backend(safe_body, "anthropic")
 
     if "/v1/messages" in request.path:

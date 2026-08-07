@@ -1,0 +1,22 @@
+provider  variant            status  out_tok  think_tok  text_len  lat_ms
+--------  -----------------  ------  -------  ---------  --------  ------
+MiniMax   baseline           200     1723     0          2423      44584 
+MiniMax   thinking_adaptive  200     1953     0          2680      51428 
+MiniMax   thinking_disabled  200     1577     0          2840      38564 
+MiniMax   effort_low         200     1664     0          2180      36504 
+MiniMax   effort_high        200     1497     0          2304      40025 
+GLM       baseline           429     0        0          0         975   
+GLM       thinking_disabled  429     0        0          0         912   
+GLM       thinking_enabled   429     0        0          0         900   
+GLM       reasoning_low      429     0        0          0         831   
+GLM       reasoning_high     429     0        0          0         912   
+LOCALE    baseline           200     799      0          1745      25218 
+LOCALE    reasoning_low      200     886      0          1952      18780 
+LOCALE    reasoning_medium   200     954      0          2248      20574 
+LOCALE    reasoning_high     200     885      0          2024      18764 
+
+MiniMax: ONORATO (scarto 23.3%)
+GLM: NON MISURABILE ({"error":{"code":"1113","message":"Insufficient balance or no resource package. Please recharge."}})
+LOCALE: ONORATO (scarto 16.2%)
+
+Saltati (credenziali mancanti): QWEN
