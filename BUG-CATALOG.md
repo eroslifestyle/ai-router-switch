@@ -2,11 +2,11 @@
 
 > Generato automaticamente da `scripts/generate_bug_report.py` a partire da `logs/BUG-CATALOG.jsonl`. Non modificare a mano — rilanciare lo script. Vedi `DEBUG-CATALOG-SPEC.md` per lo schema completo.
 
-**223 tipi distinti di bug/blocco/errore** · **31436 occorrenze totali** su 9 modalita'.
+**221 tipi distinti di bug/blocco/errore** · **33485 occorrenze totali** su 9 modalita'.
 
 ## Modalita': `anthropic`
 
-69 tipi distinti, 23403 occorrenze.
+69 tipi distinti, 25406 occorrenze.
 
 ### `rate_limit_429_exhausted` (429)
 
@@ -556,36 +556,6 @@
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `extra_headers=['x-ai-verified'] upstream_headers={'server': 'cloudflare', 'cf-ray': 'a1dbf173cfafed92-MXP'} url=https://api.anthropic.com/v1/messages?beta=true`
 
-### `tool_isolation_strip`
-
-- **Firma**: `7446f99926bbc6ef`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 15113
-- **Prima volta**: 2026-07-26T17:54:14Z
-- **Ultima volta**: 2026-08-06T20:55:59+0200
-- **Modalita' coinvolte**: anthropic
-- **Esempio**: `stripped=['mcp__zai__web_search_prime'] kept=55/56`
-
-### `tool_isolation_strip`
-
-- **Firma**: `1b910b74f7b880e0`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 7285
-- **Prima volta**: 2026-07-19T21:40:09Z
-- **Ultima volta**: 2026-07-28T07:58:11+0200
-- **Modalita' coinvolte**: anthropic
-- **Esempio**: `stripped=['mcp__MiniMax__understand_image', 'mcp__MiniMax__web_search', 'mcp__zai__web_search_prime'] kept=60/63`
-
-### `tool_isolation_strip`
-
-- **Firma**: `5eb9aca25569b15f`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 355
-- **Prima volta**: 2026-07-19T19:41:54Z
-- **Ultima volta**: 2026-07-28T07:44:40+0200
-- **Modalita' coinvolte**: anthropic
-- **Esempio**: `stripped=['mcp__MiniMax__understand_image', 'mcp__MiniMax__web_search'] kept=60/62`
-
 ### `rate_limit_429`
 
 - **Firma**: `e648db5b3f6e697e`
@@ -615,16 +585,6 @@
 - **Ultima volta**: 2026-08-04T00:42:34+0200
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `anthropic 429: retry 2/2 retry-after=1.0 sleep=1.00s`
-
-### `tool_isolation_strip`
-
-- **Firma**: `3f14d8ef8e1d0fab`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 8
-- **Prima volta**: 2026-07-22T06:53:40Z
-- **Ultima volta**: 2026-07-22T06:56:57Z
-- **Modalita' coinvolte**: anthropic
-- **Esempio**: `stripped=['mcp__zai__web_search_prime', 'mcp__MiniMax__web_search'] kept=1/3`
 
 ### `rate_limit_429`
 
@@ -658,23 +618,33 @@
 
 ### `tool_isolation_strip`
 
-- **Firma**: `379bc13a99c2fc04`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 1
-- **Prima volta**: 2026-08-03T19:52:34+0200
-- **Ultima volta**: 2026-08-03T19:52:34+0200
+- **Firma**: `7446f99926bbc6ef`
+- **Severita'**: info
+- **Occorrenze**: 17116
+- **Prima volta**: 2026-07-26T17:54:14Z
+- **Ultima volta**: 2026-08-07T01:50:31+0200
 - **Modalita' coinvolte**: anthropic
-- **Esempio**: `stripped=['mcp__websearch__search', 'mcp__MiniMax__web_search', 'mcp__zai__web_search_prime'] kept=2/5`
+- **Esempio**: `stripped=['mcp__zai__web_search_prime'] kept=55/56`
 
 ### `tool_isolation_strip`
 
-- **Firma**: `9118774d9a6c02eb`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 1
-- **Prima volta**: 2026-07-19T21:35:33Z
-- **Ultima volta**: 2026-07-19T21:35:33Z
+- **Firma**: `1b910b74f7b880e0`
+- **Severita'**: info
+- **Occorrenze**: 7285
+- **Prima volta**: 2026-07-19T21:40:09Z
+- **Ultima volta**: 2026-07-28T07:58:11+0200
 - **Modalita' coinvolte**: anthropic
-- **Esempio**: `stripped=['mcp__zai__webSearchPrime', 'mcp__MiniMax__web_search'] kept=1/3`
+- **Esempio**: `stripped=['mcp__MiniMax__understand_image', 'mcp__MiniMax__web_search', 'mcp__zai__web_search_prime'] kept=60/63`
+
+### `tool_isolation_strip`
+
+- **Firma**: `5eb9aca25569b15f`
+- **Severita'**: info
+- **Occorrenze**: 355
+- **Prima volta**: 2026-07-19T19:41:54Z
+- **Ultima volta**: 2026-07-28T07:44:40+0200
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `stripped=['mcp__MiniMax__understand_image', 'mcp__MiniMax__web_search'] kept=60/62`
 
 ### `ctx_gate` (ok)
 
@@ -685,6 +655,16 @@
 - **Ultima volta**: 2026-08-01T14:18:10+0200
 - **Modalita' coinvolte**: anthropic
 
+### `tool_isolation_strip`
+
+- **Firma**: `3f14d8ef8e1d0fab`
+- **Severita'**: info
+- **Occorrenze**: 8
+- **Prima volta**: 2026-07-22T06:53:40Z
+- **Ultima volta**: 2026-07-22T06:56:57Z
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `stripped=['mcp__zai__web_search_prime', 'mcp__MiniMax__web_search'] kept=1/3`
+
 ### `ctx_gate`
 
 - **Firma**: `164bcf4c47d65947`
@@ -693,6 +673,26 @@
 - **Prima volta**: 2026-07-26T18:23:30Z
 - **Ultima volta**: 2026-07-26T18:25:46Z
 - **Modalita' coinvolte**: anthropic
+
+### `tool_isolation_strip`
+
+- **Firma**: `379bc13a99c2fc04`
+- **Severita'**: info
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-03T19:52:34+0200
+- **Ultima volta**: 2026-08-03T19:52:34+0200
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `stripped=['mcp__websearch__search', 'mcp__MiniMax__web_search', 'mcp__zai__web_search_prime'] kept=2/5`
+
+### `tool_isolation_strip`
+
+- **Firma**: `9118774d9a6c02eb`
+- **Severita'**: info
+- **Occorrenze**: 1
+- **Prima volta**: 2026-07-19T21:35:33Z
+- **Ultima volta**: 2026-07-19T21:35:33Z
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `stripped=['mcp__zai__webSearchPrime', 'mcp__MiniMax__web_search'] kept=1/3`
 
 ## Modalita': `glm`
 
@@ -858,36 +858,6 @@
 - **Modalita' coinvolte**: glm
 - **Esempio**: `attempt=1 model=claude-sonnet-5`
 
-### `tool_isolation_strip`
-
-- **Firma**: `2cf1321f17c5adda`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 1191
-- **Prima volta**: 2026-07-22T08:07:41Z
-- **Ultima volta**: 2026-08-06T17:26:05+0200
-- **Modalita' coinvolte**: glm
-- **Esempio**: `stripped=['WebFetch', 'WebSearch'] kept=54/56`
-
-### `tool_isolation_strip`
-
-- **Firma**: `e5dc8d4b2d987612`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 308
-- **Prima volta**: 2026-07-22T07:29:23Z
-- **Ultima volta**: 2026-07-22T13:39:35Z
-- **Modalita' coinvolte**: glm
-- **Esempio**: `stripped=['WebFetch', 'WebSearch', 'mcp__MiniMax__understand_image', 'mcp__MiniMax__web_search'] kept=39/43`
-
-### `tool_isolation_strip`
-
-- **Firma**: `f9d1fac61fb04f47`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 109
-- **Prima volta**: 2026-07-19T20:18:51Z
-- **Ultima volta**: 2026-07-22T06:38:36Z
-- **Modalita' coinvolte**: glm
-- **Esempio**: `stripped=['mcp__MiniMax__understand_image', 'mcp__MiniMax__web_search'] kept=274/276`
-
 ### `glm_ratelimit_exhausted` (429)
 
 - **Firma**: `6e43cd08801003c3`
@@ -998,16 +968,6 @@
 - **Modalita' coinvolte**: glm
 - **Esempio**: `model=claude-sonnet-5 glm rate-limit: budget 8s esaurito (waited 0s)`
 
-### `tool_isolation_strip`
-
-- **Firma**: `8dc3755f203663e5`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 5
-- **Prima volta**: 2026-07-26T08:34:50Z
-- **Ultima volta**: 2026-07-26T08:36:44Z
-- **Modalita' coinvolte**: glm
-- **Esempio**: `stripped=['web_search'] kept=1/2`
-
 ### `glm_429_backoff` (429)
 
 - **Firma**: `bea2afb7568d2fad`
@@ -1020,8 +980,48 @@
 
 ### `tool_isolation_strip`
 
+- **Firma**: `2cf1321f17c5adda`
+- **Severita'**: info
+- **Occorrenze**: 1191
+- **Prima volta**: 2026-07-22T08:07:41Z
+- **Ultima volta**: 2026-08-06T17:26:05+0200
+- **Modalita' coinvolte**: glm
+- **Esempio**: `stripped=['WebFetch', 'WebSearch'] kept=54/56`
+
+### `tool_isolation_strip`
+
+- **Firma**: `e5dc8d4b2d987612`
+- **Severita'**: info
+- **Occorrenze**: 308
+- **Prima volta**: 2026-07-22T07:29:23Z
+- **Ultima volta**: 2026-07-22T13:39:35Z
+- **Modalita' coinvolte**: glm
+- **Esempio**: `stripped=['WebFetch', 'WebSearch', 'mcp__MiniMax__understand_image', 'mcp__MiniMax__web_search'] kept=39/43`
+
+### `tool_isolation_strip`
+
+- **Firma**: `f9d1fac61fb04f47`
+- **Severita'**: info
+- **Occorrenze**: 109
+- **Prima volta**: 2026-07-19T20:18:51Z
+- **Ultima volta**: 2026-07-22T06:38:36Z
+- **Modalita' coinvolte**: glm
+- **Esempio**: `stripped=['mcp__MiniMax__understand_image', 'mcp__MiniMax__web_search'] kept=274/276`
+
+### `tool_isolation_strip`
+
+- **Firma**: `8dc3755f203663e5`
+- **Severita'**: info
+- **Occorrenze**: 5
+- **Prima volta**: 2026-07-26T08:34:50Z
+- **Ultima volta**: 2026-07-26T08:36:44Z
+- **Modalita' coinvolte**: glm
+- **Esempio**: `stripped=['web_search'] kept=1/2`
+
+### `tool_isolation_strip`
+
 - **Firma**: `c04f3e9878f7fa6c`
-- **Severita'**: 🟡 Blocchi
+- **Severita'**: info
 - **Occorrenze**: 2
 - **Prima volta**: 2026-07-19T21:35:33Z
 - **Ultima volta**: 2026-07-22T06:53:48Z
@@ -1031,7 +1031,7 @@
 ### `tool_isolation_strip`
 
 - **Firma**: `0b58ea9d1dfa75c4`
-- **Severita'**: 🟡 Blocchi
+- **Severita'**: info
 - **Occorrenze**: 1
 - **Prima volta**: 2026-08-03T19:52:34+0200
 - **Ultima volta**: 2026-08-03T19:52:34+0200
@@ -1041,7 +1041,7 @@
 ### `tool_isolation_strip`
 
 - **Firma**: `54ae025d11c9e975`
-- **Severita'**: 🟡 Blocchi
+- **Severita'**: info
 - **Occorrenze**: 1
 - **Prima volta**: 2026-07-23T01:11:32Z
 - **Ultima volta**: 2026-07-23T01:11:32Z
@@ -1051,7 +1051,7 @@
 ### `tool_isolation_strip`
 
 - **Firma**: `e119ad9c18e6e970`
-- **Severita'**: 🟡 Blocchi
+- **Severita'**: info
 - **Occorrenze**: 1
 - **Prima volta**: 2026-07-22T07:21:28Z
 - **Ultima volta**: 2026-07-22T07:21:28Z
@@ -1061,7 +1061,7 @@
 ### `tool_isolation_strip`
 
 - **Firma**: `3b89b0095896c827`
-- **Severita'**: 🟡 Blocchi
+- **Severita'**: info
 - **Occorrenze**: 1
 - **Prima volta**: 2026-07-22T06:57:04Z
 - **Ultima volta**: 2026-07-22T06:57:04Z
@@ -1071,7 +1071,7 @@
 ### `tool_isolation_strip`
 
 - **Firma**: `86b15a0bd239ccc0`
-- **Severita'**: 🟡 Blocchi
+- **Severita'**: info
 - **Occorrenze**: 1
 - **Prima volta**: 2026-07-21T23:25:21Z
 - **Ultima volta**: 2026-07-21T23:25:21Z
@@ -1132,15 +1132,15 @@
 
 ## Modalita': `minimax`
 
-15 tipi distinti, 2875 occorrenze.
+14 tipi distinti, 2910 occorrenze.
 
 ### `forward_exception`
 
 - **Firma**: `46cf435b9a06795b`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 282
+- **Occorrenze**: 323
 - **Prima volta**: 2026-07-26T10:06:51Z
-- **Ultima volta**: 2026-08-06T20:39:33+0200
+- **Ultima volta**: 2026-08-06T23:37:44+0200
 - **Modalita' coinvolte**: minimax
 - **Esempio**: `Timeout on reading data from socket`
 
@@ -1183,26 +1183,6 @@
 - **Modalita' coinvolte**: minimax
 - **Esempio**: `'NoneType' object has no attribute 'request'`
 
-### `tool_isolation_strip`
-
-- **Firma**: `f2020e9e7f5cab0e`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 1562
-- **Prima volta**: 2026-07-19T22:00:32Z
-- **Ultima volta**: 2026-07-22T06:53:46Z
-- **Modalita' coinvolte**: minimax
-- **Esempio**: `stripped=['mcp__zai__web_search_prime'] kept=2/3`
-
-### `tool_isolation_strip`
-
-- **Firma**: `e44837cc566fd378`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 958
-- **Prima volta**: 2026-07-22T19:20:57Z
-- **Ultima volta**: 2026-07-31T06:11:24+0200
-- **Modalita' coinvolte**: minimax
-- **Esempio**: `stripped=['WebFetch', 'WebSearch', 'mcp__zai__web_search_prime'] kept=22/25`
-
 ### `think_plan_invalid`
 
 - **Firma**: `d9594c530578e523`
@@ -1224,28 +1204,38 @@
 
 ### `tool_isolation_strip`
 
+- **Firma**: `f2020e9e7f5cab0e`
+- **Severita'**: info
+- **Occorrenze**: 1562
+- **Prima volta**: 2026-07-19T22:00:32Z
+- **Ultima volta**: 2026-07-22T06:53:46Z
+- **Modalita' coinvolte**: minimax
+- **Esempio**: `stripped=['mcp__zai__web_search_prime'] kept=2/3`
+
+### `tool_isolation_strip`
+
+- **Firma**: `e44837cc566fd378`
+- **Severita'**: info
+- **Occorrenze**: 958
+- **Prima volta**: 2026-07-22T19:20:57Z
+- **Ultima volta**: 2026-07-31T06:11:24+0200
+- **Modalita' coinvolte**: minimax
+- **Esempio**: `stripped=['WebFetch', 'WebSearch', 'mcp__zai__web_search_prime'] kept=22/25`
+
+### `tool_isolation_strip`
+
 - **Firma**: `0de3df722554d9aa`
-- **Severita'**: 🟡 Blocchi
+- **Severita'**: info
 - **Occorrenze**: 6
 - **Prima volta**: 2026-07-22T23:32:11Z
 - **Ultima volta**: 2026-07-29T09:26:03+0200
 - **Modalita' coinvolte**: minimax
 - **Esempio**: `stripped=['WebFetch', 'WebSearch'] kept=19/21`
 
-### `minimax_429_rpm` (429)
-
-- **Firma**: `2aa4770210ced1e8`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 6
-- **Prima volta**: 2026-07-22T11:43:41Z
-- **Ultima volta**: 2026-07-22T11:45:55Z
-- **Modalita' coinvolte**: minimax
-- **Esempio**: `{"type": "error", "error": {"type": "rate_limit_error", "message": "fake rate limit"}}`
-
 ### `tool_isolation_strip`
 
 - **Firma**: `a6cb20cc79d422af`
-- **Severita'**: 🟡 Blocchi
+- **Severita'**: info
 - **Occorrenze**: 2
 - **Prima volta**: 2026-07-22T06:56:59Z
 - **Ultima volta**: 2026-07-22T06:57:02Z
@@ -1255,7 +1245,7 @@
 ### `tool_isolation_strip`
 
 - **Firma**: `a523d7b685872d06`
-- **Severita'**: 🟡 Blocchi
+- **Severita'**: info
 - **Occorrenze**: 1
 - **Prima volta**: 2026-08-03T19:52:34+0200
 - **Ultima volta**: 2026-08-03T19:52:34+0200
@@ -1265,7 +1255,7 @@
 ### `tool_isolation_strip`
 
 - **Firma**: `3a3b86a151e6a0af`
-- **Severita'**: 🟡 Blocchi
+- **Severita'**: info
 - **Occorrenze**: 1
 - **Prima volta**: 2026-07-26T08:28:18Z
 - **Ultima volta**: 2026-07-26T08:28:18Z
@@ -1275,7 +1265,7 @@
 ### `tool_isolation_strip`
 
 - **Firma**: `d8907f8dc0ec3574`
-- **Severita'**: 🟡 Blocchi
+- **Severita'**: info
 - **Occorrenze**: 1
 - **Prima volta**: 2026-07-19T21:35:33Z
 - **Ultima volta**: 2026-07-19T21:35:33Z
@@ -1349,7 +1339,7 @@
 
 ## Modalita': `mix-am`
 
-61 tipi distinti, 1452 occorrenze.
+61 tipi distinti, 1544 occorrenze.
 
 ### `relay_error_400` (400)
 
@@ -1365,11 +1355,11 @@
 
 - **Firma**: `68be3329c4f78992`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 58
+- **Occorrenze**: 61
 - **Prima volta**: 2026-07-28T22:08:59+0200
-- **Ultima volta**: 2026-08-05T08:11:10+0200
+- **Ultima volta**: 2026-08-06T21:49:18+0200
 - **Modalita' coinvolte**: mix-am
-- **Esempio**: `{"type":"error","error":{"type":"overloaded_error","message":"The server cluster is currently under high load. Please retry after a short wait and thank you for your patience. (2064) (529)"},"request_id":"06c206fe3a99bc70899493e4da1b6861"}`
+- **Esempio**: `{"type":"error","error":{"type":"overloaded_error","message":"The server cluster is currently under high load. Please retry after a short wait and thank you for your patience. (2064) (529)"},"request_id":"06c4183e5d4f1cd7e8f790af3a26a4ec"}`
 
 ### `minimax_fallback_5xx` (404)
 
@@ -1941,33 +1931,23 @@
 
 - **Firma**: `4e55ecf61db90635`
 - **Severita'**: info
-- **Occorrenze**: 660
+- **Occorrenze**: 745
 - **Prima volta**: 2026-07-26T20:35:53+0200
-- **Ultima volta**: 2026-08-06T20:51:21+0200
+- **Ultima volta**: 2026-08-07T01:48:21+0200
 - **Modalita' coinvolte**: mix-am
 
 ### `ctx_gate` (warn)
 
 - **Firma**: `9fad96d29dda127b`
 - **Severita'**: info
-- **Occorrenze**: 3
+- **Occorrenze**: 7
 - **Prima volta**: 2026-07-30T03:47:32+0200
-- **Ultima volta**: 2026-07-30T04:01:00+0200
+- **Ultima volta**: 2026-08-07T01:26:50+0200
 - **Modalita' coinvolte**: mix-am
 
 ## Modalita': `mix-gm`
 
-18 tipi distinti, 204 occorrenze.
-
-### `relay_error_400` (400)
-
-- **Firma**: `577a16219018ae0d`
-- **Severita'**: 🔴 Errori
-- **Occorrenze**: 101
-- **Prima volta**: 2026-07-26T20:47:42+0200
-- **Ultima volta**: 2026-08-06T19:50:21+0200
-- **Modalita' coinvolte**: mix-gm
-- **Esempio**: `{"error":"boom"}`
+17 tipi distinti, 103 occorrenze.
 
 ### `relay_error_502` (502)
 
@@ -2136,7 +2116,7 @@
 
 ## Modalita': `qwen`
 
-11 tipi distinti, 1270 occorrenze.
+11 tipi distinti, 1290 occorrenze.
 
 ### `forward_exception`
 
@@ -2187,26 +2167,6 @@
 - **Modalita' coinvolte**: qwen
 - **Esempio**: `'Response' object has no attribute 'release'`
 
-### `tool_isolation_strip`
-
-- **Firma**: `1418176599f956bc`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 779
-- **Prima volta**: 2026-08-04T02:27:56+0200
-- **Ultima volta**: 2026-08-04T11:12:05+0200
-- **Modalita' coinvolte**: qwen
-- **Esempio**: `stripped=['WebFetch', 'WebSearch', 'mcp__zai__web_search_prime'] kept=300/303`
-
-### `heavy_connector_strip`
-
-- **Firma**: `4ccd5828ee0b363a`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 428
-- **Prima volta**: 2026-08-04T03:41:20+0200
-- **Ultima volta**: 2026-08-06T20:39:40+0200
-- **Modalita' coinvolte**: qwen
-- **Esempio**: `stripped=2 kept=1/3`
-
 ### `qwen_429_backoff` (429)
 
 - **Firma**: `303e54f4ad58feb1`
@@ -2219,23 +2179,23 @@
 
 ### `tool_isolation_strip`
 
-- **Firma**: `ece54103702c420c`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 6
-- **Prima volta**: 2026-08-04T04:05:10+0200
-- **Ultima volta**: 2026-08-04T04:07:10+0200
+- **Firma**: `1418176599f956bc`
+- **Severita'**: info
+- **Occorrenze**: 779
+- **Prima volta**: 2026-08-04T02:27:56+0200
+- **Ultima volta**: 2026-08-04T11:12:05+0200
 - **Modalita' coinvolte**: qwen
-- **Esempio**: `stripped=['WebFetch', 'WebSearch'] kept=19/21`
+- **Esempio**: `stripped=['WebFetch', 'WebSearch', 'mcp__zai__web_search_prime'] kept=300/303`
 
-### `tool_isolation_strip`
+### `heavy_connector_strip`
 
-- **Firma**: `23762303131b59d6`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 1
-- **Prima volta**: 2026-08-03T19:52:34+0200
-- **Ultima volta**: 2026-08-03T19:52:34+0200
+- **Firma**: `4ccd5828ee0b363a`
+- **Severita'**: info
+- **Occorrenze**: 448
+- **Prima volta**: 2026-08-04T03:41:20+0200
+- **Ultima volta**: 2026-08-06T23:41:03+0200
 - **Modalita' coinvolte**: qwen
-- **Esempio**: `stripped=['mcp__MiniMax__web_search', 'mcp__zai__web_search_prime', 'web_search_20250305'] kept=2/5`
+- **Esempio**: `stripped=2 kept=1/3`
 
 ### `ctx_gate` (ok)
 
@@ -2245,3 +2205,54 @@
 - **Prima volta**: 2026-08-04T04:02:30+0200
 - **Ultima volta**: 2026-08-04T11:10:18+0200
 - **Modalita' coinvolte**: qwen
+
+### `tool_isolation_strip`
+
+- **Firma**: `ece54103702c420c`
+- **Severita'**: info
+- **Occorrenze**: 6
+- **Prima volta**: 2026-08-04T04:05:10+0200
+- **Ultima volta**: 2026-08-04T04:07:10+0200
+- **Modalita' coinvolte**: qwen
+- **Esempio**: `stripped=['WebFetch', 'WebSearch'] kept=19/21`
+
+### `tool_isolation_strip`
+
+- **Firma**: `23762303131b59d6`
+- **Severita'**: info
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-03T19:52:34+0200
+- **Ultima volta**: 2026-08-03T19:52:34+0200
+- **Modalita' coinvolte**: qwen
+- **Esempio**: `stripped=['mcp__MiniMax__web_search', 'mcp__zai__web_search_prime', 'web_search_20250305'] kept=2/5`
+
+## Body JSON non-oggetto -> 502 con dettaglio interno esposto
+
+**Trovato:** 2026-08-07, stress test `bench/stress.py` (caso `array_al_posto_di_oggetto`).
+**Stato:** aperto, NON corretto. Preesistente: sta nel dispatch del proxy, non nei
+moduli toccati dal commit bac14e6.
+
+**Riproduzione:**
+```
+curl -X POST http://127.0.0.1:8771/v1/messages -H 'content-type: application/json' --data '[1,2,3]'
+-> HTTP 502  {"error":{"type":"router_error","message":"'list' object has no attribute 'get'"}}
+```
+
+**Causa:** `ai-router-proxy.py:287` (e altri punti: 272, 341, 604, 677) fanno
+`json.loads(body).get(...)` senza verificare che il risultato sia un dict. Con un
+array JSON valido si ottiene un AttributeError, che il gestore converte in 502.
+
+**Due difetti distinti:**
+1. Codice di stato sbagliato: e' un errore del client (400), non del server (502).
+2. Il messaggio espone un dettaglio implementativo interno. Va contro la regola
+   "errori generici all'utente, dettaglio nei log".
+
+**Perche' non e' stato corretto subito:** il fix pulito e' una validazione unica
+all'ingresso di `/v1/messages`, che tocca il path caldo del dispatch centrale. Su
+un componente in cui un errore significa blocco totale, il rischio supera il
+beneficio di gestire un input che nessun client legittimo produce. Da fare con
+una finestra dedicata e test di regressione, non in coda a un altro lavoro.
+
+**Nota:** gli altri 8 casi di fault injection sono gestiti correttamente, incluso
+`system` da 200.000 caratteri, gli id `server_tool_use` non conformi e
+`output_config` su Haiku (strippato dalla whitelist, nessun 400).
