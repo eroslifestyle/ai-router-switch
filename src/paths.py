@@ -65,7 +65,19 @@ def reset_cache() -> None:
 
 
 def logs_dir() -> Path:
-    """Directory dei log applicativi."""
+    """Directory dei log applicativi.
+
+    Supporta override tramite variabile d'ambiente AIROUTER_LOGS_DIR.
+    """
+    # Override per test: senza questo, i test in-process scrivono nei store di
+    # produzione. router_constants risolve LOG_FILE, SIDECAR e USAGE_SIDECAR
+    # all'import; misurato 2026-08-07: una esecuzione della suite aggiunge 1 riga
+    # con fingerprint di test a ai-router.log e 6 righe a router-usage.jsonl,
+    # mentre senza suite il delta e' zero. L'accumulo storico vale 231 dei 423
+    # status 502 nel sidecar, il 54,6 per cento.
+    override = os.environ.get("AIROUTER_LOGS_DIR", "").strip()
+    if override:
+        return Path(override).expanduser()
     return config_home() / "logs"
 
 

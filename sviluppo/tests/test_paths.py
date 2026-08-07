@@ -184,6 +184,11 @@ class TestRelazioniParentela:
         custom = tmp_path / "custom"
         custom.mkdir()
         monkeypatch.setenv("AIROUTER_HOME", str(custom))
+        # AIROUTER_LOGS_DIR e' impostata dalla conftest per isolare i log dei
+        # test: qui va rimossa, altrimenti logs_dir() restituisce la tmpdir e
+        # l'invariante "tutto sotto config_home" risulterebbe falsa per un
+        # override deliberato invece che per una regressione.
+        monkeypatch.delenv("AIROUTER_LOGS_DIR", raising=False)
         monkeypatch.setattr(Path, "home", lambda: fake_home)
         ch = paths.config_home()
         assert paths.logs_dir().parent == ch
@@ -210,3 +215,36 @@ class TestCostantiNomeFile:
         assert isinstance(paths.CHAT_STORE_NAME, str)
         assert not isinstance(paths.MODE_FILE_NAME, Path)
         assert not isinstance(paths.CHAT_STORE_NAME, Path)
+
+
+# Guardia override AIROUTER_LOGS_DIR: senza l'override i test che avviano
+# il proxy in-process scrivevano negli store di produzione. Una esecuzione
+# della suite aggiungeva 1 riga con fingerprint di test ad ai-router.log
+# e 6 righe a router-usage.jsonl, mentre senza suite il delta era zero.
+# L'accumulo storico valeva 231 dei 423 status 502 nel sidecar, il 54,6%.
+
+
+class TestOverrideLogsDir:
+    """Verifica che AIROUTER_LOGS_DIR sovrascriva correttamente paths.logs_dir()."""
+
+    def test_override_ha_precedenza_su_config_home(self, monkeypatch, tmp_path):
+        """L'override ha priorità su config_home."""
+        monkeypatch.setenv("AIROUTER_LOGS_DIR", str(tmp_path / "altrove"))
+        assert paths.logs_dir() == tmp_path / "altrove"
+
+    def test_senza_override_resta_sotto_config_home(self, monkeypatch):
+        """Senza override si ricade correttamente sotto config_home."""
+        monkeypatch.delenv("AIROUTER_LOGS_DIR", raising=False)
+        assert paths.logs_dir() == paths.config_home() / "logs"
+
+    def test_override_vuoto_o_spazi_viene_ignorato(self, monkeypatch):
+        """Stringa vuota o soli spazi vengono trattati come assenza di override."""
+        monkeypatch.setenv("AIROUTER_LOGS_DIR", "")
+        assert paths.logs_dir() == paths.config_home() / "logs"
+        monkeypatch.setenv("AIROUTER_LOGS_DIR", "   ")
+        assert paths.logs_dir() == paths.config_home() / "logs"
+
+    def test_log_file_segue_override(self, monkeypatch, tmp_path):
+        """I log file rispettano l'override della directory dei log."""
+        monkeypatch.setenv("AIROUTER_LOGS_DIR", str(tmp_path / "altrove"))
+        assert paths.log_file("ai-router.log") == tmp_path / "altrove" / "ai-router.log"

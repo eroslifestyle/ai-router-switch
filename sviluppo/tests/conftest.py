@@ -49,10 +49,23 @@ os.environ["AIROUTER_CATALOG_PATH"] = str(
     pathlib.Path(_CATALOGO_TMP) / "BUG-CATALOG.jsonl"
 )
 
+# Isolamento directory logs per evitare inquinamento dei file di produzione
+# (LOG_FILE, SIDECAR, USAGE_SIDECAR risolvono a import-time del modulo router_constants;
+# test che avviano il proxy in-process scrivevano in ai-router.log e router-usage.jsonl
+# di produzione. Controprova 2026-08-07: una esecuzione della suite aggiungeva +1 riga
+# con fingerprint di test al log e +6 righe al sidecar, mentre senza suite il delta era
+# zero; l'accumulo storico valeva 231 delle 423 righe con status 502 nel sidecar, il
+# 54,6%, gonfiando le metriche di errore di oltre il doppio. Motivo al top-level e non
+# in fixture: i moduli di src vengono importati durante la collection, che precede
+# qualunque fixture, quindi l'isolamento deve essere attivo gia' prima.)
+_LOGS_TMP = tempfile.mkdtemp(prefix="airouter-logs-test-")
+os.environ["AIROUTER_LOGS_DIR"] = str(_LOGS_TMP)
+
 
 def pytest_sessionfinish(session, exitstatus):
-    """Rimuove la tmpdir del catalogo isolato a fine sessione."""
+    """Rimuove le tmpdir isolate (catalogo e logs) a fine sessione."""
     shutil.rmtree(_CATALOGO_TMP, ignore_errors=True)
+    shutil.rmtree(_LOGS_TMP, ignore_errors=True)
 
 
 def _purge_src_modules():
