@@ -6,11 +6,10 @@ import urllib.request
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QPoint
-from PySide6.QtGui import QColor, QPainter, QPen, QFont, QPainterPath, QGradient, QLinearGradient, QIcon
+from PySide6.QtGui import QColor, QFont, QIcon
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QGridLayout, QGraphicsDropShadowEffect,
-    QGraphicsOpacityEffect, QSizePolicy,
 )
 
 # Palette
@@ -55,7 +54,9 @@ MODES = [
 ]
 
 def hex_c(h, a=255):
-    r = int(h[1:3], 16); g = int(h[3:5], 16); b = int(h[5:7], 16)
+    r = int(h[1:3], 16)
+    g = int(h[3:5], 16)
+    b = int(h[5:7], 16)
     return QColor(r, g, b, a)
 
 def http_get(url, timeout=3):
@@ -432,7 +433,8 @@ class Card(QWidget):
 
     def _update_ui(self):
         mi = next((m for m in MODES if m["id"] == self._current), None)
-        icon = mi["icon"] if mi else ""
+        # `icon` era estratta anche qui, ma set_state non la riceve piu': rimossa
+        # il 2026-08-07 perche' assegnata e mai letta.
         exec_text = mi["exec"] if mi else ""
         self._hero.set_state(self._current, exec_text, self._health_ok)
         for mid, card in self._cards.items():
@@ -449,7 +451,8 @@ class Card(QWidget):
         self._update_ui()
 
     def _run_systemctl(self, action, wait_s):
-        import subprocess, time
+        import subprocess
+        import time
         try:
             subprocess.run(["systemctl", "--user", action, "ai-router"], capture_output=True, timeout=10)
             time.sleep(wait_s)
@@ -475,7 +478,8 @@ class Card(QWidget):
             self.move(e.globalPosition().toPoint() - self._drag)
     def mouseReleaseEvent(self, _): self._dragging = False
     def keyPressEvent(self, e):
-        if e.key() in (Qt.Key_Escape, Qt.Key_Q): self.close()
+        if e.key() in (Qt.Key_Escape, Qt.Key_Q):
+            self.close()
 
 def main():
     app = QApplication([])

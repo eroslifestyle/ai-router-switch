@@ -423,20 +423,24 @@ class StreamingRelay:
                                 if "system" in _bj and isinstance(_bj["system"], list):
                                     for _item in _bj["system"]:
                                         if isinstance(_item, dict) and "cache_control" in _item:
-                                            _cc += 1; _cc_s += 1
+                                            _cc += 1
+                                            _cc_s += 1
                                 if "messages" in _bj and isinstance(_bj["messages"], list):
                                     for _msg in _bj["messages"]:
                                         if isinstance(_msg, dict):
                                             if "cache_control" in _msg:
-                                                _cc += 1; _cc_m += 1
+                                                _cc += 1
+                                                _cc_m += 1
                                             if "content" in _msg and isinstance(_msg["content"], list):
                                                 for _ct in _msg["content"]:
                                                     if isinstance(_ct, dict) and "cache_control" in _ct:
-                                                        _cc += 1; _cc_m += 1
+                                                        _cc += 1
+                                                        _cc_m += 1
                                 if "tools" in _bj and isinstance(_bj["tools"], list):
                                     for _tool in _bj["tools"]:
                                         if isinstance(_tool, dict) and "cache_control" in _tool:
-                                            _cc += 1; _cc_t += 1
+                                            _cc += 1
+                                            _cc_t += 1
                         except Exception:
                             pass
                         _ch = int(_usage.get("cache_read_input_tokens", 0)) + int(_usage.get("cache_creation_input_tokens", 0))
