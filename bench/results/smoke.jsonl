@@ -1,1 +1,0 @@
-{"scenario": "trivial", "config": "baseline", "run": 0, "status": 200, "ok": true, "latency_ms": 5355.81, "input_tokens": 48, "output_tokens": 412, "thinking_tokens": 0, "cache_read": 0, "cache_creation": 0, "stop_reason": "end_turn", "error": "", "ts": 1786087851.6125746}

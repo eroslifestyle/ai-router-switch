@@ -54,3 +54,10 @@ sviluppo/backup-20260806/
 # nel repo vivono solo i template (systemd/ai-router.service.in).
 /systemd/ai-router.service
 /scripts/ai-router-proxy-wrapper.sh
+
+# Output dei benchmark: rigenerabili a ogni run e legati alla macchina.
+# Erano 14 file tracciati; due contenevano path assoluti personali
+# (/mnt/backup/Dropbox/...) e traceback con dettagli d'ambiente, su un repo
+# PUBBLICO. Gli script che li producono (bench/*.py) restano versionati.
+/bench/results/
+/bench/__pycache__/

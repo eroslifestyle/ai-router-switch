@@ -2,7 +2,6 @@
 """Harness di benchmark per proxy LLM Anthropic."""
 
 import json
-import os
 import sys
 import time
 import argparse

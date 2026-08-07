@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Tool Search Probe: misura risparmio contesto tool search Anthropic."""
-import json, os, sys, time, argparse, urllib.request, urllib.error
-from typing import Any
+import json
+import os
+import time
+import argparse
+import urllib.request
+import urllib.error
 
 CLAUDE_CODE_MARKER = "You are Claude Code, Anthropic's official CLI for Claude."
 TOOL_SEARCH_TYPE = "tool_search_tool_regex_20251119"
@@ -135,7 +139,9 @@ def call(token: str, body: dict, timeout: int = 120) -> dict:
         result["status"] = e.code
         try:
             result["error"] = e.read().decode()[:300]
-        except:
+        except Exception:
+            # Era un `except:` nudo: catturava anche KeyboardInterrupt e SystemExit,
+            # cioe' proprio l'interruzione a mano di uno script di stress.
             result["error"] = str(e)[:300]
     except Exception as e:
         result["error"] = str(e)[:300]

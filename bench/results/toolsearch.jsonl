@@ -1,4 +1,0 @@
-{"size": 70, "variant": "full", "status": 200, "input_tokens": 12560, "output_tokens": 778, "cache_creation": 0, "cache_read": 0, "latency_ms": 12852, "block_types": ["thinking", "text"], "two_turn_ok": null}
-{"size": 70, "variant": "search", "status": null, "input_tokens": null, "output_tokens": null, "cache_creation": null, "cache_read": null, "latency_ms": null, "block_types": [], "two_turn_ok": false}
-{"size": 280, "variant": "full", "status": 400, "input_tokens": 0, "output_tokens": 0, "cache_creation": 0, "cache_read": 0, "latency_ms": 0, "block_types": [], "two_turn_ok": null}
-{"size": 280, "variant": "search", "status": null, "input_tokens": null, "output_tokens": null, "cache_creation": null, "cache_read": null, "latency_ms": null, "block_types": [], "two_turn_ok": false}

@@ -1,6 +1,5 @@
 import json
 import os
-import sys
 import time
 import argparse
 import urllib.request
@@ -8,9 +7,7 @@ import urllib.error
 import statistics
 import threading
 import concurrent.futures
-import http.client
-from dataclasses import dataclass, asdict
-from typing import List, Dict, Any, Tuple
+from typing import List, Tuple
 from socket import socket, AF_INET, SOCK_STREAM
 
 HEALTH_PATH = '/health'

@@ -1,4 +1,11 @@
-import json, os, sys, time, argparse, urllib.request, urllib.error, statistics, dataclasses, typing, pathlib
+import json
+import os
+import time
+import argparse
+import urllib.request
+import urllib.error
+import dataclasses
+import pathlib
 
 HONORED_DELTA_PCT = 15
 PROMPT = 'Un treno parte da A alle 9:00 a 80 km/h. Un secondo parte da B alle 9:30 a 120 km/h verso A. A e B distano 400 km. A che ora si incontrano? Spiega il ragionamento passo per passo.'
