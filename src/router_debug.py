@@ -112,6 +112,11 @@ class DebugLogger:
     def __init__(self):
         self.errors: deque = deque(maxlen=MAX_DEQUE)
         self.events: deque = deque(maxlen=MAX_DEQUE)
+        # Quante volte la policy avrebbe deviato una richiesta (audit D4).
+        # Chiave "modello|task_class|modalita", valore il conteggio. In memoria
+        # e non su file: e' un contatore di processo, azzerato dal restart, e
+        # serve a rispondere a «quanto peserebbe l'attuazione automatica?».
+        self._policy_degraded: dict = {}
         self._health: dict = {
             "ts": None, "total_errors": 0, "total_events": 0,
             "last_error_ts": None, "last_event_ts": None,
@@ -337,17 +342,47 @@ class DebugLogger:
         lines = [f"{k}: {json.dumps(v, ensure_ascii=False)}" for k, v in ev.items()]
         return web.Response(text="\n".join(lines), content_type="text/plain")
 
+    def note_policy_degraded(self, model, task_class, mode) -> None:
+        """Registra che la policy ha giudicato degradato un modello (audit D4).
+
+        L'ACTUATOR nel proxy consulta la policy, logga e prosegue identico: la
+        deviazione vera avviene nell'orchestratore lato agente, ed e' una
+        scelta, non una dimenticanza. Contare gli eventi rende misurabile
+        quanto peserebbe attuarla qui dentro, senza attuarla.
+        """
+        chiave = f"{model}|{task_class}|{mode}"
+        self._policy_degraded[chiave] = self._policy_degraded.get(chiave, 0) + 1
+
     async def stats_endpoint(self, request) -> web.Response:
         from collections import Counter
         c_kind = Counter(e.get("kind") for e in self.errors)
         c_stage = Counter(e.get("stage") for e in self.errors)
         c_upstream = Counter(str(e.get("upstream_status")) for e in self.errors)
+        # Percentili di latenza per modalita' (audit D6), dalle entry non
+        # sintetiche del sidecar. Best-effort: un errore qui non deve togliere
+        # all'endpoint le statistiche che dava gia' prima.
+        latenza = {"errore": "non disponibile"}
+        try:
+            import paths
+            import usage_stats
+            finestra = int(request.query.get("finestra_s", usage_stats.DEFAULT_WINDOW_S))
+            latenza = usage_stats.latenza_per_modalita(
+                paths.log_file("router-usage.jsonl"), finestra_s=finestra,
+            )
+        except Exception as e:
+            latenza = {"errore": f"{type(e).__name__}: {e}"}
         return web.json_response({
             "total_errors": self._health.get("total_errors", 0),
             "total_events": self._health.get("total_events", 0),
             "last_error_ts": self._health.get("last_error_ts"),
             "by_kind": dict(c_kind), "by_stage": dict(c_stage),
             "by_upstream_status": dict(c_upstream),
+            "latenza": latenza,
+            # Quante volte la policy avrebbe deviato, per modello|task|modalita.
+            # Il router NON devia: vedi note_policy_degraded.
+            "policy_degraded": dict(
+                sorted(self._policy_degraded.items(), key=lambda kv: -kv[1])
+            ),
         })
 
     async def trace_endpoint(self, request) -> web.Response:

@@ -703,6 +703,14 @@ async def handle(request):
     # Fase 3 ACTUATOR: consulta router-policy.json (hot-reload). Se il modello target e'
     # degradato per questo task, logga (telemetria); la deviazione effettiva avviene
     # nell'orchestratore lato agente (chain fallback). Best-effort, mai blocca il dispatch.
+    #
+    # Che qui si LOGGHI soltanto e' una SCELTA, non una dimenticanza (audit D4):
+    # il router e' un tunnel trasparente, e deviare l'instradamento in automatico
+    # cambierebbe il modello che risponde senza che nessuno lo abbia deciso. La
+    # gerarchia vive nella configurazione globale dell'agente, non qui dentro.
+    # Per rendere comunque misurabile quanto peserebbe quell'attuazione, ogni
+    # evento viene contato e i totali si leggono su /debug/stats sotto
+    # "policy_degraded".
     try:
         from router_policy import is_degraded
         from self_healing.sensor import classify_task
@@ -710,6 +718,7 @@ async def handle(request):
         _tgt = _model_override or _req_model
         if _tgt and is_degraded(_tgt, _tc):
             log(f"policy: model={_tgt} DEGRADATO per task_class={_tc} mode={mode} (consulta fallback chain)")
+            dl.note_policy_degraded(_tgt, _tc, mode)
     except Exception:
         pass
 

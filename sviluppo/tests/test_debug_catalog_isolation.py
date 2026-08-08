@@ -149,3 +149,60 @@ class TestIsolamentoBugCatalog:
         # E che il modulo punti davvero li': senza questo il test passerebbe
         # anche se la directory fosse stata creata da qualcun altro.
         assert modulo.CATALOG_JSONL == percorso_annidato
+
+
+# ── last_mode: attribuzione dell'ultima occorrenza (audit D6, 2026-08-08) ──────
+
+def _catalogo_isolato(tmp_path, monkeypatch):
+    """Modulo debug_catalog con il catalogo dirottato in tmp_path.
+
+    Serve l'override PRIMA del reimport: il percorso viene risolto all'import
+    del modulo, non a ogni chiamata.
+    """
+    monkeypatch.setenv("AIROUTER_CATALOG_PATH", str(tmp_path / "catalogo.jsonl"))
+    return reimporta_modulo()
+
+
+def _sola_entry(modulo):
+    """Ritorna l'unica entry del catalogo isolato."""
+    catalogo = modulo._load_catalog()
+    assert len(catalogo) == 1, f"attesa una sola firma, trovate {len(catalogo)}"
+    return next(iter(catalogo.values()))
+
+def test_last_mode_su_entry_nuova(tmp_path, monkeypatch):
+    """Una firma nuova nasce con la modalita' che l'ha prodotta."""
+    dc = _catalogo_isolato(tmp_path, monkeypatch)
+    dc.record_event(severity="error", category="mix-am", kind="relay_error_502",
+                    snippet="boom")
+    entry = _sola_entry(dc)
+    assert entry["last_mode"] == "mix-am"
+    assert entry["categories"] == ["mix-am"]
+
+
+def test_modalita_diverse_danno_firme_diverse(tmp_path, monkeypatch):
+    """La modalita' entra nella firma: due modalita' = due entry distinte.
+
+    Verificato il 2026-08-08: _signature(category, kind, ...) include la
+    categoria, quindi `categories` non e' mai cumulativa e l'attribuzione a una
+    modalita' era gia' univoca. last_mode non aggiunge informazione, la rende
+    scalare.
+    """
+    dc = _catalogo_isolato(tmp_path, monkeypatch)
+    dc.record_event(severity="error", category="mix-am", kind="k", snippet="s")
+    dc.record_event(severity="error", category="qwen", kind="k", snippet="s")
+    catalogo = dc._load_catalog()
+    assert len(catalogo) == 2
+    modi = sorted(e["last_mode"] for e in catalogo.values())
+    assert modi == ["mix-am", "qwen"]
+    for entry in catalogo.values():
+        assert entry["categories"] == [entry["last_mode"]]
+
+
+def test_last_mode_resta_allineato_sulle_occorrenze_successive(tmp_path, monkeypatch):
+    """Il ramo di aggiornamento riscrive last_mode, non lo lascia al primo valore."""
+    dc = _catalogo_isolato(tmp_path, monkeypatch)
+    for _ in range(3):
+        dc.record_event(severity="error", category="mix-am", kind="k", snippet="s")
+    entry = _sola_entry(dc)
+    assert entry["last_mode"] == "mix-am"
+    assert entry["count"] == 3

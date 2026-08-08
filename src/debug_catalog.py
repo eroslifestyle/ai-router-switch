@@ -155,6 +155,15 @@ def record_event(*, severity: str, category: str, kind: str, chat_fp: str = "",
                 "first_seen": ts, "last_seen": ts, "count": 1,
                 "example_snippet": snippet, "example_fp": chat_fp,
                 "example_detail": _detail_safe,
+                # Modalita' dell'evento, come campo scalare (audit D6).
+                # Nota onesta: l'attribuzione NON era assente. La modalita'
+                # entra in _signature(), quindi ogni firma appartiene a una
+                # sola modalita' e `categories` ha sempre un elemento solo.
+                # Questo campo non aggiunge informazione: la rende leggibile
+                # senza indicizzare una lista, ed e' quello su cui filtrano
+                # gli strumenti. Il ramo di aggiornamento lo riallinea comunque,
+                # cosi' resta corretto anche se un giorno la firma cambiasse.
+                "last_mode": category,
             }
         else:
             entry["last_seen"] = ts
@@ -166,6 +175,8 @@ def record_event(*, severity: str, category: str, kind: str, chat_fp: str = "",
                 entry["severity"] = severity
             if category not in entry.get("categories", []):
                 entry.setdefault("categories", []).append(category)
+            # Sempre aggiornata, anche quando la modalita' era gia' nella lista.
+            entry["last_mode"] = category
             if snippet:
                 entry["example_snippet"] = snippet
             if chat_fp:
