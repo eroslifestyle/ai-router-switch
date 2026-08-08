@@ -258,6 +258,19 @@ def _minimax_alert(msg: str):
 
 
 # ── Logging ────────────────────────────────────────────────────────────────────
+# Cap sui due file che crescevano senza limite (2026-08-08). Misura che li ha
+# motivati: ai-router.log 15,8 MB / 197.762 righe, router-usage.jsonl 45 MB /
+# 145.804 righe, con una crescita di ~0,9 MB al giorno sul solo sidecar. Prima
+# l'unico file con un cap era debug-errors.jsonl.
+# Il sidecar tiene DUE generazioni invece di una: e' la fonte delle analisi
+# storiche (l'audit ne ha usato una finestra di 7 giorni) e con 64 MB per
+# generazione conserva diversi mesi di traffico.
+LOG_MAX_BYTES = int(os.environ.get("AIROUTER_LOG_MAX_BYTES", str(32 * 1024 * 1024)))
+LOG_KEEP = int(os.environ.get("AIROUTER_LOG_KEEP", "2"))
+USAGE_MAX_BYTES = int(os.environ.get("AIROUTER_USAGE_MAX_BYTES", str(64 * 1024 * 1024)))
+USAGE_KEEP = int(os.environ.get("AIROUTER_USAGE_KEEP", "2"))
+
+
 def log(msg: str):
     # Il RID (request ID) permette di correlare questa riga di log con il file
     # sidecar router-usage.jsonl e con il BUG-CATALOG. Il formato resta
@@ -275,6 +288,9 @@ def log(msg: str):
     prefix = "[" + rid + "] " if rid else ""
     line = f"[{time.strftime('%Y-%m-%dT%H:%M:%S')}] {prefix}{msg}"
     try:
+        # Rotazione (2026-08-08): senza cap il file cresceva senza limite —
+        # misurato a 15,8 MB e 197.762 righe. rotate_if_needed non solleva mai.
+        rotate_if_needed(LOG_FILE, LOG_MAX_BYTES, keep=LOG_KEEP)
         with open(LOG_FILE, "a") as f:
             f.write(line + "\n")
     except Exception:
@@ -455,6 +471,10 @@ def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
         # Telemetria tool: campi aggiunti SOLO quando accesa (flag spento -> entry identica a prima).
         if tools:
             entry.update(tools)
+        # Rotazione (2026-08-08): il sidecar era a 45 MB e cresceva di ~0,9 MB
+        # al giorno senza alcun cap. Due generazioni, perche' e' la fonte delle
+        # analisi storiche e non va persa alla prima rotazione.
+        rotate_if_needed(USAGE_SIDECAR, USAGE_MAX_BYTES, keep=USAGE_KEEP)
         with open(USAGE_SIDECAR, "a") as f:
             f.write(json.dumps(entry) + "\n")
     except Exception:
@@ -540,3 +560,79 @@ debug_stats = _dl_global.stats_endpoint
 debug_trace = _dl_global.trace_endpoint
 debug_catalog_endpoint = _dl_global.catalog_endpoint
 debug_catalog_entry = _dl_global.catalog_entry_endpoint
+
+
+def rotate_if_needed(path, max_bytes: int, keep: int = 1) -> bool:
+    """
+    Ruota un file di log se supera la dimensione massima specificata.
+
+    Evita che i file di log crescano senza limite, mantenendo un numero
+    configurabile di generazioni storiche. Utilizzato per i log principali
+    (ai-router.log, router-usage.jsonl) che altrimenti crescerebbero
+    di circa 0,9 MB al giorno.
+
+    Parametri:
+        path: Percorso del file da controllare e ruotare (str o Path).
+        max_bytes: Dimensione massima in byte. Se il file e' minore o
+            uguale, non viene ruotato.
+        keep: Numero di generazioni storiche da mantenere (default 1).
+            Il file .1 e' la generazione piu' recente, .N la piu' vecchia.
+            Con keep=1 si ha solo .1 come backup.
+
+    Valore di ritorno:
+        True se la rotazione e' stata eseguita con successo, False in tutti
+        gli altri casi (file non esiste, dimensione OK, errore durante
+        l'operazione).
+
+    Garanzia:
+        Questa funzione NON solleva MAI eccezioni. Ogni operazione su
+        filesystem e' protetta da try/except. Questo e' fondamentale per
+        il percorso di logging: un errore di rotazione non deve impedire
+        di scrivere un log ne' di servire una richiesta.
+    """
+    from pathlib import Path
+
+    try:
+        path = Path(path)
+    except Exception:
+        return False
+
+    try:
+        if not path.exists() or path.stat().st_size <= max_bytes:
+            return False
+    except Exception:
+        return False
+
+    if keep < 1:
+        return False
+
+    path_str = str(path)
+
+    # Rotazione a scalare: dalla generazione piu' vecchia (.keep) verso .1.
+    # - Se .keep esiste, viene eliminato.
+    # - .N viene spostato in .N+1 (per N da keep-1 fino a 1).
+    # - Il file corrente viene infine rinominato in .1.
+    #
+    # Si itera da keep verso 1 per evitare sovrascritture: se processassi
+    # .1 prima, perderei il file prima di spostarlo in .2.
+    #
+    # NOTA BENE: non si usa Path.with_suffix() per costruire i nomi delle
+    # generazioni. Con un file come 'router-usage.jsonl', with_suffix('.1')
+    # produrrebbe 'router-usage.1' invece di 'router-usage.jsonl.1',
+    # perdendo l'estensione. Per questo si concatena str(path) + '.' + numero.
+    for i in range(keep, 0, -1):
+        curr = f"{path_str}.{i}"
+        try:
+            if os.path.exists(curr):
+                if i == keep:
+                    os.remove(curr)
+                else:
+                    os.rename(curr, f"{path_str}.{i + 1}")
+        except Exception:
+            pass
+
+    try:
+        os.rename(path_str, f"{path_str}.1")
+        return True
+    except Exception:
+        return False
