@@ -1,0 +1,101 @@
+[
+ {
+  "modo": "anthropic",
+  "porta": 8771,
+  "http": "200",
+  "ttfb_s": 0.882733,
+  "tot_s": 0.883206,
+  "bytes": 285,
+  "out_tokens": null,
+  "model_risposta": null,
+  "errore": "[non-json: 'utf-8' codec can't decode byte 0x8b in ]"
+ },
+ {
+  "modo": "minimax",
+  "porta": 8772,
+  "http": "200",
+  "ttfb_s": 1.838175,
+  "tot_s": 1.838838,
+  "bytes": 513,
+  "out_tokens": 28,
+  "model_risposta": "claude-haiku-4-5-20251001",
+  "errore": ""
+ },
+ {
+  "modo": "mix-am",
+  "porta": 8773,
+  "http": "200",
+  "ttfb_s": 1.319786,
+  "tot_s": 1.320131,
+  "bytes": 507,
+  "out_tokens": 25,
+  "model_risposta": "claude-haiku-4-5-20251001",
+  "errore": ""
+ },
+ {
+  "modo": "mix-al",
+  "porta": 8774,
+  "http": "000",
+  "ttfb_s": 29.143095,
+  "tot_s": 29.143108,
+  "bytes": 0,
+  "out_tokens": 25,
+  "model_risposta": "claude-haiku-4-5-20251001",
+  "errore": ""
+ },
+ {
+  "modo": "glm",
+  "porta": 8775,
+  "http": "000",
+  "ttfb_s": 0.0,
+  "tot_s": 0.000113,
+  "bytes": 0,
+  "out_tokens": 25,
+  "model_risposta": "claude-haiku-4-5-20251001",
+  "errore": ""
+ },
+ {
+  "modo": "mix-gm",
+  "porta": 8776,
+  "http": "000",
+  "ttfb_s": 0.0,
+  "tot_s": 0.000119,
+  "bytes": 0,
+  "out_tokens": 25,
+  "model_risposta": "claude-haiku-4-5-20251001",
+  "errore": ""
+ },
+ {
+  "modo": "mix-ag",
+  "porta": 8777,
+  "http": "000",
+  "ttfb_s": 0.0,
+  "tot_s": 7.3e-05,
+  "bytes": 0,
+  "out_tokens": 25,
+  "model_risposta": "claude-haiku-4-5-20251001",
+  "errore": ""
+ },
+ {
+  "modo": "qwen",
+  "porta": 8778,
+  "http": "000",
+  "ttfb_s": 0.0,
+  "tot_s": 7.2e-05,
+  "bytes": 0,
+  "out_tokens": 25,
+  "model_risposta": "claude-haiku-4-5-20251001",
+  "errore": ""
+ },
+ {
+  "modo": "local",
+  "porta": 8779,
+  "http": "000",
+  "ttfb_s": 0.0,
+  "tot_s": 6.3e-05,
+  "bytes": 0,
+  "out_tokens": 25,
+  "model_risposta": "claude-haiku-4-5-20251001",
+  "errore": ""
+ }
+]

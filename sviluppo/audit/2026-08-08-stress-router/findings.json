@@ -1,0 +1,322 @@
+{
+  "meta": {
+    "titolo": "Stress test e audit tecnico ai-router-switch",
+    "data": "2026-08-08",
+    "ora_inizio": "07:58 CEST",
+    "ora_fine": "08:11 CEST",
+    "commit_head": "99b7615",
+    "router_pid_durante_i_test": [833619, 2095508],
+    "modalita_globale_attiva": "mix-am",
+    "aiohttp": "3.13.4",
+    "finestra_dati_storici": "7 giorni (2026-08-01 -> 2026-08-08)",
+    "richieste_reali_analizzate": 19068,
+    "entry_scartate_come_sonde": 1280,
+    "artefatti": [
+      "health-baseline.json",
+      "resolve-route-matrix.json",
+      "input-anomali.json",
+      "concorrenza.json",
+      "modalita-reali.json",
+      "storico-per-modalita.json"
+    ],
+    "limiti_dichiarati": [
+      "Test eseguiti su infrastruttura VIVA, usata contemporaneamente dalla sessione che li ha condotti.",
+      "Carico volutamente limitato a concorrenza 50 e burst 300 su endpoint health: nessun tentativo di saturazione, perche' il servizio e' critico.",
+      "Traffico reale limitato a richieste minime (max_tokens 8-16) per contenere consumo di quota.",
+      "Nessun test distruttivo, nessun riavvio provocato deliberatamente.",
+      "Le due interruzioni osservate alle 08:06:54 e 08:07:55 NON sono state provocate dai test: sono stop/start esterni (watchdog o utente)."
+    ]
+  },
+
+  "findings": [
+    {
+      "id": "F1",
+      "severita": "critica",
+      "categoria": "disponibilita",
+      "titolo": "Shutdown incompatibile con systemd: SIGKILL garantito a ogni restart",
+      "componente": "src/ai-router-proxy.py",
+      "riferimenti": ["src/ai-router-proxy.py:1002 (web.AppRunner(app))", "src/ai-router-proxy.py:1017-1019 (cleanup sequenziale)", "unit ai-router.service: TimeoutStopSec=8"],
+      "descrizione": "web.AppRunner(app) viene istanziato senza shutdown_timeout. Il default di aiohttp 3.13.4 e' 60.0 secondi. Il cleanup viene eseguito in un ciclo SEQUENZIALE su 10 runner (uno per porta), quindi il tempo massimo teorico di shutdown e' 10 x 60 = 600 secondi. La unit systemd concede TimeoutStopSec=8.",
+      "evidenza": [
+        "journalctl: \"ai-router.service: State 'stop-sigterm' timed out. Killing.\"",
+        "journalctl: \"Killing process 833619 (python3) with signal SIGKILL\"",
+        "journalctl: \"Main process exited, code=killed, status=9/KILL\"",
+        "journalctl 07:45:41: \"aiohttp.client_exceptions.ClientConnectionResetError: Cannot write to closing transport\"",
+        "inspect di aiohttp.web_runner.BaseRunner.__init__ -> shutdown_timeout default 60.0"
+      ],
+      "impatto": "Ogni restart tronca brutalmente le connessioni in volo. Con anche una sola sessione streaming SSE aperta (condizione normale con Claude Code attivo) il SIGKILL e' certo. Conseguenze: richieste client interrotte, log e sidecar non flushati, ~8 secondi di indisponibilita' su tutte le 10 porte. E' anche l'origine plausibile dei 'Cannot write to closing transport' gia' presenti nei log.",
+      "riproducibilita": "deterministica in presenza di connessioni long-lived",
+      "osservato_in_produzione": true
+    },
+    {
+      "id": "F2",
+      "severita": "alta",
+      "categoria": "affidabilita",
+      "titolo": "Modalita' qwen: 16% di errori 429 e 21,8% di risposte vuote",
+      "componente": "src/qwen_backend.py",
+      "descrizione": "Su 942 richieste reali in 7 giorni: 151 risposte 429 (16,0%) e 205 outcome 'empty' (21,8%), piu' 126 'unknown'. L'input medio e' di circa 59.000 token per richiesta (55,5 milioni totali) con cache_read pari a ZERO.",
+      "evidenza": ["storico-per-modalita.json: qwen n=942 err=16.0% empty=205 input_tok=55.575.624 cache_read=0"],
+      "impatto": "Modalita' inaffidabile: una richiesta su sei viene rifiutata e una su cinque torna vuota. L'assenza totale di cache_read implica che ogni richiesta paga l'intero prompt.",
+      "osservato_in_produzione": true
+    },
+    {
+      "id": "F3",
+      "severita": "alta",
+      "categoria": "affidabilita",
+      "titolo": "Modalita' mix-ag: 80% di errori 429, di fatto inutilizzabile",
+      "componente": "routing mix-ag / GLM backend",
+      "descrizione": "Su 15 richieste reali in 7 giorni, 12 sono 429. La mediana di output_tokens e' 0 e il p90 e' 2.",
+      "evidenza": ["storico-per-modalita.json: mix-ag n=15 err=80.0% stati={'429': 12} p50_out=0"],
+      "impatto": "La modalita' non e' utilizzabile in pratica. Il volume basso suggerisce che sia gia' stata abbandonata, ma resta esposta su porta 8777 e selezionabile.",
+      "osservato_in_produzione": true
+    },
+    {
+      "id": "F4",
+      "severita": "alta",
+      "categoria": "correttezza / sicurezza",
+      "titolo": "Nessuna validazione semantica della richiesta: input palesemente invalidi vengono serviti con 200",
+      "componente": "src/ai-router-proxy.py handle()",
+      "descrizione": "Il router valida solo la sintassi JSON. Richieste con modello inesistente, con path traversal nel nome del modello, con max_tokens negativo o con role non ammesso vengono inoltrate all'upstream e servite con HTTP 200, consumando quota e tempo.",
+      "evidenza": [
+        "model='modello-inesistente-xyz' -> HTTP 200 in 5,77 s, 519 output_tokens consumati",
+        "model='../../etc/passwd' -> HTTP 200 in 8,52 s",
+        "max_tokens=-5 -> HTTP 200 in 5,30 s",
+        "role='hacker' -> HTTP 200 in 9,88 s",
+        "controprova: JSON malformato, body vuoto, model assente, messages non lista -> correttamente 400 in ~146 ms"
+      ],
+      "impatto": "Un typo nel nome del modello non produce errore ma una generazione completa a pagamento. Il path traversal non e' sfruttabile come lettura file (il valore finisce nel body JSON verso l'upstream), ma dimostra l'assenza di allowlist sul campo model.",
+      "osservato_in_produzione": false,
+      "nota": "Rilevato con sonde dedicate, non osservato nel traffico reale."
+    },
+    {
+      "id": "F5",
+      "severita": "media",
+      "categoria": "correttezza",
+      "titolo": "Il campo model della risposta e' incoerente fra modalita' e puo' mentire al client",
+      "componente": "relay / backend",
+      "descrizione": "Con model='modello-inesistente-xyz' su mix-am la risposta al client dichiara model='modello-inesistente-xyz' mentre il sidecar registra final='MiniMax-M2.7'. In minimax puro, una richiesta con claude-haiku-4-5-20251001 ottiene una risposta che dichiara 'claude-haiku-4-5-20251001', mentre in mix-am la stessa richiesta dichiara correttamente 'MiniMax-M2.7'.",
+      "evidenza": [
+        "mix-am + haiku -> model_risposta='MiniMax-M2.7' (corretto)",
+        "minimax puro + haiku -> model_risposta='claude-haiku-4-5-20251001' (nome originale, non il modello reale)",
+        "mix-am + modello ignoto -> model_risposta='modello-inesistente-xyz', sidecar final='MiniMax-M2.7'"
+      ],
+      "impatto": "Il client non puo' sapere quale modello ha effettivamente risposto. Qualunque logica lato client o analisi dei costi basata sul campo model della risposta e' inaffidabile, e in modo diverso a seconda della modalita'.",
+      "osservato_in_produzione": true
+    },
+    {
+      "id": "F6",
+      "severita": "media",
+      "categoria": "correttezza / costo",
+      "titolo": "max_tokens innalzato silenziosamente a 1024 senza documentazione",
+      "componente": "src/minimax_body.py:11 e :134-138",
+      "descrizione": "MINIMAX_MIN_MAX_TOKENS = 1024. Se 0 < max_tokens < 1024, il valore viene sostituito con 1024. Non esiste alcun commento che motivi la scelta, a differenza del resto del file che e' densamente commentato.",
+      "evidenza": [
+        "richiesta con max_tokens=8 -> 1024 output_tokens generati, stop_reason='max_tokens' (mix-am e minimax)",
+        "src/minimax_body.py:135-136 privo di commento esplicativo"
+      ],
+      "impatto_misurato": "BASSO nel traffico reale: solo 8 risposte su 17.468 in mix-am hanno esattamente 1024 token (0,0%) e il 71,9% sta sotto 1024, perche' i client mandano max_tokens alto. L'ipotesi iniziale di uno spreco sistemico e' stata SMENTITA dalla distribuzione. Resta una violazione del contratto API che colpisce le richieste piccole (128x il richiesto nel caso misurato).",
+      "osservato_in_produzione": true
+    },
+    {
+      "id": "F7",
+      "severita": "media",
+      "categoria": "affidabilita",
+      "titolo": "mix-am: 415 risposte vuote su 17.483 richieste (2,4%)",
+      "componente": "pipeline mix-am / MiniMax",
+      "descrizione": "Nella finestra di 7 giorni, 415 richieste in mix-am hanno outcome 'empty' pur con status 200.",
+      "evidenza": ["storico-per-modalita.json: mix-am empty=415 su n=17.483"],
+      "impatto": "Una richiesta ogni 42 torna senza contenuto utile. E' la classe di bug gia' inseguita piu' volte in questo progetto (troncamento nel thinking, system prompt perduto): il fenomeno e' ridotto ma non estinto.",
+      "osservato_in_produzione": true
+    },
+    {
+      "id": "F8",
+      "severita": "bassa",
+      "categoria": "coerenza",
+      "titolo": "Content-Encoding incoerente fra modalita': gzip su glm, mix-ag, qwen; testo in chiaro sulle altre",
+      "componente": "backend glm/qwen vs minimax",
+      "descrizione": "Una richiesta identica senza header Accept-Encoding riceve corpo gzip da glm (8775), mix-ag (8777) e qwen (8778), e JSON in chiaro da minimax (8772), mix-am (8773), mix-gm (8776), mix-al (8774), local (8779). Anche anthropic (8771) risponde gzip.",
+      "evidenza": ["diagnostica modalita': corpo binario con magic 0x1f8b su 8775/8777/8778/8771; JSON leggibile su 8772/8773/8774/8776/8779"],
+      "impatto": "Un client che non negozia la compressione riceve byte illeggibili da alcune modalita' e JSON da altre. Rende fragili gli strumenti diagnostici e i test scritti su una sola modalita'.",
+      "osservato_in_produzione": true
+    },
+    {
+      "id": "F9",
+      "severita": "bassa",
+      "categoria": "coerenza",
+      "titolo": "Formato id risposta non-Anthropic su mix-al e local",
+      "componente": "src/local_backend.py / LiteLLM",
+      "descrizione": "Le modalita' mix-al (8774) e local (8779) restituiscono id nella forma 'resp_bGl0ZWxsbTpjdXN0b21fbGxtX3Byb3ZpZGVy...' (base64 LiteLLM) invece del formato Anthropic 'msg_...'.",
+      "evidenza": ["diagnostica modalita': id='resp_bGl0ZWxsbTpj...' su 8774 e 8779"],
+      "impatto": "Client che assumono il prefisso msg_ o una lunghezza di id ragionevole possono comportarsi male. L'id LiteLLM incorpora inoltre metadati del provider in base64, che e' una piccola perdita di informazione interna verso il client."
+    },
+    {
+      "id": "F10",
+      "severita": "bassa",
+      "categoria": "coerenza routing",
+      "titolo": "Asimmetria in mix-gm: chiedere esplicitamente il modello THINK lo degrada ad ACT",
+      "componente": "src/role_routing.py",
+      "descrizione": "In mix-gm, resolve_route('mix-gm','claude-opus-5') -> ('glm','glm-5.2'), corretto. Ma resolve_route('mix-gm','glm-5.2') -> ('minimax','MiniMax-M2.7'): chiedere direttamente il modello che quella modalita' usa come THINK lo manda all'esecutore.",
+      "evidenza": ["resolve-route-matrix.json, mode=mix-gm"],
+      "impatto": "Basso in pratica, perche' i client mandano nomi Anthropic. Ma la mappa dei ruoli e' costruita sui soli nomi Anthropic, quindi ogni nome nativo non-Anthropic ricade nel ruolo ACT per default."
+    },
+    {
+      "id": "F11",
+      "severita": "bassa",
+      "categoria": "robustezza",
+      "titolo": "Normalizzazione lasca del nome modello: CR/LF accettati",
+      "componente": "src/role_routing.py model_role()",
+      "descrizione": "resolve_route('mix-am','claude-opus-5\\n\\rX') -> ('anthropic', None): la stringa con CRLF viene riconosciuta come opus-5.",
+      "impatto": "Nessun impatto diretto dimostrato: il valore viaggia nel body JSON, non in un header. Va tenuto d'occhio se un giorno il nome del modello finisse in un header HTTP o in un path."
+    },
+    {
+      "id": "F12",
+      "severita": "media",
+      "categoria": "osservabilita / metodo",
+      "titolo": "Il 6,3% delle entry del sidecar sono sonde e test, e falsano le metriche per modalita'",
+      "componente": "~/.claude/logs/router-usage.jsonl",
+      "descrizione": "Su 20.348 entry in 7 giorni, 1.280 provengono da test e sonde locali (client aiohttp, chat 127.0.0.1, sid:test-*, sid:sid-to-*). Senza filtro, la modalita' minimax risulta avere il 95,3% di errori: filtrando, le richieste reali sono 9 e gli errori 0. I 182 '502' erano tutti sonde.",
+      "evidenza": ["prima del filtro: minimax n=191 err=95.3%; dopo: n=9 err=0.0%"],
+      "impatto": "Qualunque analisi per modalita' su questo file, senza esclusione delle sonde, produce conclusioni sbagliate. E' la quarta occorrenza dello stesso problema in questo progetto.",
+      "nota": "Il fix del 2026-08-07 (AIROUTER_LOGS_DIR) impedisce le NUOVE contaminazioni dalla suite, ma le sonde manuali via curl restano indistinguibili se non per fingerprint."
+    }
+  ],
+
+  "esiti_positivi": [
+    {
+      "id": "P1",
+      "titolo": "Il cuore del routing e' solido",
+      "evidenza": "198 combinazioni (9 modalita' x 22 modelli, inclusi None, stringa vuota, 5000 caratteri, path traversal, JSON injection, CRLF): 0 eccezioni non gestite, 0 provider fuori dalla catena prevista per la modalita'. Le modalita' pure nativizzano sempre il modello straniero (anthropic->claude-haiku, minimax->MiniMax-M3/M2.7, glm->glm-5.2/4.7)."
+    },
+    {
+      "id": "P2",
+      "titolo": "Ottima tenuta in concorrenza sull'accettazione connessioni",
+      "evidenza": "1 -> 50 client paralleli: 3.265,8 req/s a concorrenza 50, 150/150 risposte 200, p50 8,6 ms, p95 9,7 ms, max 10,9 ms. Nessuna degradazione ne' errore."
+    },
+    {
+      "id": "P3",
+      "titolo": "Latenza di health uniforme su tutte le dieci porte",
+      "evidenza": "20 campioni per porta: p50 fra 3,77 e 4,29 ms, p95 fra 4,40 e 5,11 ms, max 7,13 ms. Nessuna porta anomala."
+    },
+    {
+      "id": "P4",
+      "titolo": "La validazione sintattica e' corretta e veloce",
+      "evidenza": "JSON malformato, body vuoto, non-JSON, model assente, messages assente e messages non lista: tutti 400 con corpo Anthropic-compatibile in ~146 ms, senza contattare l'upstream."
+    }
+  ],
+
+  "metriche": {
+    "health_latenza_ms": {"p50_range": [3.77, 4.29], "p95_range": [4.40, 5.11], "porte": 10, "campioni_per_porta": 20},
+    "concorrenza": [
+      {"livello": 1, "rps": 53.6, "p95_ms": 54.6},
+      {"livello": 5, "rps": 1858.0, "p95_ms": 4.4},
+      {"livello": 10, "rps": 2514.0, "p95_ms": 5.7},
+      {"livello": 25, "rps": 2761.3, "p95_ms": 10.3},
+      {"livello": 50, "rps": 3265.8, "p95_ms": 9.7}
+    ],
+    "ttfb_reale_s": {"anthropic": 0.88, "minimax": 1.84, "mix-am": 1.32, "mix-al": 0.11, "glm": 1.45, "mix-gm": 2.69, "mix-ag": 0.97, "qwen": 1.62, "local": 0.68},
+    "traffico_7gg_reale": {
+      "mix-am": {"req": 17483, "err_pct": 0.0, "p50_out": 606, "p90_out": 1933, "empty": 415, "tool_only": 7831, "cache_read": 4481363985},
+      "qwen": {"req": 942, "err_pct": 16.0, "p50_out": 957, "p90_out": 11705, "empty": 205, "cache_read": 0},
+      "anthropic": {"req": 322, "err_pct": 1.6, "p50_out": 484, "empty": 16, "cache_read": 65259726},
+      "local": {"req": 195, "err_pct": 0.0, "p50_out": 1879, "empty": 0},
+      "mix-gm": {"req": 37, "err_pct": 0.0, "p50_out": 39, "p90_out": 79573},
+      "glm": {"req": 33, "err_pct": 0.0, "p50_out": 8},
+      "mix-al": {"req": 32, "err_pct": 0.0, "p50_out": 101},
+      "mix-ag": {"req": 15, "err_pct": 80.0, "p50_out": 0},
+      "minimax": {"req": 9, "err_pct": 0.0, "p50_out": 28}
+    }
+  },
+
+  "azioni_proposte": [
+    {
+      "id": "A1",
+      "tipo": "correttiva",
+      "priorita": 1,
+      "risolve": ["F1"],
+      "titolo": "Rendere lo shutdown compatibile con la finestra di systemd",
+      "intervento": "Passare shutdown_timeout esplicito a web.AppRunner (valore proposto 3.0 s, comunque < TimeoutStopSec) e sostituire il ciclo sequenziale di cleanup con asyncio.gather sui 10 runner. In alternativa o in aggiunta, alzare TimeoutStopSec a 20 s nella unit.",
+      "beneficio_atteso": "Shutdown pulito entro la finestra, fine dei SIGKILL, connessioni chiuse ordinatamente, log e sidecar flushati.",
+      "rischio": "basso",
+      "verifica": "systemctl --user restart ai-router e journal senza 'stop-sigterm timed out'; misurare il tempo di stop con systemd-analyze o timestamp del journal."
+    },
+    {
+      "id": "A2",
+      "tipo": "correttiva",
+      "priorita": 2,
+      "risolve": ["F4"],
+      "titolo": "Validazione semantica della richiesta prima dell'inoltro",
+      "intervento": "Rifiutare con 400 Anthropic-compatibile: model non presente in una allowlist derivata dai modelli noti per modalita'; max_tokens non intero o < 1; role non in {user, assistant}. La validazione va fatta prima di qualunque chiamata upstream.",
+      "beneficio_atteso": "Un typo costa 146 ms invece di 5-10 secondi e una generazione a pagamento. Elimina l'inoltro di stringhe arbitrarie nel campo model.",
+      "rischio": "medio: una allowlist troppo stretta romperebbe modelli legittimi non previsti. Mitigazione: consentire i pattern noti per provider e loggare in audit-only per una settimana prima di attivare il rifiuto."
+    },
+    {
+      "id": "A3",
+      "tipo": "correttiva",
+      "priorita": 3,
+      "risolve": ["F5"],
+      "titolo": "Uniformare il campo model della risposta al modello realmente usato",
+      "intervento": "In tutte le modalita', riscrivere il campo model della risposta con il modello effettivo (lo stesso valore che finisce in final nel sidecar), oppure aggiungere un header x-ai-actual-model e documentarlo. La scelta va fatta una volta sola e applicata a tutti i backend.",
+      "beneficio_atteso": "Il client e le analisi di costo possono fidarsi del campo model.",
+      "rischio": "basso"
+    },
+    {
+      "id": "A4",
+      "tipo": "correttiva",
+      "priorita": 4,
+      "risolve": ["F6"],
+      "titolo": "Documentare o rimuovere il minimo forzato di max_tokens",
+      "intervento": "Se il minimo serve a evitare le risposte vuote da troncamento nel thinking, scriverlo nel codice con la misura a supporto e loggare l'innalzamento quando avviene, cosi' diventa contabile. Se non serve piu', rimuoverlo. In ogni caso valutare di applicarlo solo quando il body richiede thinking.",
+      "beneficio_atteso": "Comportamento spiegabile e misurabile; nessuna sorpresa sul contratto API.",
+      "rischio": "basso, ma va verificato che rimuovendolo non tornino le risposte vuote."
+    },
+    {
+      "id": "A5",
+      "tipo": "correttiva",
+      "priorita": 5,
+      "risolve": ["F2", "F3"],
+      "titolo": "Decidere il destino di qwen e mix-ag",
+      "intervento": "qwen: capire l'origine dei 429 (quota, rate limit, dimensione richieste da 59k token medi) e attivare il prompt caching, oggi a zero. mix-ag: con l'80% di 429 su 15 richieste va o riparata o marcata come non raccomandata nella documentazione e nel selettore.",
+      "beneficio_atteso": "Meno fallimenti silenziosi per l'utente che sceglie quelle modalita'.",
+      "rischio": "basso"
+    },
+    {
+      "id": "A6",
+      "tipo": "migliorativa",
+      "priorita": 6,
+      "risolve": ["F8", "F9"],
+      "titolo": "Uniformare il contratto di risposta fra i backend",
+      "intervento": "Definire e testare un contratto unico: stesso comportamento su Content-Encoding e stesso formato di id. Un test parametrico su tutte le 9 modalita' che verifichi forma della risposta e header.",
+      "beneficio_atteso": "Client e strumenti diagnostici si comportano allo stesso modo su tutte le modalita'.",
+      "rischio": "basso"
+    },
+    {
+      "id": "A7",
+      "tipo": "migliorativa",
+      "priorita": 7,
+      "risolve": ["F12"],
+      "titolo": "Marcare le sonde nel sidecar invece di doverle indovinare",
+      "intervento": "Riconoscere un header convenzionale (es. x-airouter-synthetic: 1) e scrivere un campo synthetic=true nel sidecar. Le analisi filtrano su quel campo invece che su euristiche di fingerprint.",
+      "beneficio_atteso": "Le metriche per modalita' smettono di essere falsate: e' la quarta volta che accade in questo progetto.",
+      "rischio": "molto basso"
+    },
+    {
+      "id": "A8",
+      "tipo": "potenziamento",
+      "priorita": 8,
+      "risolve": ["F7"],
+      "titolo": "Sonda sintetica periodica su tutte le modalita'",
+      "intervento": "Un timer che ogni N minuti manda una richiesta minima marcata come sintetica a ciascuna delle 9 modalita' e registra esito, TTFB e forma della risposta. Alimenta una vista di disponibilita' per modalita'.",
+      "beneficio_atteso": "Le modalita' poco usate (mix-ag con 15 richieste in 7 giorni) smettono di degradare in silenzio: oggi ce ne si accorge solo usandole.",
+      "rischio": "basso; costo di quota contenuto e prevedibile."
+    },
+    {
+      "id": "A9",
+      "tipo": "potenziamento",
+      "priorita": 9,
+      "titolo": "Registrare la latenza nel sidecar",
+      "intervento": "Il sidecar registra token e stato ma NON la durata della richiesta. Aggiungere ttfb_ms e total_ms.",
+      "beneficio_atteso": "Oggi non e' possibile fare analisi storiche di latenza ne' individuare regressioni di performance: questo audit ha potuto misurare la latenza solo con sonde nuove, non sui 19.068 eventi storici.",
+      "rischio": "molto basso"
+    }
+  ]
+}

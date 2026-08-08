@@ -1,0 +1,816 @@
+{
+ "matrice": {
+  "anthropic": {
+   "'claude-opus-5'": [
+    "anthropic",
+    null
+   ],
+   "'claude-sonnet-5'": [
+    "anthropic",
+    null
+   ],
+   "'claude-fable-5'": [
+    "anthropic",
+    null
+   ],
+   "'claude-haiku-4-5-20251001'": [
+    "anthropic",
+    null
+   ],
+   "'claude-opus-4-8'": [
+    "anthropic",
+    null
+   ],
+   "'MiniMax-M3'": [
+    "anthropic",
+    "claude-haiku-4-5-20251001"
+   ],
+   "'MiniMax-M2.7'": [
+    "anthropic",
+    "claude-haiku-4-5-20251001"
+   ],
+   "'minimax-m2.7-hs'": [
+    "anthropic",
+    "claude-haiku-4-5-20251001"
+   ],
+   "'glm-5.2'": [
+    "anthropic",
+    "claude-haiku-4-5-20251001"
+   ],
+   "'glm-4.7'": [
+    "anthropic",
+    "claude-haiku-4-5-20251001"
+   ],
+   "'qwen3.7-max'": [
+    "anthropic",
+    "claude-haiku-4-5-20251001"
+   ],
+   "'qwen3-coder-plus'": [
+    "anthropic",
+    "claude-haiku-4-5-20251001"
+   ],
+   "'code-max'": [
+    "anthropic",
+    "claude-haiku-4-5-20251001"
+   ],
+   "'gpt-4o'": [
+    "anthropic",
+    null
+   ],
+   "''": [
+    "anthropic",
+    null
+   ],
+   "None": [
+    "anthropic",
+    null
+   ],
+   "'   '": [
+    "anthropic",
+    null
+   ],
+   "'modello-inesistente'": [
+    "anthropic",
+    null
+   ],
+   "AAAAAAAAAAAAAAAAAAAAAAAA\u2026": [
+    "anthropic",
+    null
+   ],
+   "'../../etc/passwd'": [
+    "anthropic",
+    null
+   ],
+   "'{\"injection\":true}'": [
+    "anthropic",
+    null
+   ],
+   "'claude-opus-5\\n\\rX'": [
+    "anthropic",
+    null
+   ]
+  },
+  "minimax": {
+   "'claude-opus-5'": [
+    "minimax",
+    "MiniMax-M3"
+   ],
+   "'claude-sonnet-5'": [
+    "minimax",
+    "MiniMax-M3"
+   ],
+   "'claude-fable-5'": [
+    "minimax",
+    "MiniMax-M3"
+   ],
+   "'claude-haiku-4-5-20251001'": [
+    "minimax",
+    "MiniMax-M2.7"
+   ],
+   "'claude-opus-4-8'": [
+    "minimax",
+    "MiniMax-M3"
+   ],
+   "'MiniMax-M3'": [
+    "minimax",
+    null
+   ],
+   "'MiniMax-M2.7'": [
+    "minimax",
+    null
+   ],
+   "'minimax-m2.7-hs'": [
+    "minimax",
+    null
+   ],
+   "'glm-5.2'": [
+    "minimax",
+    "MiniMax-M2.7"
+   ],
+   "'glm-4.7'": [
+    "minimax",
+    "MiniMax-M2.7"
+   ],
+   "'qwen3.7-max'": [
+    "minimax",
+    "MiniMax-M2.7"
+   ],
+   "'qwen3-coder-plus'": [
+    "minimax",
+    "MiniMax-M2.7"
+   ],
+   "'code-max'": [
+    "minimax",
+    "MiniMax-M2.7"
+   ],
+   "'gpt-4o'": [
+    "minimax",
+    null
+   ],
+   "''": [
+    "minimax",
+    null
+   ],
+   "None": [
+    "minimax",
+    null
+   ],
+   "'   '": [
+    "minimax",
+    null
+   ],
+   "'modello-inesistente'": [
+    "minimax",
+    null
+   ],
+   "AAAAAAAAAAAAAAAAAAAAAAAA\u2026": [
+    "minimax",
+    null
+   ],
+   "'../../etc/passwd'": [
+    "minimax",
+    null
+   ],
+   "'{\"injection\":true}'": [
+    "minimax",
+    null
+   ],
+   "'claude-opus-5\\n\\rX'": [
+    "minimax",
+    "MiniMax-M3"
+   ]
+  },
+  "mix-am": {
+   "'claude-opus-5'": [
+    "anthropic",
+    null
+   ],
+   "'claude-sonnet-5'": [
+    "anthropic",
+    null
+   ],
+   "'claude-fable-5'": [
+    "anthropic",
+    null
+   ],
+   "'claude-haiku-4-5-20251001'": [
+    "minimax",
+    "MiniMax-M2.7"
+   ],
+   "'claude-opus-4-8'": [
+    "anthropic",
+    null
+   ],
+   "'MiniMax-M3'": [
+    "minimax",
+    null
+   ],
+   "'MiniMax-M2.7'": [
+    "minimax",
+    null
+   ],
+   "'minimax-m2.7-hs'": [
+    "minimax",
+    null
+   ],
+   "'glm-5.2'": [
+    "minimax",
+    "MiniMax-M2.7"
+   ],
+   "'glm-4.7'": [
+    "minimax",
+    "MiniMax-M2.7"
+   ],
+   "'qwen3.7-max'": [
+    "minimax",
+    "MiniMax-M2.7"
+   ],
+   "'qwen3-coder-plus'": [
+    "minimax",
+    "MiniMax-M2.7"
+   ],
+   "'code-max'": [
+    "minimax",
+    "MiniMax-M2.7"
+   ],
+   "'gpt-4o'": [
+    "minimax",
+    null
+   ],
+   "''": [
+    "minimax",
+    null
+   ],
+   "None": [
+    "minimax",
+    null
+   ],
+   "'   '": [
+    "minimax",
+    null
+   ],
+   "'modello-inesistente'": [
+    "minimax",
+    null
+   ],
+   "AAAAAAAAAAAAAAAAAAAAAAAA\u2026": [
+    "minimax",
+    null
+   ],
+   "'../../etc/passwd'": [
+    "minimax",
+    null
+   ],
+   "'{\"injection\":true}'": [
+    "minimax",
+    null
+   ],
+   "'claude-opus-5\\n\\rX'": [
+    "anthropic",
+    null
+   ]
+  },
+  "mix-ag": {
+   "'claude-opus-5'": [
+    "anthropic",
+    null
+   ],
+   "'claude-sonnet-5'": [
+    "anthropic",
+    null
+   ],
+   "'claude-fable-5'": [
+    "anthropic",
+    null
+   ],
+   "'claude-haiku-4-5-20251001'": [
+    "glm",
+    "glm-4.7"
+   ],
+   "'claude-opus-4-8'": [
+    "anthropic",
+    null
+   ],
+   "'MiniMax-M3'": [
+    "glm",
+    "glm-4.7"
+   ],
+   "'MiniMax-M2.7'": [
+    "glm",
+    "glm-4.7"
+   ],
+   "'minimax-m2.7-hs'": [
+    "glm",
+    "glm-4.7"
+   ],
+   "'glm-5.2'": [
+    "glm",
+    null
+   ],
+   "'glm-4.7'": [
+    "glm",
+    null
+   ],
+   "'qwen3.7-max'": [
+    "glm",
+    "glm-4.7"
+   ],
+   "'qwen3-coder-plus'": [
+    "glm",
+    "glm-4.7"
+   ],
+   "'code-max'": [
+    "glm",
+    "glm-4.7"
+   ],
+   "'gpt-4o'": [
+    "glm",
+    null
+   ],
+   "''": [
+    "glm",
+    null
+   ],
+   "None": [
+    "glm",
+    null
+   ],
+   "'   '": [
+    "glm",
+    null
+   ],
+   "'modello-inesistente'": [
+    "glm",
+    null
+   ],
+   "AAAAAAAAAAAAAAAAAAAAAAAA\u2026": [
+    "glm",
+    null
+   ],
+   "'../../etc/passwd'": [
+    "glm",
+    null
+   ],
+   "'{\"injection\":true}'": [
+    "glm",
+    null
+   ],
+   "'claude-opus-5\\n\\rX'": [
+    "anthropic",
+    null
+   ]
+  },
+  "mix-gm": {
+   "'claude-opus-5'": [
+    "glm",
+    "glm-5.2"
+   ],
+   "'claude-sonnet-5'": [
+    "glm",
+    "glm-5.2"
+   ],
+   "'claude-fable-5'": [
+    "glm",
+    "glm-5.2"
+   ],
+   "'claude-haiku-4-5-20251001'": [
+    "minimax",
+    "MiniMax-M2.7"
+   ],
+   "'claude-opus-4-8'": [
+    "glm",
+    "glm-5.2"
+   ],
+   "'MiniMax-M3'": [
+    "minimax",
+    null
+   ],
+   "'MiniMax-M2.7'": [
+    "minimax",
+    null
+   ],
+   "'minimax-m2.7-hs'": [
+    "minimax",
+    null
+   ],
+   "'glm-5.2'": [
+    "minimax",
+    "MiniMax-M2.7"
+   ],
+   "'glm-4.7'": [
+    "minimax",
+    "MiniMax-M2.7"
+   ],
+   "'qwen3.7-max'": [
+    "minimax",
+    "MiniMax-M2.7"
+   ],
+   "'qwen3-coder-plus'": [
+    "minimax",
+    "MiniMax-M2.7"
+   ],
+   "'code-max'": [
+    "minimax",
+    "MiniMax-M2.7"
+   ],
+   "'gpt-4o'": [
+    "minimax",
+    null
+   ],
+   "''": [
+    "minimax",
+    null
+   ],
+   "None": [
+    "minimax",
+    null
+   ],
+   "'   '": [
+    "minimax",
+    null
+   ],
+   "'modello-inesistente'": [
+    "minimax",
+    null
+   ],
+   "AAAAAAAAAAAAAAAAAAAAAAAA\u2026": [
+    "minimax",
+    null
+   ],
+   "'../../etc/passwd'": [
+    "minimax",
+    null
+   ],
+   "'{\"injection\":true}'": [
+    "minimax",
+    null
+   ],
+   "'claude-opus-5\\n\\rX'": [
+    "glm",
+    "glm-5.2"
+   ]
+  },
+  "glm": {
+   "'claude-opus-5'": [
+    "glm",
+    "glm-5.2"
+   ],
+   "'claude-sonnet-5'": [
+    "glm",
+    "glm-5.2"
+   ],
+   "'claude-fable-5'": [
+    "glm",
+    "glm-5.2"
+   ],
+   "'claude-haiku-4-5-20251001'": [
+    "glm",
+    "glm-4.7"
+   ],
+   "'claude-opus-4-8'": [
+    "glm",
+    "glm-5.2"
+   ],
+   "'MiniMax-M3'": [
+    "glm",
+    "glm-4.7"
+   ],
+   "'MiniMax-M2.7'": [
+    "glm",
+    "glm-4.7"
+   ],
+   "'minimax-m2.7-hs'": [
+    "glm",
+    "glm-4.7"
+   ],
+   "'glm-5.2'": [
+    "glm",
+    null
+   ],
+   "'glm-4.7'": [
+    "glm",
+    null
+   ],
+   "'qwen3.7-max'": [
+    "glm",
+    "glm-4.7"
+   ],
+   "'qwen3-coder-plus'": [
+    "glm",
+    "glm-4.7"
+   ],
+   "'code-max'": [
+    "glm",
+    "glm-4.7"
+   ],
+   "'gpt-4o'": [
+    "glm",
+    null
+   ],
+   "''": [
+    "glm",
+    null
+   ],
+   "None": [
+    "glm",
+    null
+   ],
+   "'   '": [
+    "glm",
+    null
+   ],
+   "'modello-inesistente'": [
+    "glm",
+    null
+   ],
+   "AAAAAAAAAAAAAAAAAAAAAAAA\u2026": [
+    "glm",
+    null
+   ],
+   "'../../etc/passwd'": [
+    "glm",
+    null
+   ],
+   "'{\"injection\":true}'": [
+    "glm",
+    null
+   ],
+   "'claude-opus-5\\n\\rX'": [
+    "glm",
+    "glm-5.2"
+   ]
+  },
+  "qwen": {
+   "'claude-opus-5'": [
+    "qwen",
+    "qwen3.8-max"
+   ],
+   "'claude-sonnet-5'": [
+    "qwen",
+    "qwen3.8-max"
+   ],
+   "'claude-fable-5'": [
+    "qwen",
+    "qwen3.8-max"
+   ],
+   "'claude-haiku-4-5-20251001'": [
+    "qwen",
+    "qwen3-coder-plus"
+   ],
+   "'claude-opus-4-8'": [
+    "qwen",
+    "qwen3.8-max"
+   ],
+   "'MiniMax-M3'": [
+    "qwen",
+    "qwen3-coder-plus"
+   ],
+   "'MiniMax-M2.7'": [
+    "qwen",
+    "qwen3-coder-plus"
+   ],
+   "'minimax-m2.7-hs'": [
+    "qwen",
+    "qwen3-coder-plus"
+   ],
+   "'glm-5.2'": [
+    "qwen",
+    "qwen3-coder-plus"
+   ],
+   "'glm-4.7'": [
+    "qwen",
+    "qwen3-coder-plus"
+   ],
+   "'qwen3.7-max'": [
+    "qwen",
+    null
+   ],
+   "'qwen3-coder-plus'": [
+    "qwen",
+    null
+   ],
+   "'code-max'": [
+    "qwen",
+    "qwen3-coder-plus"
+   ],
+   "'gpt-4o'": [
+    "qwen",
+    null
+   ],
+   "''": [
+    "qwen",
+    null
+   ],
+   "None": [
+    "qwen",
+    null
+   ],
+   "'   '": [
+    "qwen",
+    null
+   ],
+   "'modello-inesistente'": [
+    "qwen",
+    null
+   ],
+   "AAAAAAAAAAAAAAAAAAAAAAAA\u2026": [
+    "qwen",
+    null
+   ],
+   "'../../etc/passwd'": [
+    "qwen",
+    null
+   ],
+   "'{\"injection\":true}'": [
+    "qwen",
+    null
+   ],
+   "'claude-opus-5\\n\\rX'": [
+    "qwen",
+    "qwen3.8-max"
+   ]
+  },
+  "mix-al": {
+   "'claude-opus-5'": [
+    "anthropic",
+    null
+   ],
+   "'claude-sonnet-5'": [
+    "anthropic",
+    null
+   ],
+   "'claude-fable-5'": [
+    "anthropic",
+    null
+   ],
+   "'claude-haiku-4-5-20251001'": [
+    "local",
+    "code-max"
+   ],
+   "'claude-opus-4-8'": [
+    "anthropic",
+    null
+   ],
+   "'MiniMax-M3'": [
+    "local",
+    "code-max"
+   ],
+   "'MiniMax-M2.7'": [
+    "local",
+    "code-max"
+   ],
+   "'minimax-m2.7-hs'": [
+    "local",
+    "code-max"
+   ],
+   "'glm-5.2'": [
+    "local",
+    "code-max"
+   ],
+   "'glm-4.7'": [
+    "local",
+    "code-max"
+   ],
+   "'qwen3.7-max'": [
+    "local",
+    "code-max"
+   ],
+   "'qwen3-coder-plus'": [
+    "local",
+    "code-max"
+   ],
+   "'code-max'": [
+    "local",
+    null
+   ],
+   "'gpt-4o'": [
+    "local",
+    null
+   ],
+   "''": [
+    "local",
+    null
+   ],
+   "None": [
+    "local",
+    null
+   ],
+   "'   '": [
+    "local",
+    null
+   ],
+   "'modello-inesistente'": [
+    "local",
+    null
+   ],
+   "AAAAAAAAAAAAAAAAAAAAAAAA\u2026": [
+    "local",
+    null
+   ],
+   "'../../etc/passwd'": [
+    "local",
+    null
+   ],
+   "'{\"injection\":true}'": [
+    "local",
+    null
+   ],
+   "'claude-opus-5\\n\\rX'": [
+    "anthropic",
+    null
+   ]
+  },
+  "local": {
+   "'claude-opus-5'": [
+    "local",
+    "code-max"
+   ],
+   "'claude-sonnet-5'": [
+    "local",
+    "code-max"
+   ],
+   "'claude-fable-5'": [
+    "local",
+    "code-max"
+   ],
+   "'claude-haiku-4-5-20251001'": [
+    "local",
+    "code-max"
+   ],
+   "'claude-opus-4-8'": [
+    "local",
+    "code-max"
+   ],
+   "'MiniMax-M3'": [
+    "local",
+    "code-max"
+   ],
+   "'MiniMax-M2.7'": [
+    "local",
+    "code-max"
+   ],
+   "'minimax-m2.7-hs'": [
+    "local",
+    "code-max"
+   ],
+   "'glm-5.2'": [
+    "local",
+    "code-max"
+   ],
+   "'glm-4.7'": [
+    "local",
+    "code-max"
+   ],
+   "'qwen3.7-max'": [
+    "local",
+    "code-max"
+   ],
+   "'qwen3-coder-plus'": [
+    "local",
+    "code-max"
+   ],
+   "'code-max'": [
+    "local",
+    null
+   ],
+   "'gpt-4o'": [
+    "local",
+    null
+   ],
+   "''": [
+    "local",
+    null
+   ],
+   "None": [
+    "local",
+    null
+   ],
+   "'   '": [
+    "local",
+    null
+   ],
+   "'modello-inesistente'": [
+    "local",
+    null
+   ],
+   "AAAAAAAAAAAAAAAAAAAAAAAA\u2026": [
+    "local",
+    null
+   ],
+   "'../../etc/passwd'": [
+    "local",
+    null
+   ],
+   "'{\"injection\":true}'": [
+    "local",
+    null
+   ],
+   "'claude-opus-5\\n\\rX'": [
+    "local",
+    "code-max"
+   ]
+  }
+ },
+ "eccezioni": [],
+ "anomalie": []
+}

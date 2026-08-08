@@ -1,0 +1,68 @@
+[
+ {
+  "caso": "json malformato",
+  "http": "400",
+  "ms": 584.6,
+  "corpo": "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"invalid params\"}}"
+ },
+ {
+  "caso": "body vuoto",
+  "http": "400",
+  "ms": 146.6,
+  "corpo": "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"invalid params\"}}"
+ },
+ {
+  "caso": "non-json",
+  "http": "400",
+  "ms": 148.1,
+  "corpo": "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"invalid params\"}}"
+ },
+ {
+  "caso": "model assente",
+  "http": "400",
+  "ms": 147.4,
+  "corpo": "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"invalid params\"}}"
+ },
+ {
+  "caso": "model null",
+  "http": "200",
+  "ms": 646.0,
+  "corpo": "{\"id\":\"06c5f96fa13d5d1bd9c42e9fc19b6369\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"MiniMax-M3\",\"content\":[{\"text\":\"x\",\"type\":\"text\"}],\"usage\":{\"inp"
+ },
+ {
+  "caso": "model ignoto",
+  "http": "200",
+  "ms": 5774.1,
+  "corpo": "{\"id\": \"06c5f970f85da31bc30519c866f894d9\", \"type\": \"message\", \"role\": \"assistant\", \"model\": \"modello-inesistente-xyz\", \"content\": [{\"thinking\": \"The u"
+ },
+ {
+  "caso": "model path traversal",
+  "http": "200",
+  "ms": 8515.9,
+  "corpo": "{\"id\": \"06c5f976da44177d0e108a59e6e723dc\", \"type\": \"message\", \"role\": \"assistant\", \"model\": \"../../etc/passwd\", \"content\": [{\"thinking\": \"The user wro"
+ },
+ {
+  "caso": "messages assente",
+  "http": "400",
+  "ms": 147.0,
+  "corpo": "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"invalid params\"}}"
+ },
+ {
+  "caso": "messages non lista",
+  "http": "400",
+  "ms": 145.9,
+  "corpo": "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"invalid params\"}}"
+ },
+ {
+  "caso": "max_tokens negativo",
+  "http": "200",
+  "ms": 5303.0,
+  "corpo": "{\"id\": \"06c5f97f86e8cf1e96aade77cce93229\", \"type\": \"message\", \"role\": \"assistant\", \"model\": \"claude-haiku-4-5-20251001\", \"content\": [{\"thinking\": \"The"
+ },
+ {
+  "caso": "ruolo invalido",
+  "http": "200",
+  "ms": 9876.1,
+  "corpo": "{\"id\": \"06c5f984f1cf5b085ba9fe8a7ce2db11\", \"type\": \"message\", \"role\": \"assistant\", \"model\": \"claude-haiku-4-5-20251001\", \"content\": [{\"thinking\": \"The"
+ }
+]

@@ -1,0 +1,62 @@
+[
+ {
+  "concorrenza": 1,
+  "richieste": 3,
+  "durata_s": 0.06,
+  "rps": 53.6,
+  "p50_ms": 54.6,
+  "p95_ms": 54.6,
+  "max_ms": 55.0,
+  "stati": {
+   "200": 3
+  }
+ },
+ {
+  "concorrenza": 5,
+  "richieste": 15,
+  "durata_s": 0.01,
+  "rps": 1858.0,
+  "p50_ms": 3.2,
+  "p95_ms": 4.4,
+  "max_ms": 4.7,
+  "stati": {
+   "200": 15
+  }
+ },
+ {
+  "concorrenza": 10,
+  "richieste": 30,
+  "durata_s": 0.01,
+  "rps": 2514.0,
+  "p50_ms": 4.1,
+  "p95_ms": 5.7,
+  "max_ms": 5.8,
+  "stati": {
+   "200": 30
+  }
+ },
+ {
+  "concorrenza": 25,
+  "richieste": 75,
+  "durata_s": 0.03,
+  "rps": 2761.3,
+  "p50_ms": 9.0,
+  "p95_ms": 10.3,
+  "max_ms": 12.4,
+  "stati": {
+   "200": 75
+  }
+ },
+ {
+  "concorrenza": 50,
+  "richieste": 150,
+  "durata_s": 0.05,
+  "rps": 3265.8,
+  "p50_ms": 8.6,
+  "p95_ms": 9.7,
+  "max_ms": 10.9,
+  "stati": {
+   "200": 150
+  }
+ }
+]
