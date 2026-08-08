@@ -190,7 +190,8 @@ def prepare_body(
     Su JSON non valido restituisce il body invariato: un proxy non deve mai
     rompere una richiesta che non riesce a interpretare.
     """
-    info: dict = {"stripped": (), "marker_added": False, "model": None, "parsed": False}
+    info: dict = {"stripped": (), "marker_added": False, "model": None,
+                  "parsed": False, "has_context_management": False}
     try:
         body = json.loads(body_bytes)
         if not isinstance(body, dict):
@@ -201,6 +202,9 @@ def prepare_body(
     info["parsed"] = True
     model = body.get("model")
     info["model"] = model
+    # Serve al chiamante per sapere se aggiungere il beta header: senza di quello
+    # un context_management lasciato passare fa fallire la richiesta con 400.
+    info["has_context_management"] = "context_management" in body
 
     fields = unsupported_fields(model, allow_context_management)
     present = tuple(k for k in fields if k in body)

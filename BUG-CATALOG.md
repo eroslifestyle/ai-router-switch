@@ -2,11 +2,11 @@
 
 > Generato automaticamente da `scripts/generate_bug_report.py` a partire da `logs/BUG-CATALOG.jsonl`. Non modificare a mano — rilanciare lo script. Vedi `DEBUG-CATALOG-SPEC.md` per lo schema completo.
 
-**221 tipi distinti di bug/blocco/errore** · **33485 occorrenze totali** su 9 modalita'.
+**228 tipi distinti di bug/blocco/errore** · **35367 occorrenze totali** su 9 modalita'.
 
 ## Modalita': `anthropic`
 
-69 tipi distinti, 25406 occorrenze.
+76 tipi distinti, 27196 occorrenze.
 
 ### `rate_limit_429_exhausted` (429)
 
@@ -37,6 +37,16 @@
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `retry-after=1`
 
+### `forward_exception`
+
+- **Firma**: `83bbc9e3ba47b798`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 2
+- **Prima volta**: 2026-08-07T14:40:53+0200
+- **Ultima volta**: 2026-08-07T14:41:58+0200
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `'list' object has no attribute 'get'`
+
 ### `relay_error_400` (400)
 
 - **Firma**: `616b77eeee413a4c`
@@ -46,6 +56,56 @@
 - **Ultima volta**: 2026-07-27T23:02:48+0200
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 208904 tokens > 200000 maximum"},"request_id":"req_011CdTEnv8dPM4AZnueLkxmb"}`
+
+### `relay_error_400` (400)
+
+- **Firma**: `81601913633cbd3b`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-07T14:41:00+0200
+- **Ultima volta**: 2026-08-07T14:41:00+0200
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","message":"campo_inventato_xyz: Extra inputs are not permitted"},"request_id":"req_011CdoQRbcJw7nT1fCnPdVYR"}`
+
+### `relay_error_400` (400)
+
+- **Firma**: `4ea73c5e09bf91e0`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-07T14:40:56+0200
+- **Ultima volta**: 2026-08-07T14:40:56+0200
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","message":"model: Field required"},"request_id":"req_011CdoQRFiEaEA6U4TaPKhr4"}`
+
+### `relay_error_400` (400)
+
+- **Firma**: `89943f7a4c78960b`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-07T14:40:56+0200
+- **Ultima volta**: 2026-08-07T14:40:56+0200
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","message":"messages: Field required"},"request_id":"req_011CdoQRHQBcdL3gr8MpFzDZ"}`
+
+### `relay_error_400` (400)
+
+- **Firma**: `62b01920e930d237`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-07T14:40:52+0200
+- **Ultima volta**: 2026-08-07T14:40:52+0200
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","message":"The request body is not valid JSON: unexpected end of data: line 1 column 41 (char 40)"},"request_id":"req_011CdoQQyDoAjeqQ2Atj7oKm"}`
+
+### `relay_error_400` (400)
+
+- **Firma**: `fe86f22f95549cf3`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-07T14:40:52+0200
+- **Ultima volta**: 2026-08-07T14:40:52+0200
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","message":"The request body is not valid JSON: Input is a zero-length, empty document: line 1 column 1 (char 0)"},"request_id":"req_011CdoQQznJpmx1vZnQ4CCVf"}`
 
 ### `sse_truncated` (200)
 
@@ -588,6 +648,16 @@
 
 ### `rate_limit_429`
 
+- **Firma**: `d2210ec5c7c88a45`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 4
+- **Prima volta**: 2026-08-07T14:40:52+0200
+- **Ultima volta**: 2026-08-07T14:41:57+0200
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `anthropic EXC: retry 2/2 sleep=0.67s ('list' object has no attribute 'get')`
+
+### `rate_limit_429`
+
 - **Firma**: `b5af13ec30de3db5`
 - **Severita'**: 🟡 Blocchi
 - **Occorrenze**: 2
@@ -620,11 +690,11 @@
 
 - **Firma**: `7446f99926bbc6ef`
 - **Severita'**: info
-- **Occorrenze**: 17116
+- **Occorrenze**: 18895
 - **Prima volta**: 2026-07-26T17:54:14Z
-- **Ultima volta**: 2026-08-07T01:50:31+0200
+- **Ultima volta**: 2026-08-08T00:43:34+0200
 - **Modalita' coinvolte**: anthropic
-- **Esempio**: `stripped=['mcp__zai__web_search_prime'] kept=55/56`
+- **Esempio**: `stripped=['mcp__zai__web_search_prime'] kept=73/74`
 
 ### `tool_isolation_strip`
 
@@ -1339,7 +1409,7 @@
 
 ## Modalita': `mix-am`
 
-61 tipi distinti, 1544 occorrenze.
+61 tipi distinti, 1636 occorrenze.
 
 ### `relay_error_400` (400)
 
@@ -1931,9 +2001,9 @@
 
 - **Firma**: `4e55ecf61db90635`
 - **Severita'**: info
-- **Occorrenze**: 745
+- **Occorrenze**: 837
 - **Prima volta**: 2026-07-26T20:35:53+0200
-- **Ultima volta**: 2026-08-07T01:48:21+0200
+- **Ultima volta**: 2026-08-08T00:42:28+0200
 - **Modalita' coinvolte**: mix-am
 
 ### `ctx_gate` (warn)
@@ -2225,34 +2295,3 @@
 - **Ultima volta**: 2026-08-03T19:52:34+0200
 - **Modalita' coinvolte**: qwen
 - **Esempio**: `stripped=['mcp__MiniMax__web_search', 'mcp__zai__web_search_prime', 'web_search_20250305'] kept=2/5`
-
-## Body JSON non-oggetto -> 502 con dettaglio interno esposto
-
-**Trovato:** 2026-08-07, stress test `bench/stress.py` (caso `array_al_posto_di_oggetto`).
-**Stato:** aperto, NON corretto. Preesistente: sta nel dispatch del proxy, non nei
-moduli toccati dal commit bac14e6.
-
-**Riproduzione:**
-```
-curl -X POST http://127.0.0.1:8771/v1/messages -H 'content-type: application/json' --data '[1,2,3]'
--> HTTP 502  {"error":{"type":"router_error","message":"'list' object has no attribute 'get'"}}
-```
-
-**Causa:** `ai-router-proxy.py:287` (e altri punti: 272, 341, 604, 677) fanno
-`json.loads(body).get(...)` senza verificare che il risultato sia un dict. Con un
-array JSON valido si ottiene un AttributeError, che il gestore converte in 502.
-
-**Due difetti distinti:**
-1. Codice di stato sbagliato: e' un errore del client (400), non del server (502).
-2. Il messaggio espone un dettaglio implementativo interno. Va contro la regola
-   "errori generici all'utente, dettaglio nei log".
-
-**Perche' non e' stato corretto subito:** il fix pulito e' una validazione unica
-all'ingresso di `/v1/messages`, che tocca il path caldo del dispatch centrale. Su
-un componente in cui un errore significa blocco totale, il rischio supera il
-beneficio di gestire un input che nessun client legittimo produce. Da fare con
-una finestra dedicata e test di regressione, non in coda a un altro lavoro.
-
-**Nota:** gli altri 8 casi di fault injection sono gestiti correttamente, incluso
-`system` da 200.000 caratteri, gli id `server_tool_use` non conformi e
-`output_config` su Haiku (strippato dalla whitelist, nessun 400).

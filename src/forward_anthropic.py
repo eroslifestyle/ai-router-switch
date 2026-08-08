@@ -186,7 +186,26 @@ async def forward_anthropic(request, body, session):
         # crollato da 82,4 a 2,6 e cache_creation per richiesta salita da 4.167 a
         # 52.513 (12,6x). Il rimedio costava piu' del male: il CLI il marker ce
         # l'ha gia'. L'iniezione resta disponibile per le richieste sintetiche.
-        safe_body, _caps = anthropic_capabilities.prepare_body(body, inject_marker=False)
+        # context_management: il CLI lo MANDA (301 richieste osservate nei log) e
+        # finora il router lo cancellava. Misurato il 2026-08-08 su conversazione
+        # con 12 giri di tool: clear_tool_uses toglie 31.644 token di input
+        # (-72,4%, cleared_tool_uses=9). Resta DISATTIVATO di default perche'
+        # cancellare invalida il prefisso in cache, e con 345k token di cache_read
+        # per richiesta il rimedio potrebbe costare piu' del male: e' lo stesso
+        # meccanismo che ha fatto danno con il marker. Serve una misura multi-turno
+        # prima di accenderlo. Attivazione: AIROUTER_ALLOW_CONTEXT_MGMT=1
+        _allow_cm = os.environ.get("AIROUTER_ALLOW_CONTEXT_MGMT", "") == "1"
+        safe_body, _caps = anthropic_capabilities.prepare_body(
+            body, allow_context_management=_allow_cm, inject_marker=False)
+        if _allow_cm and _caps.get("has_context_management"):
+            # Senza questo beta header l'API risponde 400 "Extra inputs are not
+            # permitted": e' la ragione per cui strippare era la scorciatoia.
+            _beta = headers.get("anthropic-beta") or headers.get("Anthropic-Beta") or ""
+            if anthropic_capabilities.BETA_CONTEXT_MANAGEMENT not in _beta:
+                headers.pop("Anthropic-Beta", None)
+                headers["anthropic-beta"] = (
+                    f"{_beta},{anthropic_capabilities.BETA_CONTEXT_MANAGEMENT}"
+                    if _beta else anthropic_capabilities.BETA_CONTEXT_MANAGEMENT)
         if _caps["stripped"] or _caps["marker_added"]:
             log(f"[caps] {_caps['model']}: stripped={_caps['stripped']} "
                 f"marker_added={_caps['marker_added']}")
@@ -312,7 +331,26 @@ async def forward_anthropic_direct(request, body, session):
         # crollato da 82,4 a 2,6 e cache_creation per richiesta salita da 4.167 a
         # 52.513 (12,6x). Il rimedio costava piu' del male: il CLI il marker ce
         # l'ha gia'. L'iniezione resta disponibile per le richieste sintetiche.
-        safe_body, _caps = anthropic_capabilities.prepare_body(body, inject_marker=False)
+        # context_management: il CLI lo MANDA (301 richieste osservate nei log) e
+        # finora il router lo cancellava. Misurato il 2026-08-08 su conversazione
+        # con 12 giri di tool: clear_tool_uses toglie 31.644 token di input
+        # (-72,4%, cleared_tool_uses=9). Resta DISATTIVATO di default perche'
+        # cancellare invalida il prefisso in cache, e con 345k token di cache_read
+        # per richiesta il rimedio potrebbe costare piu' del male: e' lo stesso
+        # meccanismo che ha fatto danno con il marker. Serve una misura multi-turno
+        # prima di accenderlo. Attivazione: AIROUTER_ALLOW_CONTEXT_MGMT=1
+        _allow_cm = os.environ.get("AIROUTER_ALLOW_CONTEXT_MGMT", "") == "1"
+        safe_body, _caps = anthropic_capabilities.prepare_body(
+            body, allow_context_management=_allow_cm, inject_marker=False)
+        if _allow_cm and _caps.get("has_context_management"):
+            # Senza questo beta header l'API risponde 400 "Extra inputs are not
+            # permitted": e' la ragione per cui strippare era la scorciatoia.
+            _beta = headers.get("anthropic-beta") or headers.get("Anthropic-Beta") or ""
+            if anthropic_capabilities.BETA_CONTEXT_MANAGEMENT not in _beta:
+                headers.pop("Anthropic-Beta", None)
+                headers["anthropic-beta"] = (
+                    f"{_beta},{anthropic_capabilities.BETA_CONTEXT_MANAGEMENT}"
+                    if _beta else anthropic_capabilities.BETA_CONTEXT_MANAGEMENT)
         if _caps["stripped"] or _caps["marker_added"]:
             log(f"[caps] {_caps['model']}: stripped={_caps['stripped']} "
                 f"marker_added={_caps['marker_added']}")

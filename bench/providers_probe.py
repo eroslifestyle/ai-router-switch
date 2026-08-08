@@ -1,4 +1,5 @@
 import json
+import statistics
 import os
 import time
 import argparse
@@ -7,7 +8,8 @@ import urllib.error
 import dataclasses
 import pathlib
 
-HONORED_DELTA_PCT = 15
+SIGNAL_NOISE_RATIO = 2.0   # quante volte il segnale deve superare il rumore
+MIN_RELEVANT_PCT = 10.0    # sotto questa quota l'effetto e' reale ma inutile in pratica
 PROMPT = 'Un treno parte da A alle 9:00 a 80 km/h. Un secondo parte da B alle 9:30 a 120 km/h verso A. A e B distano 400 km. A che ora si incontrano? Spiega il ragionamento passo per passo.'
 
 def load_env_file(path: str) -> dict[str, str]:
@@ -187,19 +189,66 @@ def build_specs() -> list[ProbeSpec]:
     return specs
 
 def verdict(rows: list[dict]) -> str:
-    if not rows:
-        return 'NON MISURABILE (nessun risultato)'
-    ok_rows = [r for r in rows if r['ok']]
-    if not ok_rows:
-        err = next((r['error'] for r in rows if r['error']), 'sconosciuto')
-        return f'NON MISURABILE ({err})'
-    outs = [r['output_tokens'] for r in ok_rows]
-    if len(set(outs)) == 1:
-        return f'ACCETTATO MA IGNORATO (output_tokens identici: {outs[0]})'
-    delta_pct = (max(outs) - min(outs)) / max(outs) * 100 if max(outs) else 0
-    if delta_pct > HONORED_DELTA_PCT:
-        return f'ONORATO (scarto {delta_pct:.1f}%)'
-    return f'INCERTO (scarto {delta_pct:.1f}%)'
+    """Giudica se il parametro ha EFFETTO, confrontando il segnale con il rumore.
+
+    La versione precedente dichiarava 'ONORATO' quando lo scarto fra le varianti
+    superava il 15 percento, senza mai guardare la varianza interna. Su MiniMax
+    avrebbe detto 'onorato' mentre il pattern era incoerente (low produceva PIU'
+    token di high): quello scarto era rumore, non risposta al parametro. Un
+    verdetto che non distingue le due cose e' peggio di nessun verdetto, perche'
+    chi lo legge ci crede.
+
+    Ora servono DUE condizioni insieme:
+      1. lo scarto fra le medie supera SIGNAL_NOISE_RATIO volte il rumore interno;
+      2. l'ordine e' coerente (se esistono un livello basso e uno alto, il basso
+         deve produrre meno token dell'alto).
+    Con una sola ripetizione per variante il rumore non e' stimabile e il verdetto
+    resta esplicitamente INCONCLUSIVO invece di inventare una risposta.
+    """
+    ok = [r for r in rows if r.get("ok")]
+    if not ok:
+        motivo = str(rows[0].get("error", "?"))[:60] if rows else "nessun dato"
+        return f"NON MISURABILE ({motivo})"
+
+    per_variant: dict[str, list[int]] = {}
+    for r in ok:
+        per_variant.setdefault(r.get("variant", "?"), []).append(r.get("output_tokens", 0))
+    if len(per_variant) < 2:
+        return "INCONCLUSIVO (meno di due varianti riuscite)"
+
+    means = {v: statistics.mean(x) for v, x in per_variant.items()}
+    sds = [statistics.stdev(x) for x in per_variant.values() if len(x) > 1]
+    if not sds:
+        return (f"INCONCLUSIVO (una sola ripetizione per variante: il rumore non e' "
+                f"stimabile; scarto osservato {max(means.values()) - min(means.values()):.0f} token)")
+
+    spread = max(means.values()) - min(means.values())
+    noise = statistics.mean(sds)
+    ratio = spread / noise if noise else float("inf")
+
+    coerente = None
+    for lo, hi in (("effort_low", "effort_high"), ("reasoning_low", "reasoning_high"),
+                   ("thinking_disabled", "thinking_enabled"), ("budget_small", "budget_large")):
+        if lo in means and hi in means:
+            coerente = means[lo] < means[hi]
+            break
+
+    rel_pct = spread / statistics.mean(list(means.values())) * 100
+
+    if ratio < SIGNAL_NOISE_RATIO:
+        return f"NESSUN EFFETTO (scarto {spread:.0f} vs rumore {noise:.0f}, rapporto {ratio:.1f})"
+    if rel_pct < MIN_RELEVANT_PCT:
+        # Distinzione che serve a chi legge: un effetto puo' essere statisticamente
+        # reale e operativamente inutile. 35 token su 900 sono misurabili ma non
+        # cambiano nessuna decisione di costo.
+        return (f"EFFETTO TRASCURABILE (statisticamente reale, rapporto {ratio:.1f}, "
+                f"ma solo {rel_pct:.1f}% di scarto: non cambia i costi)")
+    if coerente is False:
+        return (f"ACCETTATO MA NON ONORATO (scarto {spread:.0f} sopra il rumore ma ORDINE "
+                f"INCOERENTE: il livello basso produce piu' token dell'alto)")
+    if coerente is None:
+        return f"EFFETTO PLAUSIBILE, ordine non verificabile (rapporto {ratio:.1f})"
+    return f"ONORATO (scarto {spread:.0f}, rumore {noise:.0f}, rapporto {ratio:.1f}, ordine coerente)"
 
 def _fmt_row(rows: list[dict]) -> list[str]:
     hdrs = ['provider', 'variant', 'status', 'out_tok', 'think_tok', 'text_len', 'lat_ms']

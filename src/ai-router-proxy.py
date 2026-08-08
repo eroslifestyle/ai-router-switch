@@ -251,6 +251,21 @@ async def handle(request):
     if "multipart/form-data" in ct:
         return _err_response("multipart not supported", status=415)
     body = await request.read()
+
+    # VALIDAZIONE D'INGRESSO (2026-08-08): il body di /v1/messages deve essere un
+    # OGGETTO JSON. Senza questo controllo, un array valido come `[1,2,3]` arrivava
+    # fino ai punti che fanno body.get(...) e produceva un 502 con il messaggio
+    # interno esposto ("'list' object has no attribute 'get'"): stato sbagliato
+    # (e' un errore del client) e perdita di dettaglio implementativo.
+    # Trovato dallo stress test bench/stress.py, caso array_al_posto_di_oggetto.
+    if request.path.endswith("/v1/messages") and body:
+        try:
+            _parsed = json.loads(body)
+        except Exception:
+            return _err_response("body is not valid JSON", status=400)
+        if not isinstance(_parsed, dict):
+            return _err_response("body must be a JSON object", status=400)
+
     # FIX BUG-COMPRESSIONE: preserva il body ORIGINALE prima di ogni riscrittura.
     # rewrite_for_context (linee 334-374) può riscrivere `body` con tail+summary,
     # ma le pipeline (THINK/ACT) devono poter accedere ai messaggi COMPLETI.
