@@ -43,6 +43,68 @@ class StreamingRelay:
         self.log_router_usage_fn = log_router_usage_fn
         self.trim_context_fn = trim_context_fn
 
+    def _modelli_orig_e_finale(self, final_override, orig_model):
+        """Ritorna (modello chiesto dal client, modello che ha davvero risposto).
+
+        Estratto dal blocco finally di relay() il 2026-08-08 per l'audit A3: lo
+        stesso valore serve ora in due momenti diversi — negli header, che
+        partono PRIMA di leggere la risposta, e nel sidecar, che si scrive dopo.
+        Duplicare la catena di casi avrebbe garantito che le due copie
+        divergessero: e' gia' successo in questo repo piu' di una volta.
+        La logica e' invariata rispetto a prima.
+        """
+        try:
+            _body_j = json.loads(self.body.decode("utf-8", errors="replace"))
+            _body_model = (_body_j.get("model") or "").strip()
+        except Exception:
+            _body_model = ""
+        _orig = orig_model or _body_model or "?"
+        # FIX bug 2026-07-01: per mode=mixed il final NON è "?" — è il modello
+        # rimappato (MiniMax-M3 se orig è nel remap index) oppure "claude-direct"
+        # se mixed è caduto in fallback Anthropic.
+        if final_override:
+            _final = final_override
+        elif self.mode == "minimax":
+            _final = self.minimax_model
+        elif self.mode == "anthropic":
+            _final = "claude-direct"
+        elif self.mode in ("glm", "glm-minimax", "anthropic-glm", "mix-gm", "mix-ag"):
+            # Il modello GLM effettivo è nell'header x-ai-verified (glm(<model>)).
+            # Registriamo il mode; il modello reale + moltiplicatore costo sono
+            # già loggati inline da _glm_execute_with_chain (x-glm-cost-mult).
+            _final = f"glm-mode:{self.mode}"
+        else:
+            # mix-am/mixed e tutte le modalita' senza un ramo dedicato (qwen,
+            # mix-al, local, e qualunque altra si aggiunga): resolve_route e' la
+            # fonte di verita' dell'instradamento, quindi non serve un caso per
+            # ciascuna. Prima qwen, mix-al e local cadevano nel ramo finale
+            # `_final = "?"` e, senza un final_override dal call site, il sidecar
+            # le registrava come "router-internal" (2026-08-08, audit A3).
+            #
+            # Storia del ramo mix-am: il sidecar dei modelli originali non viene
+            # piu' scritto dal 2026-07-25, e l'indice ricostruito aveva 25 voci
+            # su 75.683 righe, con attribuzioni errate (claude-opus-5 ->
+            # MiniMax-M2.7) e un fallback a 'claude-direct' che marcava male
+            # claude-haiku 6 volte su 31.
+            try:
+                from role_routing import resolve_route
+                _mode_norm = 'mix-am' if self.mode == 'mixed' else self.mode
+                _provider, _override = resolve_route(_mode_norm, _orig if _orig != "?" else "")
+                if _provider == 'anthropic':
+                    _final = 'claude-direct'
+                elif _override:
+                    _final = _override
+                elif _provider == 'minimax':
+                    _final = self.minimax_model
+                else:
+                    # Modello non riconosciuto: si dichiara il provider, mai il
+                    # nome chiesto dal client — sarebbe di nuovo la bugia che
+                    # questo lavoro elimina.
+                    _final = f"{_provider}-mode:{_mode_norm}"
+            except Exception:
+                _final = "?"
+        return _orig, _final
+
     async def relay(
         self,
         upstream,
@@ -134,6 +196,21 @@ class StreamingRelay:
             resp.headers["cache-control"] = "no-cache, no-transform"
             resp.headers["connection"] = "keep-alive"
             resp.headers["x-accel-buffering"] = "no"
+        # x-ai-actual-model (audit A3, 2026-08-08): il campo `model` del corpo
+        # dice al client quello che il client ha chiesto, non quello che ha
+        # risposto — il relay lo riscrive con orig_model poche righe piu' sotto,
+        # perche' i client rifiutano un nome di modello che non riconoscono. E
+        # il comportamento differiva fra modalita': con un modello ignoto in
+        # mix-am la risposta dichiarava quel nome mentre il sidecar registrava
+        # MiniMax-M2.7. Si aggiunge un header invece di cambiare il campo:
+        # additivo, nessun client esistente si rompe, e chi vuole sapere chi ha
+        # risposto davvero ha un posto solo dove guardare.
+        try:
+            _, _actual_model = self._modelli_orig_e_finale(final_override, orig_model)
+            if _actual_model and _actual_model != "?":
+                resp.headers["x-ai-actual-model"] = str(_actual_model)
+        except Exception:
+            pass  # la telemetria non deve mai impedire una risposta
         # FIX #6: NON usare enable_chunked_encoding() - aiohttp lo fa automaticamente
         # quando Transfer-Encoding non è in headers (già skippato da HOP_HEADERS).
         # Evita doppia codifica/conflitto chunked.
@@ -385,46 +462,7 @@ class StreamingRelay:
                     self.log_fn(f"D41 TPM delta-correct skip: {_e}")
                 # FIX bug stats: passa il FINAL reale (risolto da remap) + fallback al
                 # model nel body della request se orig_model (chat_fp-mismatch) è vuoto.
-                try:
-                    _body_j = json.loads(self.body.decode("utf-8", errors="replace"))
-                    _body_model = (_body_j.get("model") or "").strip()
-                except Exception:
-                    _body_model = ""
-                _orig = orig_model or _body_model or "?"
-                # FIX bug 2026-07-01: per mode=mixed il final NON è "?" — è il modello
-                # rimappato (MiniMax-M3 se orig è nel remap index) oppure "claude-direct"
-                # se mixed è caduto in fallback Anthropic.
-                if final_override:
-                    _final = final_override
-                elif self.mode == "minimax":
-                    _final = self.minimax_model
-                elif self.mode == "anthropic":
-                    _final = "claude-direct"
-                elif self.mode in ("glm", "glm-minimax", "anthropic-glm", "mix-gm", "mix-ag"):
-                    # Il modello GLM effettivo è nell'header x-ai-verified (glm(<model>)).
-                    # Registriamo il mode; il modello reale + moltiplicatore costo sono
-                    # già loggati inline da _glm_execute_with_chain (x-glm-cost-mult).
-                    _final = f"glm-mode:{self.mode}"
-                elif self.mode in ("mixed", "mix-am"):
-                    # Il file sidecar non viene piu' scritto dal 2026-07-25 (funzione
-                    # _log_original_model rimasta senza chiamanti dopo refactor router).
-                    # L'indice ricostruito ha sole 25 voci da 75.683 righe e produce
-                    # attribuzioni errate (es. claude-opus-5 -> MiniMax-M2.7).
-                    # Il fallback a 'claude-direct' genera false attribuzioni
-                    # (es. claude-haiku in mix-am registrato come claude-direct 6/31).
-                    # Ora si usa resolve_route come fonte di verita' dell'instradamento.
-                    try:
-                        if _orig == "?":
-                            _final = "?"
-                        else:
-                            from role_routing import resolve_route
-                            _mode_norm = 'mix-am' if self.mode == 'mixed' else self.mode
-                            _provider, _override = resolve_route(_mode_norm, _orig)
-                            _final = 'claude-direct' if _provider == 'anthropic' else _override or _orig
-                    except Exception:
-                        _final = "?"
-                else:
-                    _final = "?"
+                _orig, _final = self._modelli_orig_e_finale(final_override, orig_model)
                 try:
                     if _final == "claude-direct" and upstream.status == 200:
                         _cc = 0

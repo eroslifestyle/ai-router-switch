@@ -290,6 +290,62 @@ curl http://127.0.0.1:8787/livez
 
 ---
 
+## Header e telemetria delle risposte
+
+### `x-ai-actual-model` — chi ha risposto davvero
+
+Il campo `model` del corpo della risposta riporta il modello **chiesto dal
+client**, non quello che ha generato il testo: il router lo riscrive, perché i
+client rifiutano un nome di modello che non riconoscono. Per sapere chi ha
+effettivamente risposto c'è un header dedicato, presente su tutte e nove le
+modalità:
+
+```bash
+curl -s -D - -o /dev/null http://127.0.0.1:8787/v1/messages \
+  -H 'content-type: application/json' -H 'anthropic-version: 2023-06-01' \
+  -d '{"model":"claude-haiku-4-5-20251001","max_tokens":8,
+       "messages":[{"role":"user","content":"ciao"}]}' | grep -i x-ai-actual-model
+# x-ai-actual-model: MiniMax-M2.7
+```
+
+Il valore coincide sempre con il campo `final` registrato nel sidecar
+`~/.claude/logs/router-usage.jsonl`: è calcolato una volta sola. Quando il
+modello richiesto non è riconosciuto, l'header dichiara il provider
+(`minimax-mode:mix-am`) e mai il nome inventato dal client.
+
+L'header è **additivo**: il campo `model` del corpo non è stato modificato, per
+non rompere i client esistenti.
+
+### `x-airouter-synthetic` — marcare sonde e test
+
+Chi genera traffico di prova dovrebbe inviarlo:
+
+```bash
+curl -H 'x-airouter-synthetic: 1' ...
+```
+
+L'entry corrispondente nel sidecar riceve `synthetic: true`, e viene esclusa
+dalle statistiche di `/debug/stats` e dall'apprendimento della policy di
+self-healing. Senza questa marcatura le sonde falsano le metriche per modalità:
+è già successo quattro volte in questo progetto — in un caso una modalità
+risultava al 95,3% di errori mentre le richieste reali erano nove, tutte
+riuscite. Valori accettati: `1`, `true`, `yes`.
+
+### Latenza per modalità
+
+```bash
+curl -s http://127.0.0.1:8787/debug/stats | python3 -m json.tool
+```
+
+Il campo `latenza` riporta i percentili p50/p90/p99 di `ttfb_ms` (primo byte) e
+`total_ms` (fine dello stream) per ciascuna modalità, sulle sole richieste non
+sintetiche delle ultime 24 ore. La finestra si cambia con `?finestra_s=`.
+Il campo `policy_degraded` conta quante volte la policy di self-healing avrebbe
+deviato una richiesta: il router **non** devia — l'attuazione è lato agente per
+scelta — ma il conteggio rende misurabile quanto peserebbe.
+
+---
+
 ## Esempi d'Uso
 
 ### Claude Code — base
