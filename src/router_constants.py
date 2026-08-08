@@ -7,6 +7,12 @@ import paths
 # ── Network ────────────────────────────────────────────────────────────────────
 LISTEN_HOST = os.environ.get("AIROUTER_LISTEN_HOST", "127.0.0.1")
 LISTEN_PORT = int(os.environ.get("AIROUTER_PORT", "8787"))
+# Finestra di drain per ogni aiohttp AppRunner allo shutdown. Il default della
+# libreria e' 60.0 s PER RUNNER: con dieci porte e un cleanup che aspetta i drain,
+# lo stop poteva teoricamente durare 600 s mentre la unit systemd concede
+# TimeoutStopSec=20 -> SIGKILL certo appena c'e' uno stream SSE aperto (misurato
+# nel journal: "State 'stop-sigterm' timed out. Killing").
+SHUTDOWN_TIMEOUT_S = float(os.environ.get("AIROUTER_SHUTDOWN_TIMEOUT_S", "3.0"))
 ANTHROPIC_UPSTREAM = os.environ.get("AIROUTER_ANTHROPIC_UPSTREAM", "https://api.anthropic.com")
 MINIMAX_UPSTREAM = os.environ.get("AIROUTER_MINIMAX_UPSTREAM", "https://api.minimaxi.chat/anthropic")
 MINIMAX_MODEL = os.environ.get("AIROUTER_MINIMAX_MODEL", "MiniMax-M3")

@@ -46,7 +46,7 @@ from sse_utils import _sse_events_from_message, _send_sse_message
 
 # ── Router modules (this refactoring) ─────────────────────────────────────────
 from router_constants import (
-    LISTEN_HOST, LISTEN_PORT, LISTEN_PORTS,
+    LISTEN_HOST, LISTEN_PORT, LISTEN_PORTS, SHUTDOWN_TIMEOUT_S,
     ANTHROPIC_UPSTREAM, MINIMAX_UPSTREAM, MINIMAX_MODEL,
     VALID_MODES, GLM_AVAILABLE, QWEN_AVAILABLE,
     MODE_FILE, LOG_FILE, HOP_HEADERS, PORT_MODE, _HEALTH_CHECK_PATHS,
@@ -998,7 +998,10 @@ async def _run_multiport():
             break
         forced = PORT_MODE.get(port)
         app = _make_app(session, forced)
-        runner = web.AppRunner(app)
+        # Il default aiohttp per runner.shutdown_timeout e' 60.0 s;
+        # il cleanup sequenziale su 10 porte darebbe fino a 600 s,
+        # mentre la unit systemd concede TimeoutStopSec=20 -> SIGKILL certo con stream SSE aperti.
+        runner = web.AppRunner(app, shutdown_timeout=SHUTDOWN_TIMEOUT_S)
         await runner.setup()
         site = web.TCPSite(runner, LISTEN_HOST, port)
         try:
@@ -1015,8 +1018,8 @@ async def _run_multiport():
         await stop.wait()
         log("shutdown signal received, draining...")
     finally:
-        for r in runners:
-            await r.cleanup()
+        # cleanup in parallelo: sequenziale i timeout si sommano sulle 10 porte
+        await asyncio.gather(*(r.cleanup() for r in runners), return_exceptions=True)
         await session.close()
         log("shutdown complete")
 
