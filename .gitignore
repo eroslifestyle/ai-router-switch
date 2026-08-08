@@ -61,3 +61,4 @@ sviluppo/backup-20260806/
 # PUBBLICO. Gli script che li producono (bench/*.py) restano versionati.
 /bench/results/
 /bench/__pycache__/
+.claude/PROMPT-*.md
