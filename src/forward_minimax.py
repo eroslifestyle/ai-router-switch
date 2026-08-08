@@ -148,7 +148,7 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
                 # cache_control, quindi il testo promosso arriva a destinazione.
                 _promossi = promote_system_messages(_d)
                 if _promossi:
-                    _log(f"promossi {_promossi} messaggi role=system nel campo system (minimax), {getattr(promote_system_messages, "ultimi_caratteri", 0)} caratteri")
+                    _log(f"promossi {_promossi} messaggi role=system nel campo system (minimax), {getattr(promote_system_messages, 'ultimi_caratteri', 0)} caratteri")
                 _d["messages"] = _repair_message_sequence(_d["messages"])
                 new_body = json.dumps(_d).encode()
         except Exception as _e:

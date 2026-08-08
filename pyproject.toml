@@ -41,6 +41,22 @@ packages = []
 line-length = 120
 target-version = "py310"
 
+# E402 = import non in cima al file. Nei file elencati l'ordine e' DELIBERATO,
+# non una svista: il proxy e i moduli che ne dipendono devono impostare
+# `sys.path` prima di importare i moduli interni, e gli harness di test devono
+# esportare le variabili d'ambiente prima di importare i moduli di `src/`, che
+# le leggono al momento dell'import.
+# Perche' una regola esplicita invece di 24 avvisi ricorrenti: un elenco muto
+# di avvisi "da ignorare" fa perdere di vista quelli nuovi. Con l'eccezione
+# dichiarata qui, `ruff check .` torna pulito e qualunque avviso che compaia in
+# futuro e' un avviso vero. Se il proxy verra' riorganizzato, questa lista va
+# rivista insieme, non prima.
+[tool.ruff.lint.per-file-ignores]
+"src/ai-router-proxy.py" = ["E402"]
+"src/model_context_map.py" = ["E402"]
+"src/router_utils.py" = ["E402"]
+"sviluppo/tests/*.py" = ["E402"]
+
 [tool.pytest.ini_options]
 testpaths = ["sviluppo/tests", "tests"]
 asyncio_mode = "strict"

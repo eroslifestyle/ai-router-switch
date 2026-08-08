@@ -229,7 +229,7 @@ async def forward_anthropic(request, body, session):
             from router_utils import promote_system_messages
             _promossi = promote_system_messages(body_dict)
             if _promossi:
-                log(f"promossi {_promossi} messaggi role=system nel campo system (anthropic), {getattr(promote_system_messages, "ultimi_caratteri", 0)} caratteri")
+                log(f"promossi {_promossi} messaggi role=system nel campo system (anthropic), {getattr(promote_system_messages, 'ultimi_caratteri', 0)} caratteri")
             msgs = body_dict.get("messages", [])
             role_sys = sum(1 for m in msgs if m.get("role") == "system")
             if role_sys > 0 or msgs:
@@ -386,7 +386,7 @@ async def forward_anthropic_direct(request, body, session):
             from router_utils import promote_system_messages
             _promossi = promote_system_messages(body_dict)
             if _promossi:
-                log(f"promossi {_promossi} messaggi role=system nel campo system (anthropic), {getattr(promote_system_messages, "ultimi_caratteri", 0)} caratteri")
+                log(f"promossi {_promossi} messaggi role=system nel campo system (anthropic), {getattr(promote_system_messages, 'ultimi_caratteri', 0)} caratteri")
             msgs = body_dict.get("messages", [])
             role_sys = sum(1 for m in msgs if m.get("role") == "system")
             if role_sys > 0 or msgs:
