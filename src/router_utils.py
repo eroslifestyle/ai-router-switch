@@ -485,6 +485,23 @@ def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
 def _repair_message_sequence(messages: list) -> list:
     if not messages:
         return messages
+    # Lo scarto dei messaggi role=system era MUTO. Verificato il 2026-08-08 con
+    # una prova diretta: un messaggio system con "rispondi SOLO ANANAS" viene
+    # eliminato e la risposta lo ignora — il contenuto è perso e nessuno lo
+    # segnala, né al client né al log. Lo scarto in sé è corretto (l'API
+    # Anthropic vuole il system come campo top-level, non fra i messages), ma
+    # deve essere contabile: qui si registra soltanto, non si cambia il
+    # comportamento. La correzione vera — promuovere il contenuto nel campo
+    # `system` invece di buttarlo — è una voce aperta nel TODO, perché
+    # cambierebbe cosa viene inviato all'upstream.
+    _scartati = [m for m in messages if isinstance(m, dict) and m.get("role") == "system"]
+    if _scartati:
+        try:
+            _persi = sum(len(str(m.get("content", ""))) for m in _scartati)
+            log(f"repair: scartati {len(_scartati)} messaggi role=system "
+                f"({_persi} caratteri di contenuto persi, non promossi nel campo system)")
+        except Exception:
+            pass
     msgs = [dict(m) for m in messages if m.get("role") != "system"]
     changed = True
     while changed and msgs:
