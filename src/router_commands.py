@@ -7,11 +7,12 @@ from router_mode import get_chat_mode, set_chat_mode, clear_chat_mode, get_file_
 
 _ALIAS_MAP = {
     "mixam": "mix-am",
+    "mixam2": "mix-am-2",
     "mixgm": "mix-gm",
     "mixag": "mix-ag",
 }
 _INTERNAL_TO_DISPLAY = {
-    "mix-am": "MixAM", "mix-gm": "MixGM", "mix-ag": "MixAG",
+    "mix-am": "MixAM", "mix-am-2": "MixAM-2", "mix-gm": "MixGM", "mix-ag": "MixAG",
     "mix-al": "MixAL",  # aggiunta 2026-08-04: l'8a modalita' mancava dalla mappa
     "local": "Local",   # aggiunta 2026-08-04: 9a modalita', pura locale (tutto su code-max)
     "anthropic": "anthropic", "minimax": "minimax", "glm": "glm",

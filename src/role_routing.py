@@ -61,6 +61,11 @@ ROUTING_TABLE = {
     ("qwen", ROLE_ACT): ("qwen", QWEN_ACT),
     ("mix-am", ROLE_THINK): ("anthropic", None),
     ("mix-am", ROLE_ACT): ("minimax", MINIMAX_ACT),
+    # mix-am-2: routing IDENTICO a mix-am (THINK->Anthropic, ACT->MiniMax). La
+    # differenza e' tutta in enforce_hierarchy (deny mode-specific, vedi ~/.claude/hooks/):
+    # chiude Edit/Write/Bash-redirect/micro-edit per forzare la delega a m3-code.
+    ("mix-am-2", ROLE_THINK): ("anthropic", None),
+    ("mix-am-2", ROLE_ACT): ("minimax", MINIMAX_ACT),
     ("mix-ag", ROLE_THINK): ("anthropic", None),
     ("mix-ag", ROLE_ACT): ("glm", GLM_ACT),
     ("mix-gm", ROLE_THINK): ("glm", GLM_THINK),
@@ -80,13 +85,14 @@ _MODE_DEFAULT_PROVIDER = {
     "glm": "glm",
     "qwen": "qwen",
     "mix-am": "minimax",
+    "mix-am-2": "minimax",
     "mix-ag": "glm",
     "mix-gm": "minimax",
     "mix-al": "local",
     "local": "local",
 }
 
-VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-ag", "mix-gm", "mix-al", "local")
+VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-am-2", "mix-ag", "mix-gm", "mix-al", "local")
 
 
 # ── Native executor per provider ─────────────────────────────────────────────

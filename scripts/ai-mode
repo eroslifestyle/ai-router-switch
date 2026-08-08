@@ -116,6 +116,7 @@ set_mode(){
     mixgm|glm-minimax)    echo "mix-gm" ;;
     mixag|anthropic-glm)   echo "mix-ag" ;;
     mixam|mixed)           echo "mix-am" ;;
+    mixam2)                echo "mix-am-2" ;;
     mixal)                 echo "mix-al" ;;
     *)                     echo "$1" ;;
   esac

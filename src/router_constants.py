@@ -110,7 +110,7 @@ HOP_HEADERS = frozenset({
 })
 
 # ── Valid modes ────────────────────────────────────────────────────────────────
-VALID_MODES = ("anthropic", "minimax", "mix-am", "mix-ag", "mix-gm", "glm", "qwen", "mix-al", "local")
+VALID_MODES = ("anthropic", "minimax", "mix-am", "mix-am-2", "mix-ag", "mix-gm", "glm", "qwen", "mix-al", "local")
 
 # ── Port mode map ─────────────────────────────────────────────────────────────
 PORT_MODE = {
@@ -123,6 +123,7 @@ PORT_MODE = {
     8778: "qwen",
     8774: "mix-al",   # sandbox: prova mix-al senza toccare :8787
     8779: "local",   # sandbox: prova local (pura, tutto sul modello locale) senza toccare :8787
+    8780: "mix-am-2",   # sandbox: variante mix-am con enforcement deny (delega aggressiva)
 }
 _pm_override = os.environ.get("AIROUTER_PORT_MODE_JSON", "").strip()
 if _pm_override:
