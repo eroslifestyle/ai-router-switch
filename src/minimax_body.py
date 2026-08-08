@@ -143,14 +143,19 @@ def remap_body_for_minimax(raw: bytes, request=None, *,
                     log_model_fn(orig, _target, chat_id)
             else:
                 chat_id = "?"
-            # Ricorda per riscrittura SSE — consumato dal relay()
-            if orig_model_store is not None:
+            # Ricorda orig per la riscrittura SSE (consumato dal relay a stream finito).
+            # Chiave = id(request), non il fingerprint: quando resolve_fp torna
+            # "default" (session-id assente) la chiave e' CONDIVISA fra richieste, e
+            # l'orig di una richiesta haiku in volo veniva rileggero dalla richiesta
+            # opus successiva verso Anthropic -> il sidecar registrava haiku->claude-direct.
+            # id(request) isola ogni richiesta (stesso oggetto in forward_minimax e relay).
+            if orig_model_store is not None and request is not None:
                 if len(orig_model_store) > 2000:
                     _keep = orig_model_store.get("__remap__")
                     orig_model_store.clear()
                     if _keep is not None:
                         orig_model_store["__remap__"] = _keep
-                orig_model_store[chat_id] = orig
+                orig_model_store[str(id(request))] = orig
             data["model"] = _target
         for f in MINIMAX_UNSUPPORTED_FIELDS:
             data.pop(f, None)

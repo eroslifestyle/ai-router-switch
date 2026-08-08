@@ -118,17 +118,13 @@ class StreamingRelay:
         # di remap costruito dal sidecar, che per mix-am ripiegava sul default
         # "claude-direct" anche quando l'esecutore era MiniMax: la telemetria
         # riportava il provider sbagliato (fix 2026-07-25).
-        # FIX E: leggi e rimuovi orig_model da riscrivere nello SSE/non-stream
-        # NB: i call site passano spesso chat_fp sbagliato (es 'default' vs IP reale).
-        # Soluzione: prova la chiave esplicita; se manca e c'è esattamente UN orig
-        # pending in _request_orig_model, usa quello (single-user loopback tipico).
-        # FIX D38 2026-07-02: escludi la chiave interna '__remap__' (indice remap, dict)
-        # dal fallback single-entry — altrimenti il dict finisce riscritto in body['model'].
-        orig_model = self.request_orig_model.pop(chat_fp_for_rewrite, None)
-        if orig_model is None:
-            _pending = [k for k in self.request_orig_model if k != "__remap__"]
-            if len(_pending) == 1:
-                orig_model = self.request_orig_model.pop(_pending[0])
+        # FIX E: leggi e rimuovi orig_model da riscrivere nello SSE/non-stream.
+        # Chiave = id(self.request): stesso oggetto request che remap_body_for_minimax
+        # (in forward_minimax) ha usato per scrivere, quindi correspondence 1:1 e niente
+        # piu' race sul fingerprint "default" condiviso. Per il path Anthropic (nessuna
+        # scrittura nel dict) pop ritorna None e _modelli_orig_e_finale ricade sul
+        # modello del body, che e' quello corretto.
+        orig_model = self.request_orig_model.pop(str(id(self.request)), None)
         # DEBUG: per errori 4xx/5xx (NON 429 rate-limit), cattura body in chiaro.
         # Per gli errori il body è piccolo e non streaming — lo logghiamo e poi
         # lo mandiamo diretto senza passare dal loop iter_any() (che consumerebbe
