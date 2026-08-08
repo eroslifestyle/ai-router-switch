@@ -98,8 +98,18 @@ def build_shrink_summary(messages: list, budget: int) -> str:
     return out[:max(0, budget - len(hard) - 1)] + chr(10) + hard
 
 
-def _smart_truncate(msg: dict, max_len: int = TRUNCATE_MAX_LEN) -> str:
-    """Truncation intelligente: preserva tool_use integrali, tronca resto."""
+def _smart_truncate(msg: dict, max_len: int = None) -> str:
+    """Truncation intelligente: preserva tool_use integrali, tronca resto.
+
+    `max_len=None` e non `= TRUNCATE_MAX_LEN`: il default di un parametro viene
+    valutato UNA volta, all'import, quindi legare qui la costante la rendeva non
+    tarabile — cambiarla a runtime aggiornava i conteggi alle righe 147/158/161,
+    che la leggono ogni volta, ma NON la lunghezza di troncatura, ferma al valore
+    di partenza. Il risultato era un comportamento misto e silenzioso, che
+    falsava qualunque tentativo di misurare l'effetto della soglia (2026-08-08).
+    """
+    if max_len is None:
+        max_len = TRUNCATE_MAX_LEN
     content = msg.get("content", "")
     tool_use = msg.get("tool_use", [])
     # niente `role` qui: il prefisso "[ruolo]:" lo mettono i chiamanti (righe 43/51/57)
