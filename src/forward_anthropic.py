@@ -217,6 +217,19 @@ async def forward_anthropic(request, body, session):
         headers.setdefault("anthropic-version", "2023-06-01")
         try:
             body_dict = json.loads(safe_body)
+            # Promozione PRIMA della riparazione: _repair_message_sequence
+            # elimina i messaggi role=system, e fino al 2026-08-08 ne buttava il
+            # contenuto (verificato: un system con "rispondi solo ANANAS" veniva
+            # ignorato dalla risposta). Ora il testo passa nel campo `system`,
+            # dove l'API Anthropic lo vuole. Il blocco si aggiunge in CODA e
+            # senza cache_control: il prompt caching lavora per prefissi, quindi
+            # la parte gia' in cache resta valida.
+            # NB: questo blocco esiste in DUE gemelle, forward_anthropic e
+            # forward_anthropic_direct. Modificarne una sola le fa divergere.
+            from router_utils import promote_system_messages
+            _promossi = promote_system_messages(body_dict)
+            if _promossi:
+                log(f"promossi {_promossi} messaggi role=system nel campo system (anthropic), {getattr(promote_system_messages, "ultimi_caratteri", 0)} caratteri")
             msgs = body_dict.get("messages", [])
             role_sys = sum(1 for m in msgs if m.get("role") == "system")
             if role_sys > 0 or msgs:
@@ -361,6 +374,19 @@ async def forward_anthropic_direct(request, body, session):
     if "/v1/messages" in request.path:
         try:
             body_dict = json.loads(safe_body)
+            # Promozione PRIMA della riparazione: _repair_message_sequence
+            # elimina i messaggi role=system, e fino al 2026-08-08 ne buttava il
+            # contenuto (verificato: un system con "rispondi solo ANANAS" veniva
+            # ignorato dalla risposta). Ora il testo passa nel campo `system`,
+            # dove l'API Anthropic lo vuole. Il blocco si aggiunge in CODA e
+            # senza cache_control: il prompt caching lavora per prefissi, quindi
+            # la parte gia' in cache resta valida.
+            # NB: questo blocco esiste in DUE gemelle, forward_anthropic e
+            # forward_anthropic_direct. Modificarne una sola le fa divergere.
+            from router_utils import promote_system_messages
+            _promossi = promote_system_messages(body_dict)
+            if _promossi:
+                log(f"promossi {_promossi} messaggi role=system nel campo system (anthropic), {getattr(promote_system_messages, "ultimi_caratteri", 0)} caratteri")
             msgs = body_dict.get("messages", [])
             role_sys = sum(1 for m in msgs if m.get("role") == "system")
             if role_sys > 0 or msgs:

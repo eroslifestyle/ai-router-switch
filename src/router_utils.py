@@ -653,3 +653,83 @@ def rotate_if_needed(path, max_bytes: int, keep: int = 1) -> bool:
         return True
     except Exception:
         return False
+
+
+def promote_system_messages(body_dict: dict) -> int:
+    """
+    Problema: _repair_message_sequence elimina i messaggi role='system' da messages
+    per conformita' all'API Anthropic (che richiede system come campo top-level),
+    ma ne perde il contenuto invece di promuoverlo.
+
+    Comportamento:
+    - Estrae il testo da ogni messaggio role='system' in body_dict['messages']
+    - Il testo viene aggiunto al campo body_dict['system'] IN CODA, mai in testa
+    - Non modifica mai il contenuto preesistente di system
+    - Rimuove i messaggi system dall'array messages
+
+    Valore di ritorno:
+    - Numero di messaggi promossi (0 se nessuno o in caso di errore)
+
+    Questa trasformazione e' accessoria: non deve mai impedire l'inoltro della richiesta.
+    """
+    try:
+        messages = body_dict.get('messages')
+        if not messages:
+            return 0
+
+        promoted_count = 0
+        system_texts = []
+
+        for msg in messages:
+            if not (isinstance(msg, dict) and msg.get('role') == 'system'):
+                continue
+
+            content = msg.get('content', '')
+
+            if isinstance(content, str):
+                text = content
+            elif isinstance(content, list):
+                parts = []
+                for block in content:
+                    if isinstance(block, dict) and block.get('type') == 'text':
+                        text_part = block.get('text', '')
+                        if text_part:
+                            parts.append(text_part)
+                text = '\n'.join(parts)
+            else:
+                text = ''
+
+            if text and text.strip():
+                system_texts.append(text)
+
+        if not system_texts:
+            return 0
+
+        promoted_count = len(system_texts)
+        combined_text = '\n\n'.join(system_texts)
+
+        # Aggiunge al campo system IN CODA, senza toccare il contenuto preesistente
+        current_system = body_dict.get('system')
+        if current_system is None:
+            body_dict['system'] = combined_text
+        elif isinstance(current_system, str):
+            body_dict['system'] = current_system + '\n\n' + combined_text
+        elif isinstance(current_system, list):
+            # Caso (c): prompt caching funziona per PREFISSI. Aggiungere un blocco in CODA
+            # senza cache_control preserva i breakpoint gia' in cache e non invalida
+            # il prefisso gia' elaborato. Non modificare MAI la lista esistente
+            # (errore gia' commesso: convertire in stringa ha azzerato la cache,
+            # facendo passare l'input da 2 token a oltre 200.000).
+            body_dict['system'].append({'type': 'text', 'text': combined_text})
+
+        # Rimuove i messaggi system da messages
+        body_dict['messages'] = [m for m in messages if not (isinstance(m, dict) and m.get('role') == 'system')]
+
+        # Il volume promosso va reso contabile: una richiesta reale ne ha
+        # portati 183 in una volta sola. Non si tronca — il contenuto e' del
+        # client — ma si misura, cosi' un eventuale gonfiamento del system
+        # prompt si vede nei log invece di essere una sorpresa in fattura.
+        promote_system_messages.ultimi_caratteri = len(combined_text)
+        return promoted_count
+    except Exception:
+        return 0

@@ -138,9 +138,17 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
     # applica _repair_message_sequence sul path ACT normale (finora mancante).
     if os.environ.get("AIROUTER_TRANSITION_FILTERS", "0") == "1":
         try:
-            from router_utils import _repair_message_sequence
+            from router_utils import _repair_message_sequence, promote_system_messages
             _d = json.loads(new_body)
             if isinstance(_d.get("messages"), list):
+                # Promozione prima della riparazione: _repair_message_sequence
+                # elimina i messaggi role=system e fino al 2026-08-08 ne buttava
+                # il contenuto. L'endpoint Anthropic-compatible di MiniMax onora
+                # il campo `system` top-level, anche come lista di blocchi con
+                # cache_control, quindi il testo promosso arriva a destinazione.
+                _promossi = promote_system_messages(_d)
+                if _promossi:
+                    _log(f"promossi {_promossi} messaggi role=system nel campo system (minimax), {getattr(promote_system_messages, "ultimi_caratteri", 0)} caratteri")
                 _d["messages"] = _repair_message_sequence(_d["messages"])
                 new_body = json.dumps(_d).encode()
         except Exception as _e:
