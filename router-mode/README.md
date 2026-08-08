@@ -5,7 +5,7 @@
 Standalone control panel for the AI Router (`:8787`) with 9 orchestration modes. Provides both CLI and GUI interfaces to switch modes and monitor router health in real-time.
 
 **Location**: `~/.claude/router-mode/`  
-**Modes**: anthropic · minimax · glm · qwen · mix-am · mix-gm · mix-ag · mix-al · local  
+**Modes**: anthropic · minimax · glm · qwen · mix-am · mix-am-2 · mix-gm · mix-ag · mix-al · local
 **Proxy**: `:9988` (CORS bypass for browser fetch)
 
 ---
@@ -19,7 +19,7 @@ Standalone Python script for mode management and status queries.
 **Commands**:
 ```bash
 routestats status              # Show current mode + health OK/OFFLINE
-routestats modes               # List all 9 modes with executors
+routestats modes               # List all 10 modes with executors
 routestats switch <mode>       # Switch mode via proxy POST /admin/mode/{mode}
 routestats card                # Launch card.py GUI
 routestats json                # Output state as JSON
@@ -144,10 +144,14 @@ Planned: badge in GNOME topbar showing `MODE: mix-am` with quick-switch dropdown
 |------|------|--------------|----------|-----------|----------|
 | **anthropic** | 🔵 | Claude Sonnet | Claude Haiku | — | Default, highest quality, full Claude stack |
 | **minimax** | 🟠 | MiniMax M3 | MiniMax M2.7 | — | Cost-optimized, pure MiniMax |
-| **mix-am** | 🔷 | Claude (THINK) | MiniMax M2.7 | same model as THINK | Balanced: smart planning + fast exec |
 | **glm** | 🟢 | GLM 5.2 (THINK) | GLM 4.7 | same model as THINK | Z.ai only, context-aware tiering |
+| **qwen** | 🟣 | Qwen 3.7-max | Qwen coder-plus | same model as THINK | Alibaba Model Studio pure, DashScope key |
+| **mix-am** | 🔷 | Claude (THINK) | MiniMax M2.7 | same model as THINK | Balanced: smart planning + fast exec |
+| **mix-am-2** | 🔷⚡ | Claude (THINK) | MiniMax M2.7 | same model as THINK | MixAM + delega forzata (deny su coding del THINK) |
 | **mix-gm** | 🟢🟠 | GLM 5.2 (THINK) | MiniMax M2.7 (ACT) | same model as THINK | Hybrid: GLM reasoning + MiniMax execution |
 | **mix-ag** | 🔵🟢 | Claude (THINK) | GLM 4.7 (ACT) | same model as THINK | Hybrid: Anthropic planning + GLM cost-efficiency |
+| **mix-al** | 🔵🖥 | Claude (THINK) | code-max (local) | same model as THINK | Hybrid: Anthropic planning + local LLM exec |
+| **local** | 🖥️ | code-max | code-max | same model as THINK | Pure local LLM (llama.cpp), full isolation |
 
 The THINK model is always chosen manually by the user; it is never fixed in code and
 never escalates on its own. VERIFY has no separate route — it is performed by the same

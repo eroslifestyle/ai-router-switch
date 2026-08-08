@@ -37,12 +37,21 @@ MODES = [
     {"id": "mix-am",    "icon": "🔷", "label": "MixAM",
      "desc": "Anthropic orchestra + MiniMax esegue.",
      "exec": "Anthropic orch · M2.7 act"},
+    {"id": "mix-am-2",  "icon": "🔷⚡", "label": "MixAM-2",
+     "desc": "MixAM con delega forzata (deny su coding del THINK).",
+     "exec": "Anthropic orch · M2.7 act (deny)"},
     {"id": "mix-gm",    "icon": "🟢🟠", "label": "MixGM",
      "desc": "GLM-5.2 think → MiniMax act → GLM verify.",
      "exec": "GLM-5.2 think · M2.7 act"},
     {"id": "mix-ag",    "icon": "🔵🟢", "label": "MixAG",
      "desc": "Anthropic think → GLM tiered act → Anthropic verify.",
      "exec": "Anthropic orch · GLM tiered act"},
+    {"id": "mix-al",    "icon": "🔵🖥", "label": "MixAL",
+     "desc": "Anthropic think + LLM locale (code-max) act.",
+     "exec": "Anthropic think · code-max act"},
+    {"id": "local",     "icon": "🖥️", "label": "Local",
+     "desc": "Tutto su LLM locale (code-max). Isolamento totale, nessuna escalation remota.",
+     "exec": "code-max (think+act)"},
 ]
 def http_get(url, timeout=5):
     try:
