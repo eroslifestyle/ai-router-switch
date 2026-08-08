@@ -237,6 +237,15 @@ def process_file(jsonl_path: Path, learner: OutcomeLearner, offset: int) -> int:
                     continue
                 try:
                     entry = json.loads(line)
+                    # Sonde e test non sono traffico reale (2026-08-08, audit D5):
+                    # la policy marcava degradato un modello anche sulla base di
+                    # richieste generate da noi. Nel sidecar il 6,3% delle entry
+                    # storiche erano sonde, e senza filtro la modalita' minimax
+                    # risultava al 95,3% di errori mentre le richieste vere erano
+                    # 9 con zero errori. Il campo lo scrive log_router_usage
+                    # quando la richiesta porta l'header x-airouter-synthetic.
+                    if entry.get("synthetic"):
+                        continue
                     model = entry.get("final") or entry.get("orig") or DEFAULT_MODEL
                     task_class = entry.get("task_class") or DEFAULT_TASK_CLASS
                     outcome = entry.get("outcome") or "ok"

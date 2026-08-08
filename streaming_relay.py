@@ -464,6 +464,14 @@ class StreamingRelay:
                             self.log_fn(f"cache: OK bp=s{_cc_s}/m{_cc_m}/t{_cc_t} read={_usage['cache_read_input_tokens']} creation={_usage['cache_creation_input_tokens']} input={_usage['input_tokens']}")
                 except Exception:
                     pass
+                _is_synthetic = False
+                try:
+                    _is_synthetic = (
+                        self.request.headers.get("x-airouter-synthetic", "").strip().lower()
+                        in ("1", "true", "yes")
+                    )
+                except Exception:
+                    pass
                 self.log_router_usage_fn(
                     chat_id=chat_fp_for_rewrite,
                     orig=_orig,
@@ -483,6 +491,11 @@ class StreamingRelay:
                     # il campo semplicemente non compare nell'entry.
                     ttfb_ms=_ttfb_ms,
                     total_ms=(time.monotonic() - _t_start) * 1000.0,
+                    # Sonde e test: chi genera traffico sintetico manda
+                    # 'x-airouter-synthetic: 1' e l'entry viene marcata, cosi' le
+                    # analisi per modalita' possono escluderla invece di doverla
+                    # indovinare dal fingerprint del client.
+                    synthetic=_is_synthetic,
                 )
             except Exception:
                 pass

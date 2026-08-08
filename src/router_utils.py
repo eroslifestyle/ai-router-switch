@@ -374,7 +374,8 @@ def collect_tools_stats(body: bytes) -> dict | None:
 def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
                      mode: str, client: str = "?", status: int = 200, path: str = "",
                      tools: dict | None = None, body=None,
-                     ttfb_ms: float | None = None, total_ms: float | None = None):
+                     ttfb_ms: float | None = None, total_ms: float | None = None,
+                     synthetic: bool = False):
     if not final or final == "?":
         final = "router-internal"
     try:
@@ -401,6 +402,14 @@ def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
             entry["ttfb_ms"] = round(float(ttfb_ms), 1)
         if total_ms is not None:
             entry["total_ms"] = round(float(total_ms), 1)
+        # Sonde e test (2026-08-08, audit A7). Il 6,3% delle entry storiche
+        # (1.280 su 20.348 in 7 giorni) veniva da sonde manuali e suite di test, e
+        # falsava ogni analisi per modalita': senza filtro la modalita' minimax
+        # risultava al 95,3% di errori mentre le richieste reali erano 9, con zero
+        # errori. E' la quarta volta che accade in questo progetto. Il campo si
+        # scrive solo quando e' vero, cosi' le entry normali restano identiche.
+        if synthetic:
+            entry["synthetic"] = True
         # Self-healing (Fase 1): outcome reale (ok|empty|truncated|tool_only|error) + task_class.
         # Best-effort: se self_healing.sensor non importa, outcome/task_class restano assenti.
         try:
