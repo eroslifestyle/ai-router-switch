@@ -331,6 +331,42 @@ self-healing. Senza questa marcatura le sonde falsano le metriche per modalità:
 risultava al 95,3% di errori mentre le richieste reali erano nove, tutte
 riuscite. Valori accettati: `1`, `true`, `yes`.
 
+### Contratto di risposta — cosa varia fra le modalità
+
+Il router **non uniforma** il corpo della risposta: passa i byte come li riceve
+dall'upstream (`auto_decompress=False`, scelta deliberata — la libreria Brotli
+locale è rotta e decomprimere romperebbe ogni risposta `br`). Le differenze qui
+sotto nascono quindi dai provider, non dal proxy. Misura del 2026-08-08, un
+ciclo di `sviluppo/tools/probe_modes.py`, richieste identiche **senza**
+`Accept-Encoding`:
+
+| Modalità | Content-Encoding | Formato `id` | Provider dell'id |
+|---|---|---|---|
+| `anthropic` | gzip | `msg_…` | Anthropic |
+| `minimax` | in chiaro | esadecimale nudo | MiniMax |
+| `mix-am` | in chiaro | esadecimale nudo | MiniMax |
+| `mix-gm` | in chiaro | esadecimale nudo | MiniMax |
+| `glm` | gzip | `msg_…` | z.ai |
+| `mix-ag` | gzip | `msg_…` | z.ai |
+| `qwen` | gzip | `msg_…` | Alibaba |
+| `mix-al` | in chiaro | `resp_<base64>` | LiteLLM locale |
+| `local` | in chiaro | `resp_<base64>` | LiteLLM locale |
+
+Conseguenze pratiche:
+
+- Un client che **non negozia** la compressione riceve byte illeggibili da
+  quattro modalità su nove. Gli strumenti diagnostici vanno scritti per
+  entrambe le forme (o si invii sempre `Accept-Encoding: identity`).
+- I formati di `id` sono **tre**, non due: chi assume il prefisso `msg_` o una
+  lunghezza ragionevole va incontro a sorprese su `mix-al`/`local` (l'id
+  LiteLLM incorpora metadati del provider in base64) e sulle tre modalità
+  MiniMax (nessun prefisso).
+- L'unica cosa uniforme su tutte e nove è l'header `x-ai-actual-model`.
+
+Il comportamento è fissato da `sviluppo/tests/test_contratto_risposta.py`, che
+è un test di **caratterizzazione**: se diventa rosso, il contratto è cambiato e
+va deciso se il cambiamento è voluto — non è detto che sia un bug.
+
 ### Latenza per modalità
 
 ```bash
