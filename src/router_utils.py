@@ -259,8 +259,21 @@ def _minimax_alert(msg: str):
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 def log(msg: str):
+    # Il RID (request ID) permette di correlare questa riga di log con il file
+    # sidecar router-usage.jsonl e con il BUG-CATALOG. Il formato resta
+    # retrocompatibile: il timestamp e' il primo elemento (parser in
+    # sviluppo/tools/compact_correlate.py fa match su timestamp a inizio riga).
     from router_constants import LOG_FILE
-    line = f"[{time.strftime('%Y-%m-%dT%H:%M:%S')}] {msg}"
+    rid = ""
+    try:
+        # Import dentro il try: se il modulo mancasse, il logging deve
+        # continuare a funzionare senza correlazione, mai fallire.
+        from request_context import get_request_id
+        rid = get_request_id() or ""
+    except Exception:
+        pass
+    prefix = "[" + rid + "] " if rid else ""
+    line = f"[{time.strftime('%Y-%m-%dT%H:%M:%S')}] {prefix}{msg}"
     try:
         with open(LOG_FILE, "a") as f:
             f.write(line + "\n")
@@ -410,6 +423,17 @@ def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
         # scrive solo quando e' vero, cosi' le entry normali restano identiche.
         if synthetic:
             entry["synthetic"] = True
+        # Correlazione (2026-08-08): lo stesso id compare nelle righe di
+        # ai-router.log e nell'header x-airouter-request-id della risposta.
+        # Prima non esisteva alcun modo di collegare un errore alla sua
+        # richiesta se non incrociando i timestamp a mano.
+        try:
+            from request_context import get_request_id
+            _rid = get_request_id()
+            if _rid:
+                entry["request_id"] = _rid
+        except Exception:
+            pass
         # Self-healing (Fase 1): outcome reale (ok|empty|truncated|tool_only|error) + task_class.
         # Best-effort: se self_healing.sensor non importa, outcome/task_class restano assenti.
         try:

@@ -211,6 +211,17 @@ class StreamingRelay:
                 resp.headers["x-ai-actual-model"] = str(_actual_model)
         except Exception:
             pass  # la telemetria non deve mai impedire una risposta
+        # x-airouter-request-id (2026-08-08): stesso id che compare nelle righe
+        # di ai-router.log e nel campo request_id del sidecar. Serve a chiudere
+        # il triangolo: dato un errore visto dal client, si risale alla riga di
+        # log e all'entry di telemetria senza incrociare i timestamp a mano.
+        try:
+            from request_context import get_request_id, HEADER_NAME
+            _rid = get_request_id()
+            if _rid:
+                resp.headers[HEADER_NAME] = _rid
+        except Exception:
+            pass
         # FIX #6: NON usare enable_chunked_encoding() - aiohttp lo fa automaticamente
         # quando Transfer-Encoding non è in headers (già skippato da HOP_HEADERS).
         # Evita doppia codifica/conflitto chunked.

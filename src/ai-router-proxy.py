@@ -246,6 +246,13 @@ def _is_pinnable_fp(fp: str) -> bool:
 
 
 async def handle(request):
+    # Ogni richiesta riceve un id breve che finisce nelle righe di ai-router.log, nel sidecar router-usage.jsonl
+    # e nell'header di risposta, così da poter ricostruire la storia di una singola richiesta senza incrociare i timestamp a mano.
+    try:
+        from request_context import set_request_id, new_request_id
+        set_request_id(new_request_id())
+    except Exception:
+        pass
     fp = _resolve_chat_fingerprint(request)
     ct = (request.headers.get("Content-Type") or "").lower()
     if "multipart/form-data" in ct:
