@@ -45,6 +45,7 @@ MODES = [
     {"id": "anthropic", "icon": "🔵", "label": "Anthropic", "exec": "Claude Opus/Sonnet"},
     {"id": "minimax", "icon": "🟠", "label": "MiniMax", "exec": "M3 orch / M2.7 act"},
     {"id": "mix-am", "icon": "🔷", "label": "MixAM", "exec": "Anthropic THINK + MiniMax ACT"},
+    {"id": "mix-am-2", "icon": "🔷⚡", "label": "MixAM-2", "exec": "MixAM + delega forzata (deny)"},
     {"id": "glm", "icon": "🟢", "label": "GLM", "exec": "GLM-5.2 orch / tiering"},
     {"id": "qwen", "icon": "🟣", "label": "Qwen", "exec": "3.7-max / coder-plus"},
     {"id": "mix-gm", "icon": "🟢🟠", "label": "MixGM", "exec": "GLM-5.2 THINK + MiniMax ACT"},
@@ -374,7 +375,7 @@ class Card(QWidget):
         spacer1.setFixedHeight(8)
         body_layout.addWidget(spacer1)
 
-        # ── Sezione MULTI (2x2, blocco centrato) ────────────────────
+        # ── Sezione MULTI (3x2, blocco centrato) ────────────────────
         multi_lbl = QLabel("MULTI")
         multi_lbl.setFont(QFont("Sans", 9, QFont.Weight.Bold))
         multi_lbl.setStyleSheet("background:transparent;color:#5a6470")
@@ -382,12 +383,12 @@ class Card(QWidget):
 
         multi_grid = QGridLayout()
         multi_grid.setSpacing(SPACING)
-        multi_ids = ["mix-am", "mix-ag", "mix-gm", "mix-al"]
+        multi_ids = ["mix-am", "mix-am-2", "mix-ag", "mix-gm", "mix-al"]
         for i, mid in enumerate(multi_ids):
             m = next(x for x in MODES if x["id"] == mid)
             card = ModeCard(m, self._do_switch)
             self._cards[mid] = card
-            multi_grid.addWidget(card, i // 2, i % 2)
+            multi_grid.addWidget(card, i // 3, i % 3)
         multi_row = QHBoxLayout()
         multi_row.setContentsMargins(0, 0, 0, 0)
         multi_row.addStretch()
