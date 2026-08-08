@@ -123,7 +123,9 @@ PORT_MODE = {
     8778: "qwen",
     8774: "mix-al",   # sandbox: prova mix-al senza toccare :8787
     8779: "local",   # sandbox: prova local (pura, tutto sul modello locale) senza toccare :8787
-    8780: "mix-am-2",   # sandbox: variante mix-am con enforcement deny (delega aggressiva)
+    # 8780 NON usabile: occupata da chatterbox-gpu (uvicorn su 0.0.0.0:8780, servizio
+    # TTS in /srv/multimodal). Il router falliva il bind con Errno 98 a ogni avvio.
+    8781: "mix-am-2",   # sandbox: variante mix-am con enforcement deny (delega aggressiva)
 }
 _pm_override = os.environ.get("AIROUTER_PORT_MODE_JSON", "").strip()
 if _pm_override:

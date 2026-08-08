@@ -14,7 +14,10 @@ from paths import config_home, ensure_dir
 
 PYTHON_MIN = (3, 10)
 REQUIRED = ["aiohttp", "brotli", "multidict", "PIL"]
-FIXED_PORTS = list(range(8771, 8781))
+# Elenco esplicito, non un range: 8780 e' saltata perche' occupata da un altro
+# servizio (chatterbox-gpu su 0.0.0.0:8780) e mix-am-2 usa la 8781. Un range
+# nasconderebbe il salto e reintrodurrebbe il conflitto al primo refactor.
+FIXED_PORTS = [8771, 8772, 8773, 8774, 8775, 8776, 8777, 8778, 8779, 8781]
 DYNAMIC_PORT = 8787
 PORTS_STR = " ".join(map(str, FIXED_PORTS + [DYNAMIC_PORT]))
 
