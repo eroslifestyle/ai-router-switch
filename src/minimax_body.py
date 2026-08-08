@@ -89,26 +89,13 @@ def strip_server_tools_for_minimax(data: dict) -> None:
             # "unknown tool" su MiniMax. Va riallineato, non basta lo strip.
             from tool_isolation import sanitize_tool_choice
             sanitize_tool_choice(data)
-    # defer_loading senza tool di ricerca = stato ibrido (2026-08-08).
-    # Il tool deferral di Claude Code ha DUE ingredienti: i tool marcati
-    # `defer_loading: true` e un tool di ricerca che li espande, della forma
-    # {"type": "tool_search_tool_regex_20251119", ...}. Quest'ultimo non ha
-    # `input_schema` e non e' fra i protetti, quindi lo strip qui sopra lo
-    # elimina — lasciando pero' i marcatori sugli altri. Verso MiniMax
-    # partiva cosi' un body con tool "da caricare dopo" e nulla che potesse
-    # caricarli: i tool restavano irraggiungibili. Regola: o entrambi gli
-    # ingredienti, o nessuno. MiniMax non supporta il tool search, quindi si
-    # toglie anche il marcatore.
-    tools_finali = data.get("tools")
-    if isinstance(tools_finali, list):
-        ha_ricerca = any(
-            isinstance(t, dict) and "tool_search" in str(t.get("type", ""))
-            for t in tools_finali
-        )
-        if not ha_ricerca:
-            for t in tools_finali:
-                if isinstance(t, dict):
-                    t.pop("defer_loading", None)
+    # Regola: o entrambi gli ingredienti del tool deferral, o nessuno. Lo strip
+    # qui sopra porta via il tool di ricerca (privo di input_schema) e MiniMax
+    # non lo supporta comunque, quindi va tolto anche il marcatore dagli altri.
+    # La regola vale identica per glm e qwen: sta in tool_isolation e non piu'
+    # a mano qui, perche' due copie della stessa logica divergono col tempo.
+    from tool_isolation import sanitize_defer_loading
+    sanitize_defer_loading(data)
     for m in data.get("messages", []):
         c = m.get("content")
         if not isinstance(c, list):

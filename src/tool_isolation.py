@@ -109,6 +109,36 @@ def sanitize_tool_choice(data: dict) -> None:
         data.pop("tool_choice", None)
 
 
+def sanitize_defer_loading(data: dict) -> bool:
+    """Rimuove i marcatori `defer_loading` rimasti orfani. Muta `data`.
+
+    Regola: o entrambi gli ingredienti, o nessuno. Il tool deferral di Claude
+    Code ne richiede DUE: i tool marcati `{"defer_loading": true}` e un tool di
+    ricerca che li espande (il suo `type` contiene "tool_search"). Quest'ultimo
+    non ha `input_schema`, quindi lo strip lo classifica come server-tool
+    Anthropic e lo rimuove verso minimax/glm/qwen — lasciando pero' i marcatori
+    sugli altri. Il body che ne esce dichiara tool "da caricare dopo" e non
+    offre nulla che possa caricarli: quei tool restano irraggiungibili.
+    """
+    tools = data.get("tools")
+    if not isinstance(tools, list):
+        return False
+
+    ha_ricerca = any(
+        isinstance(t, dict) and "tool_search" in str(t.get("type", ""))
+        for t in tools
+    )
+    if ha_ricerca:
+        return False
+
+    rimossi = False
+    for t in tools:
+        if isinstance(t, dict) and "defer_loading" in t:
+            t.pop("defer_loading")
+            rimossi = True
+    return rimossi
+
+
 def filter_tools_for_backend(body: bytes, backend: str) -> bytes:
     """Rimuove dall'array `tools` i tool brandizzati di provider DIVERSI da
     `backend` ('anthropic'|'minimax'|'glm'). I tool locali di Claude Code
@@ -146,12 +176,24 @@ def filter_tools_for_backend(body: bytes, backend: str) -> bytes:
         _cc = next((t.get("cache_control") for t in reversed(tools)
                     if isinstance(t, dict) and t not in kept and t.get("cache_control")), None)
         if _cc and not any(isinstance(t, dict) and t.get("cache_control") for t in kept):
-            kept[-1] = {**kept[-1], "cache_control": _cc}
+            # Il breakpoint va sull'ultimo elemento di `kept` CHE SIA UN DICT.
+            # Un client puo' mandare un `tools` con un elemento spurio in coda:
+            # `kept[-1]` era allora una stringa e lo spread sollevava TypeError,
+            # che nessun chiamante intercetta (500 al client). Il gemello in
+            # qwen_tool_trim.py questa guardia ce l'aveva gia'.
+            _i = next((i for i in reversed(range(len(kept))) if isinstance(kept[i], dict)), None)
+            if _i is not None:
+                kept[_i] = {**kept[_i], "cache_control": _cc}
         data["tools"] = kept
     else:
         data.pop("tools", None)
         data.pop("tool_choice", None)
     sanitize_tool_choice(data)
+    # Lo strip appena eseguito puo' aver rimosso il tool di ricerca (privo di
+    # input_schema, quindi classificato come server-tool Anthropic) lasciando
+    # orfani i marcatori defer_loading sugli altri tool. Qui e non prima del
+    # return anticipato: se non rimuoviamo nulla, il body non va toccato.
+    sanitize_defer_loading(data)
     return json.dumps(data).encode()
 
 

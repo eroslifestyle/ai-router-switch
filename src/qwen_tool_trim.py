@@ -11,7 +11,7 @@ per richiesta. Misurato il 2026-08-04.
 import json
 import os
 from debug_catalog import record_event
-from tool_isolation import sanitize_tool_choice
+from tool_isolation import sanitize_defer_loading, sanitize_tool_choice
 
 
 _HEAVY_CONNECTOR_PREFIX = 'mcp__claude_ai_'
@@ -78,4 +78,8 @@ def strip_heavy_connectors(body: bytes) -> bytes:
         data.pop('tool_choice', None)
     
     sanitize_tool_choice(data)
+    # Il filtro per backend gira PRIMA di questo strip (qwen_backend.py) e puo'
+    # aver gia' portato via il tool di ricerca: i marcatori vanno ripuliti anche
+    # qui, altrimenti restano orfani sui connettori superstiti.
+    sanitize_defer_loading(data)
     return json.dumps(data).encode()
