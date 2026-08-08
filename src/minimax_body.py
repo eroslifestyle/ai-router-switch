@@ -8,6 +8,27 @@ import os
 
 MINIMAX_MODEL = os.environ.get("AIROUTER_MINIMAX_MODEL", "MiniMax-M3")
 MINIMAX_UNSUPPORTED_FIELDS = ("context_management", "mcp_servers", "thinking")
+# Soglia minima imposta a max_tokens verso MiniMax. Se il client ne chiede meno,
+# la richiesta viene innalzata a questo valore.
+#
+# Perche' esiste (documentato il 2026-08-08, audit A4 — prima non c'era alcun
+# commento in un file per il resto densamente commentato): e' un rimedio alle
+# risposte vuote da troncamento nel thinking. MiniMax spende i primi token in
+# blocchi di ragionamento; con un tetto basso il generatore si ferma prima di
+# emettere un solo blocco di testo e il client riceve una risposta senza
+# contenuto, con status 200. E' la classe di bug piu' inseguita in questo
+# progetto.
+#
+# Perche' NON si toglie: l'ipotesi che sprecasse quota e' stata SMENTITA dalla
+# misura sul traffico reale (7 giorni, mix-am): solo 8 risposte su 17.468 hanno
+# esattamente 1024 token di output, e il 71,9% sta sotto la soglia, perche' i
+# client mandano max_tokens alto e l'innalzamento non li tocca mai. Il costo
+# reale e' quindi trascurabile; il beneficio e' evitare una classe di
+# fallimenti silenziosi.
+#
+# Resta una deviazione dal contratto API, e colpisce le richieste piccole: con
+# max_tokens=8 si generano 1024 token, 128 volte il richiesto. Per questo ogni
+# innalzamento viene ora LOGGATO: e' contabile, non piu' invisibile.
 MINIMAX_MIN_MAX_TOKENS = int(os.environ.get("AIROUTER_MINIMAX_MIN_MAX_TOKENS", "1024"))
 
 
@@ -134,6 +155,12 @@ def remap_body_for_minimax(raw: bytes, request=None, *,
             _mt = int(data.get("max_tokens", 0) or 0)
             if 0 < _mt < MINIMAX_MIN_MAX_TOKENS:
                 data["max_tokens"] = MINIMAX_MIN_MAX_TOKENS
+                # Loggato dal 2026-08-08 (audit A4): l'innalzamento avveniva in
+                # silenzio, quindi non era possibile sapere quanto spesso
+                # accadesse ne' quanto costasse. Ora e' contabile: basta un
+                # grep 'max_tokens innalzato' sul log del router.
+                _log(f"max_tokens innalzato: {_mt} -> {MINIMAX_MIN_MAX_TOKENS} "
+                     f"(minimo per evitare le risposte vuote da troncamento nel thinking)")
         except (TypeError, ValueError):
             pass
         return json.dumps(data).encode()
