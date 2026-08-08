@@ -42,6 +42,43 @@ def _normalize(snippet):
     return s.strip()
 
 
+# Campi del catalogo che possono contenere il testo dell'errore, in ordine di
+# preferenza. `upstream_error` e' quello che le entry reali usano davvero: le
+# 240 entry di debug-errors.jsonl non hanno mai ne' `snippet` ne' `error`
+# (verificato il 2026-08-08 contando le chiavi). Cercando solo quei due la
+# signature restava sempre la stringa vuota, e i ticket finivano tutti con
+# l'md5 del nulla — d41d8cd9. Gli altri nomi restano per i cataloghi di test e
+# per eventuali produttori futuri.
+CAMPI_TESTO_ERRORE = ("snippet", "error", "upstream_error", "note")
+
+# Campi che descrivono la richiesta e non il testo dell'errore: servono come
+# discriminante di riserva quando il testo manca del tutto. Senza, due bug
+# diversi ma entrambi senza testo collasserebbero sullo stesso ticket,
+# sovrascrivendone storia e tentativi.
+CAMPI_DISCRIMINANTI = ("mode", "path", "stage", "status", "upstream_status")
+
+
+def _signature_entry(entry):
+    """Ricava la signature di raggruppamento di una entry del catalogo.
+
+    Prende il primo campo di testo disponibile; se sono tutti vuoti, ripiega su
+    una combinazione dei campi che descrivono la richiesta, cosi' la signature
+    non e' mai vuota e bug diversi restano distinti.
+    """
+    for campo in CAMPI_TESTO_ERRORE:
+        valore = entry.get(campo)
+        if valore:
+            normalizzata = _normalize(str(valore))
+            if normalizzata:
+                return normalizzata
+    coppie = [f"{c}={entry.get(c)}" for c in CAMPI_DISCRIMINANTI if entry.get(c)]
+    if coppie:
+        return _normalize("|".join(coppie))
+    # Nemmeno un campo utile: si marca esplicitamente invece di produrre una
+    # stringa vuota, che darebbe di nuovo l'md5 del nulla.
+    return "senza-testo-e-senza-contesto"
+
+
 def recurring_bugs(catalog, min_count=3):
     """Find groups of recurring bugs in the catalog.
 
@@ -52,8 +89,7 @@ def recurring_bugs(catalog, min_count=3):
     groups = {}
     for entry in catalog:
         kind = entry.get("kind")
-        snippet = entry.get("snippet") or entry.get("error") or ""
-        signature = _normalize(snippet)
+        signature = _signature_entry(entry)
         key = (kind, signature)
         if key not in groups:
             groups[key] = {"entries": [], "last_ts": ""}
@@ -128,6 +164,13 @@ def make_ticket(bug):
     suspected files, reproduction hint, suggested branch, and status.
     """
     signature = bug["signature"]
+    if not signature:
+        # Guardia esplicita: una signature vuota darebbe l'md5 del nulla
+        # (d41d8cd9) per QUALUNQUE bug, e i ticket si sovrascriverebbero a
+        # vicenda perdendo storia e tentativi. E' successo davvero: i tre
+        # ticket in ~/.claude/self-fix/ avevano tutti quel suffisso.
+        # Il fallback usa il campione, cosi' bug diversi restano distinti.
+        signature = _signature_entry(bug.get("sample") or {})
     hash8 = hashlib.md5(signature.encode()).hexdigest()[:8]
     kind = bug["kind"]
     ticket_id = f"{kind}-{hash8}"
@@ -135,7 +178,13 @@ def make_ticket(bug):
     ticket = {
         "id": ticket_id,
         "kind": kind,
-        "symptom": bug["sample"].get("snippet") or bug["sample"].get("error") or "",
+        # Stessa catena di campi della signature: cercando solo snippet/error
+        # il sintomo restava vuoto su ogni ticket reale, perche' le entry usano
+        # upstream_error.
+        "symptom": next(
+            (str(bug["sample"].get(c)) for c in CAMPI_TESTO_ERRORE if bug["sample"].get(c)),
+            "",
+        ),
         "count": bug["count"],
         "mode": bug["sample"].get("mode"),
         "suspected_files": _suspected_files(bug["sample"]),

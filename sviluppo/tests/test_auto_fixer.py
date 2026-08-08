@@ -272,3 +272,101 @@ def test_make_ticket_symptom_ricade_su_error():
     assert result["symptom"] == expected_symptom, (
         f"Atteso symptom '{expected_symptom}', Ottenuto: '{result['symptom']}'"
     )
+
+
+# ── Fingerprint dei ticket (audit D2, 2026-08-08) ─────────────────────────────
+# I tre ticket in ~/.claude/self-fix/ avevano tutti il suffisso d41d8cd9, che e'
+# md5("")[:8]: la signature era sempre vuota perche' si cercava il testo
+# dell'errore in "snippet"/"error", campi che le entry reali non hanno mai.
+
+MD5_STRINGA_VUOTA = hashlib.md5(b"").hexdigest()[:8]
+
+
+def _bug(kind, sample, count=5):
+    """Costruisce un bug come lo produrrebbe recurring_bugs."""
+    from self_healing.auto_fixer import _signature_entry
+    return {"kind": kind, "signature": _signature_entry(sample),
+            "count": count, "sample": sample, "last_ts": "2026-08-08T00:00:00Z"}
+
+
+def test_entry_reale_non_produce_md5_della_stringa_vuota():
+    """Il caso che ha generato i tre ticket ambigui: testo solo in upstream_error."""
+    sample = {
+        "kind": "relay_error_404", "mode": "mix-am", "path": "/v1/messages",
+        "stage": "relay", "status": "404", "upstream_status": "404",
+        "upstream_error": '{"type":"error","error":{"type":"not_found_error"}}',
+    }
+    ticket = make_ticket(_bug("relay_error_404", sample))
+    assert not ticket["id"].endswith(MD5_STRINGA_VUOTA), (
+        f"Il ticket ha di nuovo l'md5 del nulla: {ticket['id']}"
+    )
+
+
+def test_bug_diversi_producono_ticket_diversi():
+    """Due errori distinti dello stesso kind non devono collassare.
+
+    Se collassassero, il secondo sovrascriverebbe storia e tentativi del primo.
+    """
+    base = {"kind": "relay_error_502", "mode": "mix-am", "path": "/v1/messages",
+            "stage": "relay", "status": "502"}
+    uno = dict(base, upstream_error="upstream connection reset by peer")
+    due = dict(base, upstream_error="gateway timeout waiting for backend")
+    t1 = make_ticket(_bug("relay_error_502", uno))
+    t2 = make_ticket(_bug("relay_error_502", due))
+    assert t1["id"] != t2["id"], f"Stesso id per bug diversi: {t1['id']}"
+
+
+def test_entry_senza_alcun_testo_resta_discriminata():
+    """Senza testo dell'errore si ripiega sui campi della richiesta."""
+    uno = {"kind": "x", "mode": "mix-am", "path": "/v1/messages", "stage": "relay"}
+    due = {"kind": "x", "mode": "qwen", "path": "/v1/messages", "stage": "relay"}
+    t1 = make_ticket(_bug("x", uno))
+    t2 = make_ticket(_bug("x", due))
+    assert t1["id"] != t2["id"], "Modalita' diverse devono dare ticket diversi"
+    assert not t1["id"].endswith(MD5_STRINGA_VUOTA)
+
+
+def test_signature_vuota_esplicita_non_passa():
+    """Anche se un chiamante passa una signature vuota, la guardia interviene."""
+    sample = {"kind": "y", "mode": "glm", "upstream_error": "boom"}
+    bug = {"kind": "y", "signature": "", "count": 3, "sample": sample,
+           "last_ts": "2026-08-08T00:00:00Z"}
+    ticket = make_ticket(bug)
+    assert not ticket["id"].endswith(MD5_STRINGA_VUOTA), (
+        f"La guardia non ha funzionato: {ticket['id']}"
+    )
+
+
+def test_il_sintomo_non_e_piu_vuoto():
+    """Il campo symptom cercava anch'esso solo snippet/error."""
+    sample = {"kind": "z", "mode": "mix-am",
+              "upstream_error": "context length exceeded"}
+    ticket = make_ticket(_bug("z", sample))
+    assert ticket["symptom"] == "context length exceeded"
+
+
+def test_snippet_ha_ancora_la_precedenza():
+    """I cataloghi che usano snippet continuano a funzionare come prima."""
+    sample = {"kind": "w", "snippet": "timeout after 30s",
+              "upstream_error": "altro testo", "mode": "anthropic"}
+    ticket = make_ticket(_bug("w", sample))
+    assert ticket["symptom"] == "timeout after 30s"
+
+
+def test_raggruppamento_su_entry_reali(tmp_path):
+    """Entry con lo stesso errore si raggruppano, entry diverse no."""
+    percorso = tmp_path / "catalogo.jsonl"
+    entries = (
+        [{"kind": "relay_error_502", "mode": "mix-am", "stage": "relay",
+          "upstream_error": f"connection reset after {i}ms", "ts": f"2026-08-0{i%9+1}"}
+         for i in range(4)]
+        + [{"kind": "relay_error_502", "mode": "mix-am", "stage": "relay",
+            "upstream_error": "gateway timeout", "ts": "2026-08-08"}
+           for _ in range(3)]
+    )
+    percorso.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+    bugs = recurring_bugs(load_bug_catalog(percorso), min_count=3)
+    # Le prime quattro condividono la signature: i numeri diventano '#'.
+    assert len(bugs) == 2, f"Attesi 2 gruppi, ottenuti {len(bugs)}"
+    ids = {make_ticket(b)["id"] for b in bugs}
+    assert len(ids) == 2, f"I due gruppi devono dare id diversi: {ids}"
