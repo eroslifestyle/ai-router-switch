@@ -39,6 +39,9 @@ AGENT_TIMEOUT_S = 1800
 HEALTH_ROUNDS_S = (30, 120, 300)
 PYTEST_TIMEOUT_S = 900
 IMPORT_TIMEOUT_S = 60
+# Pulizia F401 prima del gate D: opera su pochi file gia' in cache del disco,
+# 30 s sono un tetto largo. Vedi _pulisci_import_inutilizzati.
+RUFF_FIX_TIMEOUT_S = 30
 
 
 def _log(msg):
@@ -220,6 +223,73 @@ Non aggiungere dipendenze nuove.
         return False
 
 
+def _dettaglio_eccezione(exc):
+    """Rende leggibile un'eccezione di sottoprocesso.
+
+    'failed:exception-CalledProcessError' da solo non dice ne' quale comando e'
+    fallito ne' perche': era il caso di due dei tre ticket. Qui si estraggono
+    comando, codice di uscita e stderr quando ci sono.
+    """
+    parti = [f"{type(exc).__name__}: {exc}"]
+    cmd = getattr(exc, "cmd", None)
+    if cmd:
+        parti.append(f"cmd={cmd if isinstance(cmd, str) else ' '.join(map(str, cmd))}")
+    rc = getattr(exc, "returncode", None)
+    if rc is not None:
+        parti.append(f"rc={rc}")
+    for nome in ("stderr", "output", "stdout"):
+        val = getattr(exc, nome, None)
+        if not val:
+            continue
+        if isinstance(val, bytes):
+            val = val.decode("utf-8", errors="replace")
+        val = str(val).strip()
+        if val:
+            parti.append(f"{nome}={val[-400:]}")
+            break
+    return " | ".join(parti)
+
+
+def _pulisci_import_inutilizzati(worktree, file_modificati):
+    """Toglie gli import inutilizzati dai soli file toccati dalla patch.
+
+    Motivo (audit D3, 2026-08-08): due dei tre tentativi di fix falliti hanno
+    fallito per la stessa ragione, e non per sfortuna. La storia dei ticket
+    diceva
+        failed:gateD: ruff fallito: F401 MINIMAX_ORCHESTRATOR_MODEL imported but unused
+        failed:gateD: ruff fallito: F401 pathlib.Path imported but unused
+    cioe' il generatore di patch lascia sistematicamente import orfani quando
+    rimuove il codice che li usava, e il gate ruff li respinge. E' un difetto
+    del generatore, non un problema di qualita' della patch.
+
+    Le regole sono limitate a F401 di proposito: un `ruff --fix` cieco su
+    questo repo ha gia' svuotato un blocco try togliendo l'unico import che
+    conteneva. E si tocca solo la lista dei file cambiati, mai l'albero intero.
+
+    Non solleva mai: se ruff manca o fallisce, il gate successivo dara' il
+    verdetto come prima.
+    """
+    if not file_modificati:
+        return
+    try:
+        res = subprocess.run(
+            ["ruff", "check", "--select", "F401", "--fix"] + list(file_modificati),
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+            timeout=RUFF_FIX_TIMEOUT_S,
+        )
+        uscita = (res.stdout or "").strip()
+        if "fixed" in uscita.lower():
+            _log(f"gateD: import inutilizzati rimossi prima del lint -> {uscita.splitlines()[-1]}")
+    except FileNotFoundError:
+        pass  # ruff assente: lo segnala gia' il gate D
+    except subprocess.TimeoutExpired:
+        _log("gateD: timeout nella pulizia degli import, si prosegue col lint")
+    except Exception as e:
+        _log(f"gateD: pulizia import non riuscita ({type(e).__name__}), si prosegue")
+
+
 def run_gates(worktree):
     """Esegue controlli di sicurezza e qualità."""
     # Gate A: diff non vuoto
@@ -276,6 +346,7 @@ def run_gates(worktree):
     existing_changed = [f for f in dict.fromkeys(all_changed)
                         if (worktree / f).exists()]
     if existing_changed:
+        _pulisci_import_inutilizzati(worktree, existing_changed)
         try:
             ruff_result = subprocess.run(
                 ["ruff", "check"] + existing_changed,
@@ -609,9 +680,19 @@ def process_ticket(ticket, dry_run=False, merge=False):
             cleanup_worktree(ticket_id)
         except Exception:
             pass  # fail-open
+        # Il solo nome della classe non basta (audit D3, 2026-08-08): due
+        # ticket su tre riportavano 'failed:exception-CalledProcessError' e da
+        # quella stringa non si capiva ne' quale comando fosse fallito ne'
+        # perche'. CalledProcessError porta cmd/returncode/stderr: si estraggono
+        # e si scrivono nel log, mentre l'outcome resta breve perche' finisce
+        # nella history del ticket e viene confrontato.
+        dettaglio = _dettaglio_eccezione(e)
+        _log(f"Eccezione pre-merge su {ticket_id}: {dettaglio}")
         outcome = f"failed:exception-{type(e).__name__}"
         state["last_outcome"] = outcome
         state["history"].append(outcome)
+        state.setdefault("last_error_detail", "")
+        state["last_error_detail"] = dettaglio[:500]
         save_state(ticket_id, state)
         return 1
 
