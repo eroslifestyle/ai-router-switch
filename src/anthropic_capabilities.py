@@ -5,6 +5,11 @@ import re
 from typing import Any
 
 CLAUDE_CODE_MARKER = "You are Claude Code, Anthropic's official CLI for Claude."
+# Gate Anthropic: il prefisso (senza punto finale) matcha anche la variante Agent
+# SDK, che dopo "for Claude" ha una virgola. Cosi' il marker non viene duplicato e
+# il prompt caching resta valido. Verificato 2026-08-08 su api.anthropic.com: la
+# variante Agent SDK ottiene 200 su sonnet-5 e opus-5, senza marker si ha 429.
+CLAUDE_CODE_MARKER_PREFIX = CLAUDE_CODE_MARKER.rstrip('.')
 BETA_CONTEXT_MANAGEMENT = "context-management-2025-06-27"
 BETA_COMPACTION = "compact-2026-01-12"
 BETA_TASK_BUDGETS = "task-budgets-2026-03-13"
@@ -100,22 +105,30 @@ def unsupported_fields(
 
 
 def has_marker(system_field: Any) -> bool:
-    """True se il marker Claude Code e' presente nel system field."""
+    """True se il marker Claude Code e' presente nel system field.
+
+    Il gate Anthropic accetta il prefisso e non richiede il punto finale.
+    Il marker canonico e' 'You are Claude Code, Anthropic's official CLI for Claude.'
+    ma nei transcript reali appare anche la variante con Agent SDK
+    ('You are Claude Code, Anthropic's official CLI for Claude, running within the
+    Claude Agent SDK.') che finisce con virgola invece che punto. Il confronto
+    con CLAUDE_CODE_MARKER_PREFIX (prefisso) copre entrambi i formati.
+    """
     if not system_field:
         return False
     if isinstance(system_field, str):
-        return CLAUDE_CODE_MARKER in system_field
+        return CLAUDE_CODE_MARKER_PREFIX in system_field
     if isinstance(system_field, list):
         # Il formato canonico e' una lista di blocchi {type,text}, ma un proxy
         # vede body arbitrari: si accetta anche la lista di stringhe nuda,
         # altrimenti il marker verrebbe duplicato a ogni richiesta e la cache
         # invalidata a ogni turno.
         for item in system_field:
-            if isinstance(item, str) and CLAUDE_CODE_MARKER in item:
+            if isinstance(item, str) and CLAUDE_CODE_MARKER_PREFIX in item:
                 return True
             if isinstance(item, dict):
                 text = item.get("text")
-                if isinstance(text, str) and CLAUDE_CODE_MARKER in text:
+                if isinstance(text, str) and CLAUDE_CODE_MARKER_PREFIX in text:
                     return True
         return False
     return False
@@ -272,6 +285,16 @@ if __name__ == "__main__":
     assert not has_marker(CLAUDE_CODE_MARKER.replace("CLI", "XXX"))
     assert not has_marker(None)
     assert not has_marker(123)
+    # La variante con la virgola vale come marker per l'API (200 su sonnet-5 e
+    # opus-5, misurato 2026-08-08): non va duplicata, o si perde la cache.
+    sdk_marker = "You are Claude Code, Anthropic's official CLI for Claude, running within the Claude Agent SDK."
+    assert has_marker(sdk_marker)
+    assert has_marker([{"type": "text", "text": sdk_marker}])
+    assert has_marker([sdk_marker])
+    opus_body = {"model": "claude-opus-4-5", "system": sdk_marker}
+    opus_with_marker, added = ensure_marker(opus_body)
+    assert not added
+    assert opus_with_marker is opus_body
 
     opus_body = {"model": "claude-opus-4-5", "system": "hello"}
     opus_with_marker, added = ensure_marker(opus_body)
