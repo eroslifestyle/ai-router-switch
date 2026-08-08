@@ -1,0 +1,21 @@
+[Unit]
+Description=AI Router — sonda di disponibilita' su tutte e nove le modalita'
+# Sorgente: sviluppo/tools/probe_modes.py (Documentation= omessa: il
+# percorso del progetto contiene uno spazio e systemd rifiuta la URL).
+After=ai-router.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=@PROJECT_ROOT@
+# INTERRUTTORE: la sonda non manda nulla finche' questa non vale 1.
+# Spenta di proposito: un ciclo interroga sette provider a pagamento, e
+# accenderla e' una decisione dell'utente, non un effetto dell'installazione.
+# Per accenderla: creare un drop-in con Environment=AIROUTER_PROBE_ENABLED=1
+#   systemctl --user edit ai-router-probe.service
+Environment=AIROUTER_PROBE_ENABLED=0
+ExecStart=/usr/bin/python3 sviluppo/tools/probe_modes.py
+Nice=15
+IOSchedulingClass=idle
+# Nove modalita' con timeout 45 s ciascuna, in sequenza: 7 minuti e' il tetto
+# largo. In pratica un ciclo completo misurato dura circa 20 secondi.
+TimeoutStartSec=7min

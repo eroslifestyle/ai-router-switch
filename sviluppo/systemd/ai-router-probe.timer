@@ -1,0 +1,18 @@
+[Unit]
+Description=Timer sonda modalita': un ciclo ogni 30 minuti
+# Sorgente: sviluppo/tools/probe_modes.py (Documentation= omessa: il
+# percorso del progetto contiene uno spazio e systemd rifiuta la URL).
+
+[Timer]
+# Minuti 07 e 37, non 00 e 30: quelle due posizioni sono affollate da ogni
+# altro timer del sistema, e un ciclo che parte insieme a tutto il resto misura
+# anche la contesa, non solo la disponibilita' delle modalita'.
+OnCalendar=*-*-* *:07,37:00
+RandomizedDelaySec=2min
+# false e non true: se la macchina e' stata spenta, i cicli persi non vanno
+# recuperati in blocco all'avvio. Una raffica di nove richieste per ogni
+# mezz'ora di sonno sarebbe un modo costoso di misurare il passato.
+Persistent=false
+
+[Install]
+WantedBy=timers.target
