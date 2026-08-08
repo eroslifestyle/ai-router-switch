@@ -266,6 +266,23 @@ async def handle(request):
         if not isinstance(_parsed, dict):
             return _err_response("body must be a JSON object", status=400)
 
+        # VALIDAZIONE SEMANTICA, SOLO OSSERVATIVA (2026-08-08, audit A2).
+        # Il router valida la sintassi ma non il significato dei valori: un
+        # model inesistente, un max_tokens negativo o un role inventato
+        # ottenevano 200 e una generazione completa a pagamento (misurato:
+        # 519 token per un nome di modello con un typo). Qui si LOGGA soltanto
+        # cosa verrebbe rifiutato. Nessun 400 nuovo: un'allowlist troppo
+        # stretta romperebbe modelli legittimi, e la decisione di attivare il
+        # rifiuto va presa guardando questi log, non a priori.
+        try:
+            import semantic_validation
+            _rilievi = semantic_validation.valuta(_parsed)
+            if _rilievi:
+                log(f"validazione semantica (solo audit, richiesta INOLTRATA): "
+                    f"{semantic_validation.descrivi(_rilievi)}")
+        except Exception:
+            pass
+
     # FIX BUG-COMPRESSIONE: preserva il body ORIGINALE prima di ogni riscrittura.
     # rewrite_for_context (linee 334-374) può riscrivere `body` con tail+summary,
     # ma le pipeline (THINK/ACT) devono poter accedere ai messaggi COMPLETI.
