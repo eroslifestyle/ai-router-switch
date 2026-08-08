@@ -653,9 +653,31 @@ def _rewrite_glm_model(raw: bytes, orig_model: str) -> bytes:
     return raw
 
 
+# Margine di sicurezza sulla stima che alimenta il rate limiter. Sovrastimare
+# e' prudente (si chiedono piu' slot del necessario, quindi meno 429),
+# sottostimare no. Il valore era cablato come "* 1.2" senza spiegazione, ed era
+# l'unica differenza con la stima di qwen_backend: da qui la divergenza del 20%
+# fra i due backend, rimasta aperta perche' non si sapeva quale delle due fosse
+# giusta. Ora la fonte e' token_counter, che riporta misure reali (glm 4.06
+# byte/token), e il margine resta ma è dichiarato.
+_MARGINE_STIMA = 1.10
+
+
 def _estimate_tokens(data: bytes) -> int:
-    """Stima token da bytes (1 token ≈ 4 char + overhead)."""
+    """Stima i token di un body per il rate limiter, con margine prudenziale.
+
+    Usa i byte/token misurati in token_counter invece di un divisore cablato:
+    per GLM la misura e' 4.06 byte/token. La vecchia formula divideva di fatto
+    per 3.33 (4 / 1.2), sovrastimando del 20% rispetto alla misura.
+    """
     try:
-        return max(1, int(len(data) / 4 * 1.2))
+        from token_counter import bytes_per_token
+        divisore = bytes_per_token("glm")
+        return max(1, int(len(data) / divisore * _MARGINE_STIMA))
     except Exception:
-        return 1
+        # Fallback identico al comportamento storico: mai lasciare il limiter
+        # senza una stima, e in caso di dubbio sovrastimare.
+        try:
+            return max(1, int(len(data) / 4 * 1.2))
+        except Exception:
+            return 1
