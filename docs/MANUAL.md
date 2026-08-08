@@ -125,6 +125,26 @@ Accetta l'alias storico `anthropic-glm`.
 
 **Uso:** Claude come orchestratore, GLM per l'esecuzione a basso costo.
 
+#### Stato misurato (2026-08-08): poco usata, ma **non** rotta
+
+L'audit del 2026-08-08 aveva riportato «80% di 429, di fatto inutilizzabile»
+su 15 richieste in sette giorni. Il dato non regge al filtro delle sonde:
+
+| | richieste (7 gg) | errori |
+|---|---|---|
+| Senza filtro | 15 | 12 (80%) |
+| **Solo traffico reale** | **2** | **0** |
+
+I dodici 429 erano sonde e test nostri. Un ciclo di
+`sviluppo/tools/probe_modes.py` eseguito il 2026-08-08 ha ottenuto **HTTP 200 in
+3,1 s**. È la stessa contaminazione descritta nel finding F12 dello stesso audit,
+ed è la quinta volta che accade in questo progetto: da qui l'header
+`x-airouter-synthetic`.
+
+La modalità resta **poco usata** — due richieste reali in una settimana — ma non
+c'è alcuna prova che sia guasta. Non è stata rimossa né marcata come sconsigliata:
+sarebbe stato un provvedimento basato su un numero sbagliato.
+
 ### 7. `qwen` — Qwen puro (Alibaba Model Studio)
 
 - **qwen3.8-max** fa il THINK e il VERIFY
@@ -137,6 +157,43 @@ Endpoint Anthropic-compatible sull'host dedicato del workspace, `https://{Worksp
 Chiave: `secrets.sh get qwen.api_key`. Porta fissa: `8778`. Guida dedicata: `docs/MODALITA-QWEN.md`.
 
 **Uso:** contesti molto lunghi a basso costo — `qwen3-coder-plus` dichiara 1.048.576 token di input.
+
+#### Stato misurato (2026-08-08)
+
+Tutto il traffico reale della modalità è concentrato in **un solo giorno**, il
+2026-08-04: 902 richieste da Claude Code, la giornata in cui la modalità è stata
+messa in esercizio. Da allora non è più stata usata. Le percentuali storiche
+vanno lette come la fotografia di quella giornata, non come una proprietà della
+modalità.
+
+**I 429 sono quasi tutti nostri, non di Alibaba.** Su 151 richieste rifiutate:
+
+| Origine | Occorrenze nel log |
+|---|---|
+| `QWEN 429 attempt` — rifiuto vero di Alibaba | **5** |
+| `budget … esaurito` — rifiuto del limiter **interno** al router | **212** |
+
+Nessun minuto di quella giornata ha superato il limite TPM del modello (picco
+758.516 token/minuto contro il milione consentito da `qwen3.8-max` in
+ap-southeast-1). Il 16,5% di errori non misura la disponibilità del provider:
+misura la taratura del nostro rate limiter. Il cap di attesa è già stato alzato
+da 8 a 45 s il 2026-08-04 proprio per questo (`QWEN_STREAM_ACQUIRE_CAP_SEC`);
+se la modalità tornerà in uso, è il primo parametro da osservare.
+
+**Il prompt caching funziona.** Il `cache_read` a zero nello storico non è un
+limite dell'upstream: verificato il 2026-08-08 con due richieste identiche
+consecutive su entrambi i modelli della catena, il router propaga i breakpoint
+`cache_control` e Alibaba li onora.
+
+| Modello | 1ª richiesta | 2ª richiesta |
+|---|---|---|
+| `qwen3-coder-plus` | `cache_creation=2645` | **`cache_read=2645`** |
+| `qwen3.8-max` | `cache_creation=1992` | **`cache_read=1992`** |
+
+Perché la sessione del 4 agosto non ne beneficiasse non è più determinabile a
+posteriori — il codice è cambiato molte volte da allora, incluse le correzioni
+ai breakpoint di cache — e riprodurlo costerebbe quota senza cambiare la
+conclusione: oggi il comportamento è corretto.
 
 ---
 
