@@ -152,3 +152,64 @@ class TestDettaglioEccezione:
         )
         d = _dettaglio_eccezione(exc)
         assert len(d) < 1000, "il dettaglio finisce nel log, non deve esplodere"
+
+
+class TestStatoDisattivazione:
+    """D1: il log ripeteva la stessa riga quattro volte al giorno.
+
+    Il fixer resta SPENTO — un fixer che modifica codice senza supervisione non
+    si accende in una sessione autonoma — ma il suo stato deve essere leggibile.
+    """
+
+    def _stato(self, tmp_path, monkeypatch, righe_log, ticket=()):
+        from self_healing import fixer
+        log = tmp_path / "self-fix.log"
+        log.write_text("\n".join(righe_log) + "\n", encoding="utf-8")
+        stato_dir = tmp_path / "self-fix"
+        stato_dir.mkdir()
+        for nome in ticket:
+            (stato_dir / nome).write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(fixer, "LOG_FILE", log)
+        monkeypatch.setattr(fixer, "STATE_DIR", stato_dir)
+        return fixer._stato_disattivazione()
+
+    def test_riporta_da_quando_e_spento(self, tmp_path, monkeypatch):
+        s = self._stato(tmp_path, monkeypatch, [
+            "[fixer] 2026-08-06 19:23:38 Self-fixer disattivato (X)",
+            "[fixer] 2026-08-07 03:18:40 Self-fixer disattivato (X)",
+        ])
+        assert "2026-08-06 19:23:38" in s
+
+    def test_una_esecuzione_riuscita_azzera_il_conteggio(self, tmp_path, monkeypatch):
+        """Conta la sequenza ININTERROTTA in fondo, non la prima riga del file."""
+        s = self._stato(tmp_path, monkeypatch, [
+            "[fixer] 2026-08-01 10:00:00 Self-fixer disattivato (X)",
+            "[fixer] 2026-08-05 10:00:00 Ticket elaborato",
+            "[fixer] 2026-08-07 03:18:40 Self-fixer disattivato (X)",
+        ])
+        assert "2026-08-07 03:18:40" in s
+        assert "2026-08-01" not in s
+
+    def test_conta_i_ticket_in_coda(self, tmp_path, monkeypatch):
+        s = self._stato(tmp_path, monkeypatch,
+                        ["[fixer] 2026-08-06 19:23:38 Self-fixer disattivato (X)"],
+                        ticket=("relay_error_502-8d1ee04d.json",))
+        assert "1 ticket in coda" in s
+        assert "relay_error_502-8d1ee04d.json" in s
+
+    def test_coda_vuota(self, tmp_path, monkeypatch):
+        s = self._stato(tmp_path, monkeypatch,
+                        ["[fixer] 2026-08-06 19:23:38 Self-fixer disattivato (X)"])
+        assert "0 ticket in coda" in s
+
+    def test_rimanda_alla_decisione(self, tmp_path, monkeypatch):
+        """Lo stato deve dire cosa fare, non solo cosa succede."""
+        s = self._stato(tmp_path, monkeypatch,
+                        ["[fixer] 2026-08-06 19:23:38 Self-fixer disattivato (X)"])
+        assert "TODO" in s
+
+    def test_log_assente_non_solleva(self, tmp_path, monkeypatch):
+        from self_healing import fixer
+        monkeypatch.setattr(fixer, "LOG_FILE", tmp_path / "non-esiste.log")
+        monkeypatch.setattr(fixer, "STATE_DIR", tmp_path / "nemmeno")
+        assert isinstance(fixer._stato_disattivazione(), str)

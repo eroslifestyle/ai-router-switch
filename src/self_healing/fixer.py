@@ -4,6 +4,7 @@ Self-healing fixer L2: auto-merge con auto-revert.
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -221,6 +222,41 @@ Non aggiungere dipendenze nuove.
     except Exception as e:
         _log(f"Errore esecuzione agente: {e}")
         return False
+
+
+def _stato_disattivazione():
+    """Riassume da quanto il fixer e' spento e quanto lavoro e' in attesa.
+
+    Prima il log ripeteva la stessa riga a ogni esecuzione — quattro volte al
+    giorno dal 2026-08-06 — senza dire ne' da quanto durasse ne' se ci fosse
+    qualcosa in coda (audit D1). Chi apriva il file vedeva rumore, non stato.
+    """
+    parti = []
+    try:
+        prima_riga_spenta = None
+        ultime = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
+        # Si cerca l'inizio della sequenza ininterrotta di righe "disattivato"
+        # in fondo al file: e' l'istante da cui e' spento senza interruzioni.
+        for riga in reversed(ultime):
+            if "Self-fixer disattivato" in riga:
+                prima_riga_spenta = riga
+            elif riga.strip():
+                break
+        if prima_riga_spenta:
+            # Formato della riga: "[fixer] 2026-08-07 03:18:40 Self-fixer ..."
+            istante = re.search(r"\]\s*(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})",
+                                prima_riga_spenta)
+            if istante:
+                parti.append(f"spento almeno dal {istante.group(1)}")
+    except Exception:
+        pass
+    try:
+        ticket = sorted(p.name for p in STATE_DIR.glob("*.json"))
+        parti.append(f"{len(ticket)} ticket in coda" + (f": {', '.join(ticket)}" if ticket else ""))
+    except Exception:
+        pass
+    parti.append("decidere se accenderlo o rimuovere il timer (voce aperta nel TODO)")
+    return " · ".join(parti)
 
 
 def _dettaglio_eccezione(exc):
@@ -714,8 +750,12 @@ def main():
     # Interruttore generale: senza AIROUTER_SELF_FIX_ENABLED=1 il fixer non fa nulla.
     # Vale anche per --ticket, non solo per --auto: se e spento, e spento.
     if os.environ.get("AIROUTER_SELF_FIX_ENABLED", "0") != "1":
-        _log("Self-fixer disattivato (AIROUTER_SELF_FIX_ENABLED diverso da 1)")
-        print("Self-fixer disattivato. Per abilitarlo: AIROUTER_SELF_FIX_ENABLED=1")
+        # Il messaggio era sempre lo stesso, quattro volte al giorno, dal
+        # 2026-08-06: leggendo il log non si capiva ne' da quanto durasse la
+        # situazione ne' se ci fosse lavoro in attesa (audit D1). Ora lo dice.
+        stato = _stato_disattivazione()
+        _log(f"Self-fixer disattivato (AIROUTER_SELF_FIX_ENABLED diverso da 1) — {stato}")
+        print(f"Self-fixer disattivato. Per abilitarlo: AIROUTER_SELF_FIX_ENABLED=1\n{stato}")
         return 0
 
     if not args.auto and not args.ticket:
