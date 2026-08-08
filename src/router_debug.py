@@ -5,6 +5,7 @@ import gzip
 import hmac
 import json
 import os
+import time
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -85,7 +86,17 @@ async def debug_auth_middleware(request, handler):
     riscrive la modalita globale del router. Risponde 404 e non 401
     per non rivelare a chi scandaglia che la rotta esiste. Sul loopback
     non cambia nulla, il guard entra in funzione solo se
-    AIROUTER_LISTEN_HOST e aperto a un indirizzo non-loopback."""
+    AIROUTER_LISTEN_HOST e aperto a un indirizzo non-loopback.
+    Marca anche l'istante d'ingresso in request['t_start'] per la telemetria di latenza."""
+    # Istante d'ingresso della richiesta nel router (2026-08-08, audit A9).
+    # Sta qui e non nel relay perche' il relay riceve l'upstream gia' aperto:
+    # misurare da li' perderebbe la connessione upstream, che e' proprio la
+    # parte lenta. time.monotonic() e non time.time(): immune agli aggiustamenti
+    # dell'orologio di sistema.
+    try:
+        request["t_start"] = time.monotonic()
+    except Exception:
+        pass  # request non sottoscrivibile (fake nei test): la latenza restera' assente
     path = getattr(request, "path", "")
     protetto = any(path == p or path.startswith(p + "/") for p in ("/debug", "/admin"))
     if protetto and not _debug_auth_ok(request):

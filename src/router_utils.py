@@ -373,7 +373,8 @@ def collect_tools_stats(body: bytes) -> dict | None:
 
 def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
                      mode: str, client: str = "?", status: int = 200, path: str = "",
-                     tools: dict | None = None, body=None):
+                     tools: dict | None = None, body=None,
+                     ttfb_ms: float | None = None, total_ms: float | None = None):
     if not final or final == "?":
         final = "router-internal"
     try:
@@ -390,6 +391,16 @@ def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
             "thinking_blocks": int(usage.get("thinking_blocks", 0) or 0),
             "tool_use_blocks": int(usage.get("tool_use_blocks", 0) or 0),
         }
+        # Latenza (2026-08-08, audit A9): il sidecar registrava token e stato ma
+        # non la durata, quindi nessuna regressione di performance era rilevabile
+        # a posteriori. Campi in CODA e solo se valorizzati: le entry storiche
+        # restano leggibili e gli strumenti che le leggono non cambiano.
+        # ttfb_ms = dall'ingresso della richiesta nel router al primo byte
+        # inoltrato al client; total_ms = fino alla fine dello stream.
+        if ttfb_ms is not None:
+            entry["ttfb_ms"] = round(float(ttfb_ms), 1)
+        if total_ms is not None:
+            entry["total_ms"] = round(float(total_ms), 1)
         # Self-healing (Fase 1): outcome reale (ok|empty|truncated|tool_only|error) + task_class.
         # Best-effort: se self_healing.sensor non importa, outcome/task_class restano assenti.
         try:

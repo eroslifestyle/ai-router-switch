@@ -5,6 +5,7 @@ Byte-for-byte identical relay logic, no behavioral changes.
 """
 import json
 import re as re_module
+import time
 
 from aiohttp import web
 from router_debug import dl
@@ -142,6 +143,18 @@ class StreamingRelay:
         iterator = upstream.content.iter_any()
         chunk_count = 0
         total_bytes = 0
+        # Latenza (2026-08-08, audit A9). t_start e' marcato dal middleware
+        # all'ingresso della richiesta nel router: partire da qui perderebbe la
+        # connessione upstream, cioe' la parte lenta. Il fallback su monotonic()
+        # serve ai test, che costruiscono request finte senza t_start.
+        _t_start = None
+        try:
+            _t_start = self.request.get("t_start")
+        except Exception:
+            pass
+        if _t_start is None:
+            _t_start = time.monotonic()
+        _ttfb_ms = None
         model_rewrite_done = orig_model is None  # se non c'è orig_model, skip subito
         # FIX F: accumula chunks per estrarre usage reale dai record SSE/JSON
         _acc_buf = bytearray()
@@ -160,6 +173,7 @@ class StreamingRelay:
                 total_bytes += len(chunk)
                 # FIX #4: log primo chunk per debug
                 if chunk_count == 1:
+                    _ttfb_ms = (time.monotonic() - _t_start) * 1000.0
                     self.log_fn(f"relay first chunk {len(chunk)}B (SSE={is_sse})")
                 # FIX E: riscrivi il campo 'model' nello stream SSE (solo primo chunk rilevante)
                 if not model_rewrite_done and orig_model:
@@ -464,6 +478,11 @@ class StreamingRelay:
                     # resta identica a prima.
                     tools=collect_tools_stats(self.body),
                     body=self.body,
+                    # Latenza: ttfb_ms puo' essere None se lo stream non ha mai
+                    # prodotto un chunk (errore prima del primo byte); in quel caso
+                    # il campo semplicemente non compare nell'entry.
+                    ttfb_ms=_ttfb_ms,
+                    total_ms=(time.monotonic() - _t_start) * 1000.0,
                 )
             except Exception:
                 pass
