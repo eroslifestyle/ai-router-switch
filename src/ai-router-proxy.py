@@ -974,6 +974,10 @@ def _make_app(session, forced_mode):
     app.router.add_get("/debug/last", dl.last_endpoint)
     app.router.add_get("/debug/stats", dl.stats_endpoint)
     app.router.add_get("/debug/trace", dl.trace_endpoint)
+    # /debug/request?rid=<id> (2026-08-08): ricostruisce la storia di UNA
+    # richiesta unendo righe di log e telemetria. Coperta dallo stesso
+    # middleware di autenticazione delle altre rotte /debug/.
+    app.router.add_get("/debug/request", dl.request_endpoint)
     app.router.add_get("/debug/health", dl.health_endpoint)
     app.router.add_get("/debug/catalog", dl.catalog_endpoint)
     app.router.add_get("/debug/catalog/{signature}", dl.catalog_entry_endpoint)

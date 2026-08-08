@@ -353,6 +353,104 @@ class DebugLogger:
         chiave = f"{model}|{task_class}|{mode}"
         self._policy_degraded[chiave] = self._policy_degraded.get(chiave, 0) + 1
 
+    async def request_endpoint(self, request) -> web.Response:
+        """
+        Ricostruisce la storia completa di una richiesta a partire dal suo ID.
+
+        Dal 2026-08-08 ogni richiesta ha un identificatore esadecimale che compare
+        nei log (ai-router.log), nella telemetria (router-usage.jsonl) e nell'header
+        x-airouter-request-id della risposta al client. Questo endpoint aggrega
+        tutte le entry correlate in un'unica risposta JSON.
+
+        Args:
+            request: oggetto aiohttp request con query string.
+
+        Ritorna:
+            web.Response JSON contenente:
+            - request_id: il rid cercato
+            - righe_log: lista delle righe di log contenenti '[rid]'
+            - righe_log_totali: numero di righe trovate
+            - troncato: True se e' stato raggiunto il limite di 500 righe
+            - telemetria: lista delle entry di router-usage.jsonl con request_id == rid
+            - errore: (opzionale) messaggio di errore se la lettura di un file fallisce
+        """
+        rid = request.query.get('rid', '').strip()
+
+        # Validazione: rid assente o vuoto
+        if not rid:
+            return web.json_response(
+                {'errore': "parametro 'rid' mancante", 'uso': '/debug/request?rid=<request-id>'},
+                status=400
+            )
+
+        # Validazione: solo esadecimali, lunghezza massima 64.
+        # Il valore diventa parte di una ricerca su file, quindi
+        # accettiamo solo hex per evitare l'iniezione di pattern arbitrari.
+        if len(rid) > 64 or not all(c in '0123456789abcdefABCDEF' for c in rid):
+            return web.json_response(
+                {'errore': 'rid non valido'},
+                status=400
+            )
+
+        import paths
+
+        # Ricerca nei log: scandisce ai-router.log cercando '[rid]'.
+        # Il limite di 500 righe evita risposte enormi su richieste
+        # con molti log (es. retry loop). Oltre il limite si interrompe.
+        MAX_RIGHE_LOG = 500
+        log_righe = []
+        log_troncato = False
+        log_errore = None
+
+        try:
+            log_path = paths.log_file('ai-router.log')
+            with open(log_path, 'r', errors='replace') as fh:
+                for riga in fh:
+                    if f'[{rid}]' in riga:
+                        log_righe.append(riga.rstrip('\n'))
+                        if len(log_righe) >= MAX_RIGHE_LOG:
+                            log_troncato = True
+                            break
+        except Exception as exc:
+            log_righe = []
+            log_errore = str(exc)
+
+        # Ricerca nella telemetria: scandisce router-usage.jsonl e raccoglie
+        # le entry il cui campo request_id corrisponde al rid.
+        telemetria = []
+        tele_errore = None
+
+        try:
+            tele_path = paths.log_file('router-usage.jsonl')
+            with open(tele_path, 'r', errors='replace') as fh:
+                for riga in fh:
+                    try:
+                        entry = json.loads(riga)
+                    except Exception:
+                        # Salta righe non leggibili (json malformato)
+                        continue
+                    if entry.get('request_id') == rid:
+                        telemetria.append(entry)
+        except Exception as exc:
+            telemetria = []
+            tele_errore = str(exc)
+
+        # Compone la risposta: mai sollevare, errori confluiscono nel JSON
+        body = {
+            'request_id': rid,
+            'righe_log': log_righe,
+            'righe_log_totali': len(log_righe),
+            'troncato': log_troncato,
+            'telemetria': telemetria
+        }
+
+        if log_errore is not None:
+            body['errore_log'] = log_errore
+        if tele_errore is not None:
+            body['errore_telemetria'] = tele_errore
+
+        return web.json_response(body, status=200)
+
     async def stats_endpoint(self, request) -> web.Response:
         from collections import Counter
         c_kind = Counter(e.get("kind") for e in self.errors)
