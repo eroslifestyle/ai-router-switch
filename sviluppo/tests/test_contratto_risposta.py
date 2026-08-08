@@ -59,6 +59,7 @@ CONTRATTO_OSSERVATO = {
     "anthropic": {"encoding": "gzip", "id": "msg_"},
     "minimax": {"encoding": "identity", "id": "esadecimale"},
     "mix-am": {"encoding": "identity", "id": "esadecimale"},
+    "mix-am-2": {"encoding": "identity", "id": "esadecimale"},  # routing identico a mix-am
     "mix-al": {"encoding": "identity", "id": "resp_"},
     "glm": {"encoding": "gzip", "id": "msg_"},
     "mix-gm": {"encoding": "identity", "id": "esadecimale"},

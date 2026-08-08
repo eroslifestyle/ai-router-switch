@@ -14,7 +14,7 @@ from paths import config_home, ensure_dir
 
 PYTHON_MIN = (3, 10)
 REQUIRED = ["aiohttp", "brotli", "multidict", "PIL"]
-FIXED_PORTS = list(range(8771, 8780))
+FIXED_PORTS = list(range(8771, 8781))
 DYNAMIC_PORT = 8787
 PORTS_STR = " ".join(map(str, FIXED_PORTS + [DYNAMIC_PORT]))
 
