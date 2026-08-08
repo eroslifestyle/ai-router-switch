@@ -18,11 +18,17 @@ Environment=AIROUTER_ANTHROPIC_UPSTREAM=https://api.anthropic.com
 Environment=AIROUTER_MINIMAX_UPSTREAM=https://api.minimaxi.chat/anthropic
 Environment=AIROUTER_MINIMAX_MODEL=MiniMax-M2.7
 Environment=AIROUTER_NEW_PIPELINE=1
-# Le chiavi API si leggono da qui. Il trattino iniziale rende il file
+# Le chiavi API si leggono da qui. Il trattino iniziale rende ogni file
 # facoltativo: senza, il servizio non partirebbe finché non esiste.
 # PYTHONPATH lo imposta il wrapper, non Environment=, che troncherebbe i path
 # contenenti spazi.
+# I due file sotto ~/.secrets sono quelli realmente in uso in produzione: un
+# template che caricava solo @CONFIG_HOME@/.env faceva ripartire il router
+# SENZA chiavi API dopo una rigenerazione con install.py (2026-08-09). Restano
+# facoltativi, quindi un'installazione pulita che usa solo .env funziona uguale.
 EnvironmentFile=-@CONFIG_HOME@/.env
+EnvironmentFile=-%h/.secrets/minimax.env
+EnvironmentFile=-%h/.secrets/glm.env
 
 # Pre-start: libera le porte da eventuali processi orfani di un restart fallito.
 # Il trattino iniziale e i "|| true" rendono il passo innocuo dove fuser non c'è.
@@ -33,12 +39,14 @@ ExecStart=@WRAPPER@
 # Stop: SIGTERM → 3s → SIGKILL (il proxy si blocca, non aspettare 90s default)
 KillMode=mixed
 KillSignal=SIGTERM
-# 8 s e non 3 (2026-07-26): lo stop tipico dura ~0,04 s misurati — il drain di
-# aiohttp (r.cleanup()) è già istantaneo senza stream aperti, quindi il timeout
-# morde SOLO quando c'è un SSE in corso, cioè esattamente quando il SIGKILL
-# tronca una risposta a metà. 8 s dà respiro a quegli stream senza bloccare i
-# restart per minuti. SendSIGKILL resta la rete di sicurezza.
-TimeoutStopSec=8
+# 20 s e non 8 (2026-08-08, audit F1): il proxy creava gli AppRunner SENZA
+# shutdown_timeout, quindi ogni runner ereditava il default aiohttp di 60 s e il
+# cleanup era per giunta sequenziale sulle dieci porte — tetto teorico 600 s,
+# SIGKILL certo ("State 'stop-sigterm' timed out. Killing", "status=9/KILL").
+# Ora il proxy passa SHUTDOWN_TIMEOUT_S=3 s per runner e fa il cleanup in
+# parallelo con asyncio.gather: il drain reale sta sotto i 4 s. I 20 s sono il
+# margine, non il tempo atteso. Rif. sviluppo/audit/2026-08-08-stress-router/.
+TimeoutStopSec=20
 SendSIGKILL=yes
 FinalKillSignal=SIGKILL
 
