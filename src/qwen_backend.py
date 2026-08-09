@@ -99,6 +99,12 @@ QWEN_MAX_TOKENS_LIMIT = int(os.environ.get("AIROUTER_QWEN_MAX_TOKENS_LIMIT", "65
 # Misurato il 2026-08-03 sull'account: 4,8 MB accettati (1.000.009 token di
 # input), 6,7 MB respinti. 4 MB lascia margine sotto il punto accettato noto.
 QWEN_MAX_BODY_BYTES = int(os.environ.get("AIROUTER_QWEN_MAX_BODY_BYTES", str(4 * 1024 * 1024)))
+# Target byte per shrink testo preventivo (context-exceeded). Qwen3-max ha 32k
+# token context (~128k byte), qwen3-coder-plus 256k token (~1M byte).
+# 600k e' sotto il limite del gateway (QWEN_MAX_BODY_BYTES=4MB) ma costoso:
+# qwen a differenza di glm non da' 400 context-exceeded chiaro, tronca e basta.
+QWEN_SHRINK_TARGET_BYTES = int(os.environ.get(
+    "AIROUTER_QWEN_CONTEXT_SHRINK_TARGET", "600000"))
 QWEN_SAFETY = float(os.environ.get("AIROUTER_QWEN_SAFETY", "0.8"))
 QWEN_RETRY_CAP_SEC = float(os.environ.get("AIROUTER_QWEN_RETRY_CAP_SEC", "90"))
 # 8s era troppo poco: il 25,6% delle richieste qwen veniva rifiutato dal limiter
@@ -424,6 +430,16 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
     body = tool_isolation.filter_tools_for_backend(body, "qwen")
     body = qwen_tool_trim.strip_heavy_connectors(body)
     body = clamp_qwen_max_tokens(body, log_fn=log_fn)
+
+    # SHRINK TESTO PREVENTIVO: se il body supera il target, riduce il contesto
+    # prima di chiamare l'upstream Qwen. Qwen non risponde con un 400
+    # context-exceeded chiaro: tronca la risposta o dà 500 opaco.
+    if len(body) > QWEN_SHRINK_TARGET_BYTES:
+        from context_shrink import shrink_body_to_budget
+        _shrunk = await shrink_body_to_budget(body, QWEN_SHRINK_TARGET_BYTES)
+        if _shrunk is not None and len(_shrunk) < len(body):
+            log_fn(f"QWEN preventivo shrink {len(body)}b -> {len(_shrunk)}b")
+            body = _shrunk
 
     # Il gateway risponde 413 RequestTooLarge sui byte, prima ancora di valutare
     # il contesto del modello, e non spiega perche'. Intercettarlo qui produce un

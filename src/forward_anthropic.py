@@ -22,11 +22,31 @@ from router_debug import dl
 from anthropic_body import sanitize_server_tool_ids
 import anthropic_capabilities
 
+# Rate limiter preventivo (sliding window RPM/TPM + cooldown 429 burst).
+# Fail-open: se il modulo o l'acquire falliscono, forward prosegue senza slot
+# e il retry reattivo (pipeline_common) copre il resto. Mai bloccare il path.
+try:
+    from anthropic_rate_limiter import (
+        ANTHROPIC_LIMITER as _ANTHROPIC_LIMITER,
+        _ANTHROPIC_SEM as _ANTHROPIC_SEM,
+        _classify_anthropic_429,
+        _estimate_tokens as _anthropic_est_tokens,
+        RateLimitExhausted as _AnthropicRateLimitExhausted,
+    )
+    _ANTHROPIC_LIMITER_AVAILABLE = True
+except Exception as _e:
+    _ANTHROPIC_LIMITER_AVAILABLE = False
+
 # Deep-debug (analyze struttura body + dump _DEBUG_LAST_SENT su disco) è overhead
 # SINCRONO nel path caldo, eseguito ad ogni richiesta e scalante col body (deep-copy
 # di ogni content block + json.dump indent=2 su disco). Serve solo per diagnosi:
 # gated dietro flag, default OFF. Attiva con AIROUTER_DEEP_DEBUG=1 quando serve.
 _DEEP_DEBUG = os.environ.get("AIROUTER_DEEP_DEBUG", "0") == "1"
+
+# Target byte per shrink testo fallback (context-exceeded). Anthropic ha 200k
+# token context (~800k byte a 4 byte/token). 700k lascia margine per max_tokens.
+_ANTHROPIC_SHRINK_TARGET = int(os.environ.get(
+    "AIROUTER_ANTHROPIC_CONTEXT_SHRINK_TARGET", "700000"))
 
 
 def _readable_err(raw: bytes) -> str:
@@ -140,6 +160,14 @@ def _emit_deep_debug(fn: str, request, safe_body: bytes) -> None:
 
 
 # _text_from_message rimossa il 2026-08-07: copia morta, nessun chiamante. Fonte unica in providers/base.py
+
+
+class _noop_cm:
+    """Context manager no-op: usato se il limiter non e' disponibile (fail-open)."""
+    async def __aenter__(self):
+        return None
+    async def __aexit__(self, *args):
+        return False
 
 
 async def forward_anthropic(request, body, session):
@@ -262,13 +290,39 @@ async def forward_anthropic(request, body, session):
     if _DEEP_DEBUG:
         _emit_deep_debug("forward_anthropic", request, safe_body)
 
+    # Rate limiter preventivo (fail-open): acquisisci slot RPM/TPM prima della
+    # richiesta. Se il limiter e' indisponibile o esaurisce il budget, procedi
+    # senza slot — il retry reattivo (pipeline_common) resta il backstop.
+    _lim_entry = None
+    if _ANTHROPIC_LIMITER_AVAILABLE:
+        try:
+            _lim_model = (json.loads(safe_body).get("model", "")
+                          if safe_body else "")
+            _lim_tokens = _anthropic_est_tokens(safe_body)
+            _lim_entry = await _ANTHROPIC_LIMITER.acquire(
+                _lim_model, _lim_tokens)
+        except _AnthropicRateLimitExhausted:
+            log("[forward_anthropic] limiter budget esaurito, proceed senza slot")
+            _lim_entry = None
+        except Exception:
+            _lim_entry = None
+
     # Context window retry: 400 context -> strip images and retry
     _kw = dict(data=safe_body, headers=headers, allow_redirects=False)
     _to = upstream_timeout_for(safe_body)
     if _to is not None:
         _kw["timeout"] = _to  # non-streaming: vedi upstream_timeout_for
     try:
-        up = await session.request(request.method, url, **_kw)
+        async with _ANTHROPIC_SEM if _ANTHROPIC_LIMITER_AVAILABLE else _noop_cm():
+            up = await session.request(request.method, url, **_kw)
+        if _lim_entry is not None and _ANTHROPIC_LIMITER_AVAILABLE:
+            _ANTHROPIC_LIMITER.record(_lim_entry, _lim_tokens, up.status < 400)
+            if up.status < 400:
+                _ANTHROPIC_LIMITER.on_success()
+            elif up.status == 429:
+                _kind = _classify_anthropic_429(
+                    up.status, dict(up.headers), b"")
+                _ANTHROPIC_LIMITER.on_429(_kind)
         if up.status == 400:
             err_headers = dict(up.headers)
             try:
@@ -308,8 +362,43 @@ async def forward_anthropic(request, body, session):
                     await up.release()
                     log(f"[forward_anthropic] ctx-retry fallito {up.status}: "
                         f"{_readable_err(retry_err)[:300]}")
-                    # anche qui lo stream e' consumato: ripropone il body letto
-                    return _PreReadResponse(up.status, retry_headers, retry_err)
+                    # strip-images fallito: lo stream e' consumato. NON ritornare
+                    # l'errore subito: prova shrink testo come fallback additivo.
+                    _shrink_base = stripped
+                else:
+                    # niente immagini da strippare: shrink parte dal body originale
+                    _shrink_base = safe_body
+                # SHRINK TESTO (fallback additivo, NON sostituisce strip-images):
+                # riduce il contesto a system + tail messages + summary compresso.
+                # Entra solo se strip-images non applicato o fallito.
+                from context_shrink import shrink_body_to_budget
+                _target = min(_ANTHROPIC_SHRINK_TARGET, len(_shrink_base) // 2)
+                _shrunk = await shrink_body_to_budget(_shrink_base, _target)
+                if _shrunk is not None and len(_shrunk) < len(_shrink_base):
+                    log(f"[forward_anthropic] ctx-exceed -> text shrink "
+                        f"{len(_shrink_base)}b -> {len(_shrunk)}b")
+                    _kw_sh = dict(data=_shrunk, headers=headers,
+                                 allow_redirects=False)
+                    _to_sh = upstream_timeout_for(_shrunk)
+                    if _to_sh is not None:
+                        _kw_sh["timeout"] = _to_sh
+                    up = await session.request(request.method, url, **_kw_sh)
+                    if up.status < 400:
+                        return up
+                    dl.capture(kind="forward_anthropic_ctx_shrink_fail",
+                             request=request, stage="forward",
+                             upstream_status=up.status,
+                             note="context shrink text fallback failed",
+                             mode="anthropic", severity="error")
+                    sh_headers = dict(up.headers)
+                    try:
+                        sh_err = await up.read()
+                    except Exception:
+                        sh_err = b""
+                    await up.release()
+                    log(f"[forward_anthropic] ctx-shrink fallito {up.status}: "
+                        f"{_readable_err(sh_err)[:300]}")
+                    return _PreReadResponse(up.status, sh_headers, sh_err)
             # 400 non-context: lo stream e' gia' stato consumato sopra, quindi
             # `return up` consegnerebbe al client un corpo VUOTO. Ripropone il
             # body reale, cosi' il messaggio di Anthropic arriva a schermo.

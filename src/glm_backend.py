@@ -332,6 +332,12 @@ def resolve_glm_upstream_model(tier: str) -> str:
 # illegal 限制数值范围[1,32768]". Clamp al choke-point forward_glm.
 GLM_MAX_TOKENS_LIMIT = int(os.environ.get("AIROUTER_GLM_MAX_TOKENS_LIMIT", "32768"))
 
+# Target byte per shrink testo preventivo (context-exceeded). GLM-5.2 ha 1M token
+# (~4M byte), glm-4.7 ha 200k token (~800k byte). 600k e' prudente per entrambi:
+# sotto il limite del modello piu' piccolo dopo il which model resolution.
+GLM_SHRINK_TARGET_BYTES = int(os.environ.get(
+    "AIROUTER_GLM_CONTEXT_SHRINK_TARGET", "600000"))
+
 
 def clamp_glm_max_tokens(body: bytes, log_fn=None) -> bytes:
     """Clampa max_tokens nel body in uscita verso z.ai a GLM_MAX_TOKENS_LIMIT.
@@ -448,6 +454,16 @@ async def forward_glm(request, body: bytes, session, model: str,
     # CLAMP max_tokens (2026-07-22): z.ai rifiuta > 32768 con 400 [1210]. Choke-point
     # unico → copre pure glm + mix-ag + mix-gm indipendentemente dalla costruzione body.
     body = clamp_glm_max_tokens(body, log_fn=log_fn)
+
+    # SHRINK TESTO PREVENTIVO: se il body supera il target, riduce il contesto
+    # prima di chiamare z.ai. GLM non risponde sempre con un 400 leggibile
+    # (puo' dare 500 opaco o troncare), quindi la guardia e' preventiva.
+    if len(body) > GLM_SHRINK_TARGET_BYTES:
+        from context_shrink import shrink_body_to_budget
+        _shrunk = await shrink_body_to_budget(body, GLM_SHRINK_TARGET_BYTES)
+        if _shrunk is not None and len(_shrunk) < len(body):
+            log_fn(f"GLM preventivo shrink {len(body)}b -> {len(_shrunk)}b")
+            body = _shrunk
 
     url = GLM_UPSTREAM + request.path_qs
 
