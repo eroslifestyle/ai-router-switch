@@ -78,7 +78,14 @@ class _PreReadResponse:
     async def json(self):
         return json.loads(self._body)
 
-    async def release(self):
+    def release(self):
+        """SINCRONO: il relay lo chiama senza await (upstream.release()).
+
+        Se fosse una coroutine non verrebbe mai attesa, producendo solo un
+        RuntimeWarning silenzioso (era il bug: la classe gemella
+        SyntheticResponse in synthetic_response.py ha gia' release() sincrono
+        con lo stesso motivo documentato, questa non l'aveva mai ricevuto).
+        """
         return None
 
     @property
