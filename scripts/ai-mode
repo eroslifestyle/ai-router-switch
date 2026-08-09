@@ -117,6 +117,8 @@ set_mode(){
     mixag|anthropic-glm)   echo "mix-ag" ;;
     mixam|mixed)           echo "mix-am" ;;
     mixam2)                echo "mix-am-2" ;;
+    mixgm2)                echo "mix-gm-2" ;;
+    mixag2)                echo "mix-ag-2" ;;
     mixal)                 echo "mix-al" ;;
     *)                     echo "$1" ;;
   esac

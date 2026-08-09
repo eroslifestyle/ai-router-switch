@@ -68,8 +68,17 @@ ROUTING_TABLE = {
     ("mix-am-2", ROLE_ACT): ("minimax", MINIMAX_ACT),
     ("mix-ag", ROLE_THINK): ("anthropic", None),
     ("mix-ag", ROLE_ACT): ("glm", GLM_ACT),
+    # mix-ag-2: routing identico a mix-ag. La differenza e' enforce_hierarchy
+    # (deny mode-specific). NB: in mix-ag-2 NON c'e' CLI di coding (glm-code non
+    # esiste) -> _CODE_EXECUTOR e' stringa vuota: la delega passa solo dai subagent.
+    ("mix-ag-2", ROLE_THINK): ("anthropic", None),
+    ("mix-ag-2", ROLE_ACT): ("glm", GLM_ACT),
     ("mix-gm", ROLE_THINK): ("glm", GLM_THINK),
     ("mix-gm", ROLE_ACT): ("minimax", MINIMAX_ACT),
+    # mix-gm-2: routing identico a mix-gm (THINK->GLM, ACT->MiniMax). Differenza
+    # in enforce_hierarchy (deny mode-specific, delega a m3-code).
+    ("mix-gm-2", ROLE_THINK): ("glm", GLM_THINK),
+    ("mix-gm-2", ROLE_ACT): ("minimax", MINIMAX_ACT),
     ("mix-al", ROLE_THINK): ("anthropic", None),
     ("mix-al", ROLE_ACT): ("local", LOCAL_ACT),
     # local è una modalità pura, THINK ACT e VERIFY vanno tutti al modello locale code-max su llama.cpp 8083, nessuna escalation remota, isolamento totale, e il _nativize riscrive ogni modello incluso claude-opus del THINK su code-max.
@@ -88,11 +97,13 @@ _MODE_DEFAULT_PROVIDER = {
     "mix-am-2": "minimax",
     "mix-ag": "glm",
     "mix-gm": "minimax",
+    "mix-gm-2": "minimax",
+    "mix-ag-2": "glm",
     "mix-al": "local",
     "local": "local",
 }
 
-VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-am-2", "mix-ag", "mix-gm", "mix-al", "local")
+VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-am-2", "mix-ag", "mix-ag-2", "mix-gm", "mix-gm-2", "mix-al", "local")
 
 
 # ── Native executor per provider ─────────────────────────────────────────────

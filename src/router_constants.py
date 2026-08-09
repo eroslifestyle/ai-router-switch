@@ -110,7 +110,7 @@ HOP_HEADERS = frozenset({
 })
 
 # ── Valid modes ────────────────────────────────────────────────────────────────
-VALID_MODES = ("anthropic", "minimax", "mix-am", "mix-am-2", "mix-ag", "mix-gm", "glm", "qwen", "mix-al", "local")
+VALID_MODES = ("anthropic", "minimax", "mix-am", "mix-am-2", "mix-ag", "mix-ag-2", "mix-gm", "mix-gm-2", "glm", "qwen", "mix-al", "local")
 
 # ── Port mode map ─────────────────────────────────────────────────────────────
 PORT_MODE = {
@@ -126,6 +126,8 @@ PORT_MODE = {
     # 8780 NON usabile: occupata da chatterbox-gpu (uvicorn su 0.0.0.0:8780, servizio
     # TTS in /srv/multimodal). Il router falliva il bind con Errno 98 a ogni avvio.
     8781: "mix-am-2",   # sandbox: variante mix-am con enforcement deny (delega aggressiva)
+    8784: "mix-gm-2",   # sandbox: variante mix-gm con enforcement deny (delega aggressiva)
+    8785: "mix-ag-2",   # sandbox: variante mix-ag con enforcement deny (delega aggressiva)
 }
 _pm_override = os.environ.get("AIROUTER_PORT_MODE_JSON", "").strip()
 if _pm_override:

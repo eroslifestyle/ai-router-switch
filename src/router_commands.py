@@ -9,10 +9,12 @@ _ALIAS_MAP = {
     "mixam": "mix-am",
     "mixam2": "mix-am-2",
     "mixgm": "mix-gm",
+    "mixgm2": "mix-gm-2",
     "mixag": "mix-ag",
+    "mixag2": "mix-ag-2",
 }
 _INTERNAL_TO_DISPLAY = {
-    "mix-am": "MixAM", "mix-am-2": "MixAM-2", "mix-gm": "MixGM", "mix-ag": "MixAG",
+    "mix-am": "MixAM", "mix-am-2": "MixAM-2", "mix-gm": "MixGM", "mix-gm-2": "MixGM-2", "mix-ag": "MixAG", "mix-ag-2": "MixAG-2",
     "mix-al": "MixAL",  # aggiunta 2026-08-04: l'8a modalita' mancava dalla mappa
     "local": "Local",   # aggiunta 2026-08-04: 9a modalita', pura locale (tutto su code-max)
     "anthropic": "anthropic", "minimax": "minimax", "glm": "glm",

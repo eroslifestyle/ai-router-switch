@@ -63,7 +63,9 @@ CONTRATTO_OSSERVATO = {
     "mix-al": {"encoding": "identity", "id": "resp_"},
     "glm": {"encoding": "gzip", "id": "msg_"},
     "mix-gm": {"encoding": "identity", "id": "esadecimale"},
+    "mix-gm-2": {"encoding": "identity", "id": "esadecimale"},  # routing identico a mix-gm
     "mix-ag": {"encoding": "gzip", "id": "msg_"},
+    "mix-ag-2": {"encoding": "gzip", "id": "msg_"},  # routing identico a mix-ag
     "qwen": {"encoding": "gzip", "id": "msg_"},
     "local": {"encoding": "identity", "id": "resp_"},
 }
