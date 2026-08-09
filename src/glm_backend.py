@@ -191,7 +191,7 @@ class GLMRateLimiter:
                         win.append(entry)
                         return entry
                     wait = max(0.5, 60.0 - (now - win[0][0])) if win else 1.0
-            wait += random.uniform(0.05, 0.5)
+            wait += random.uniform(0.05, 0.2)
             if waited + wait > budget_sec:
                 raise RateLimitExhausted(
                     f"glm rate-limit: budget {budget_sec:.0f}s esaurito (waited {waited:.0f}s)")
