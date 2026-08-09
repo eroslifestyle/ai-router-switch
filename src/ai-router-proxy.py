@@ -43,6 +43,7 @@ from model_context_map import get_safe_input_limit
 from context_rewrite import rewrite_for_context
 from context_alert import notify_context_threshold
 from sse_utils import _sse_events_from_message, _send_sse_message
+from anthropic_body import strip_thinking_blocks
 
 # ── Router modules (this refactoring) ─────────────────────────────────────────
 from router_constants import (
@@ -824,7 +825,8 @@ async def handle(request):
             # z.ai onora il campo "model" del BODY: senza set_body_model ignora
             # il modello scelto qui e usa il proprio default (vedi docstring di
             # set_body_model). forward_glm non riscrive il body: lo fa il caller.
-            _glm_body = _glm_mod.set_body_model(body, _glm_model)
+            _glm_body = strip_thinking_blocks(body)
+            _glm_body = _glm_mod.set_body_model(_glm_body, _glm_model)
             up = await _glm_mod.forward_glm(request, _glm_body, session,
                                             _req_model or _glm_model, log_fn=log,
                                             passthrough=True, upstream_model=_glm_model)
@@ -845,7 +847,8 @@ async def handle(request):
             _qwen_model = _model_override or _qwen_mod.resolve_qwen_upstream_model(_qwen_mod.QWEN_TIER_CODER)
             # L'upstream Model Studio onora il campo "model" del BODY (come z.ai):
             # senza set_body_model userebbe il proprio default ignorando la rotta.
-            _qwen_body = _qwen_mod.set_body_model(body, _qwen_model)
+            _qwen_body = strip_thinking_blocks(body)
+            _qwen_body = _qwen_mod.set_body_model(_qwen_body, _qwen_model)
             up = await _qwen_mod.forward_qwen(request, _qwen_body, session,
                                               _req_model or _qwen_model, log_fn=log,
                                               passthrough=True, upstream_model=_qwen_model)
@@ -871,6 +874,7 @@ async def handle(request):
                 # modello a delegarle a vision_local/ocr_image.
                 _local_body = _local_mod.strip_images_with_note(_local_body)
                 _local_body = _local_mod.inject_system_hint(_local_body)
+            _local_body = strip_thinking_blocks(_local_body)
             _local_body = _local_mod.set_body_model(_local_body, _local_model)
             up = await _local_mod.forward_local(request, _local_body, session,
                                                 _req_model or _local_model, log_fn=log,

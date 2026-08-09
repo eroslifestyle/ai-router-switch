@@ -94,3 +94,37 @@ def sanitize_server_tool_ids(body: bytes) -> tuple[bytes, int]:
     # Serializzazione del body sanificato
     sanitized_body = json.dumps(data, ensure_ascii=False).encode('utf-8')
     return sanitized_body, corrected_count
+
+
+def strip_thinking_blocks(body: bytes) -> bytes:
+    """Rimuove i thinking content blocks dai messaggi prima di forwardare a
+    upstream non-Anthropic (MiniMax/GLM/Qwen/local).
+
+    I thinking blocks Anthropic contengono una ``signature`` crittografica che
+    un provider non-Anthropic non puo' validare. Se la history con questi blocchi
+    torna ad Anthropic in un turno THINK successivo, Anthropic risponde 400
+    ``messages.N.content.M: Invalid signature in thinking block``.
+
+    Fast path: se il body non contiene ``"thinking"`` il JSON non viene parsato.
+    """
+    if b'"thinking"' not in body:
+        return body
+    try:
+        data = json.loads(body)
+    except Exception:
+        return body
+
+    removed = 0
+    for msg in data.get("messages", []):
+        cl = msg.get("content")
+        if not isinstance(cl, list):
+            continue
+        filtered = [b for b in cl
+                    if not (isinstance(b, dict) and b.get("type") == "thinking")]
+        removed += len(cl) - len(filtered)
+        if len(filtered) != len(cl):
+            msg["content"] = filtered
+
+    if removed == 0:
+        return body
+    return json.dumps(data, ensure_ascii=False).encode("utf-8")

@@ -104,6 +104,20 @@ async def debug_auth_middleware(request, handler):
     return await handler(request)
 
 
+def _category_for_mode(mode: str | None) -> str:
+    """Mappa una modalita' in category telemetrica per debug-events.jsonl.
+
+    Le mode miste (mix-am, mix-gm, mix-al, e le loro -2) collassano su 'mix';
+    le mode pure (anthropic/minimax/glm/qwen/local) mantengono il nome.
+    ponytail: startswith('mix') copre le varianti -2 senza enum esplicito.
+    """
+    if not mode:
+        return "unknown"
+    if mode.startswith("mix"):
+        return "mix"
+    return mode
+
+
 class DebugLogger:
     """Singleton: cattura strutturata, storage resiliente, health tracking."""
 
@@ -291,11 +305,18 @@ class DebugLogger:
                 upstream_status: int | None = None, upstream_raw: bytes = b"",
                 upstream_encoding: str = "", sent_bytes: int = 0,
                 orig: dict | None = None, sent_analysis: dict | None = None,
-                note: str = "", mode: str = None, severity: str = "error") -> None:
+                note: str = "", mode: str = None, severity: str = "error",
+                category: str = None) -> None:
         try:
             if mode is None:
                 from router_mode import get_mode
                 mode = get_mode(request, fp)
+            # 2026-08-09: category nel record di debug-events.jsonl. Prima il
+            # 67% degli eventi non aveva category: il record non la derivava
+            # mai da mode. Il chiamante puo' passarla esplicita;
+            # in assenza, la si ricava da mode via _category_for_mode.
+            if category is None:
+                category = _category_for_mode(mode)
 
             err_text = self._decompress(upstream_raw, upstream_encoding)
             flags = self._orig_flags(orig)
@@ -303,6 +324,7 @@ class DebugLogger:
 
             record = {
                 "ts": ts, "kind": kind, "fp": fp, "mode": mode,
+                "category": category,
                 "path": getattr(request, "path", "") if request else "",
                 "client_model": client_model, "upstream_model": upstream_model,
                 "status": status, "stage": stage,

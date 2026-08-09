@@ -159,6 +159,15 @@ def remap_body_for_minimax(raw: bytes, request=None, *,
             data["model"] = _target
         for f in MINIMAX_UNSUPPORTED_FIELDS:
             data.pop(f, None)
+        # Strip thinking content blocks from message history: MiniMax non puo'
+        # validare le signature Anthropic e il loro leaking nella history causa
+        # 400 "Invalid signature in thinking block" quando la storia torna ad
+        # Anthropic nel turno THINK successivo (BUG #1: 922 occorrenze/giorno).
+        for _msg in data.get("messages", []):
+            _c = _msg.get("content")
+            if isinstance(_c, list):
+                _msg["content"] = [b for b in _c
+                                   if not (isinstance(b, dict) and b.get("type") == "thinking")]
         strip_server_tools_for_minimax(data)
         # Il campo `system` resta top-level: l'endpoint Anthropic-compatible di
         # MiniMax lo onora. Convertirlo in un messaggio role=system lo faceva

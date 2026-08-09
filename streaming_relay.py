@@ -8,7 +8,7 @@ import re as re_module
 import time
 
 from aiohttp import web
-from router_debug import dl
+from router_debug import dl, _category_for_mode
 from router_utils import collect_tools_stats
 import tool_isolation
 
@@ -153,6 +153,7 @@ class StreamingRelay:
                 upstream_raw=_raw,
                 upstream_encoding=_enc,
                 orig=self.orig, mode=self.mode,
+                category=_category_for_mode(self.mode),
                 note=f"extra_headers={list((extra_headers or {}).keys())} upstream_headers={_diag_headers} url={getattr(upstream, 'url', '')}",
             )
             # Invia l'errore direttamente: body già letto, costruisci web.Response
@@ -570,7 +571,9 @@ class StreamingRelay:
                         upstream_status=upstream.status,
                         note=(f"bytes={total_bytes} chunks={chunk_count} "
                               f"exc={type(_loop_exc).__name__}"),
-                        orig=self.orig, mode=self.mode, severity="error",
+                        orig=self.orig, mode=self.mode,
+                        category=_category_for_mode(self.mode),
+                        severity="error",
                     )
                 elif upstream.status == 200:
                     _txt_blk = int(_usage.get("text_blocks", 0) or 0)
@@ -590,7 +593,9 @@ class StreamingRelay:
                                     "Content-Encoding", ""),
                                 note=(f"bytes={total_bytes} text_blocks={_txt_blk} "
                                       f"real_out_tokens={_real_out}"),
-                                orig=self.orig, mode=self.mode, severity="error",
+                                orig=self.orig, mode=self.mode,
+                                category=_category_for_mode(self.mode),
+                                severity="error",
                             )
             except Exception:
                 pass
@@ -615,6 +620,7 @@ class StreamingRelay:
                         upstream_raw=bytes(_acc_buf[:8192]),
                         upstream_encoding=upstream.headers.get("Content-Encoding", ""),
                         orig=self.orig, mode=self.mode,
+                        category=_category_for_mode(self.mode),
                         note=f"marker={_hit}",
                     )
         except Exception:
@@ -641,6 +647,7 @@ class StreamingRelay:
                         upstream_raw=bytes(_acc_buf[:4096]),
                         upstream_encoding=upstream.headers.get("Content-Encoding", ""),
                         orig=self.orig, mode=self.mode,
+                        category=_category_for_mode(self.mode),
                         note=f"foreign={_foreign} backend={_bk}",
                     )
         except Exception:
