@@ -7,6 +7,7 @@ from typing import Optional, Callable
 import aiohttp
 from aiohttp import web
 
+import debug_catalog
 import paths
 import secrets_provider
 from synthetic_response import synthetic_error
@@ -271,6 +272,9 @@ class _FixedContent:
                 and obj.get("usage", {}).get("output_tokens", 0) >= self._max):
             obj["delta"]["stop_reason"] = "max_tokens"
             self._log("stop_reason corretto: end_turn -> max_tokens")
+            debug_catalog.record_event(
+                severity="error", category="local", kind="truncated_response_local",
+                snippet=f"end_turn->max_tokens output_tokens={obj.get('usage', {}).get('output_tokens', 0)} max={self._max}")
             return prefix + json.dumps(obj).encode()
         return line
 
@@ -283,6 +287,9 @@ class _FixedContent:
                 and obj.get("usage", {}).get("output_tokens", 0) >= self._max):
             obj["stop_reason"] = "max_tokens"
             self._log("stop_reason corretto: end_turn -> max_tokens")
+            debug_catalog.record_event(
+                severity="error", category="local", kind="truncated_response_local",
+                snippet=f"end_turn->max_tokens output_tokens={obj.get('usage', {}).get('output_tokens', 0)} max={self._max}")
             return json.dumps(obj).encode()
         return raw
 
@@ -322,6 +329,9 @@ async def forward_local(
     key = await get_local_key()
     if not key:
         log_fn("forward_local: API key mancante")
+        debug_catalog.record_event(
+            severity="block", category="local", kind="local_key_missing",
+            code=502, snippet="LOCAL_LLM_API_KEY not configured")
         if passthrough:
             return synthetic_error(502, 'local_unavailable', 'Local LLM key not configured')
         return web.Response(
@@ -355,9 +365,16 @@ async def forward_local(
             if status in (502, 503, 504):
                 if attempt < LOCAL_MAX_RETRY:
                     log_fn(f"forward_local retry {attempt+1}: status {status}")
+                    debug_catalog.record_event(
+                        severity="error", category="local", kind="local_5xx_retry",
+                        code=status, snippet=f"attempt {attempt+1} model={model}")
                     await resp.release()
                     await asyncio.sleep(2)
                     continue
+            if status == 429:
+                debug_catalog.record_event(
+                    severity="block", category="local", kind="quota_429_local",
+                    code=429, snippet=f"model={model}")
             if passthrough:
                 _max_tok = requested_max_tokens(body)
                 if status == 200 and _max_tok:
@@ -365,6 +382,10 @@ async def forward_local(
                 return resp
             body_bytes = await resp.read()
             await resp.release()
+            if status == 200 and not body_bytes.strip():
+                debug_catalog.record_event(
+                    severity="error", category="local", kind="empty_response_local",
+                    code=200, snippet=f"model={model} empty body")
             return web.Response(
                 body=body_bytes,
                 status=status,
@@ -383,6 +404,10 @@ async def forward_local(
             if _is_timeout:
                 log_fn(f"forward_local TIMEOUT dopo {elapsed_ms:.0f}ms (limite {LOCAL_TIMEOUT_SEC}s): nessun retry")
             log_fn(f"forward_local error: {type(e).__name__} elapsed={elapsed_ms:.0f}ms")
+            debug_catalog.record_event(
+                severity="error", category="local",
+                kind="upstream_timeout" if _is_timeout else "upstream_conn_error",
+                code=502, snippet=f"{type(e).__name__} elapsed={elapsed_ms:.0f}ms model={model}")
             err_msg = f'{{"type":"error","error":{{"type":"local_unavailable","message":"Local LLM backend unreachable: {e}"}}}}'
             if passthrough:
                 return synthetic_error(502, 'local_unavailable', err_msg)
@@ -393,6 +418,9 @@ async def forward_local(
             )
 
     log_fn("forward_local: exhausted retries")
+    debug_catalog.record_event(
+        severity="error", category="local", kind="upstream_error",
+        code=502, snippet=f"exhausted {LOCAL_MAX_RETRY+1} attempts model={model}")
     err_msg = '{"type":"error","error":{"type":"local_unavailable","message":"Local LLM backend failed after retries"}}'
     if passthrough:
         return synthetic_error(502, 'local_unavailable', err_msg)

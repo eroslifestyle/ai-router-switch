@@ -81,6 +81,13 @@ def parse_router_command(text: str):
 
 
 def _router_reply_text(action: dict, fp: str, fallback_fp: str = None) -> str:
+    # fp e' costruito dal proxy come "sid:<session-id>" quando l'header
+    # X-Claude-Code-Session-Id e' presente, altrimenti conversation_fingerprint()
+    # (content-hash 12 char). Entrambi i casi sono coperti da get_chat_mode(fp),
+    # che usa la stessa chiave con cui set_chat_mode ha scritto l'override.
+    # Verificato 2026-08-09: !router status risponde correttamente minimax anche
+    # quando il file globale ai-router-mode dice mix-am-2 (divergenza intenzionale:
+    # il file e' il DEFAULT per le chat nuove, non la fonte di verita per-chat).
     if action["action"] == "set":
         set_chat_mode(fp, action["mode"])
         _disp = _INTERNAL_TO_DISPLAY.get(action["mode"], action["mode"])

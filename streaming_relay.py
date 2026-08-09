@@ -249,6 +249,13 @@ class StreamingRelay:
         _tail_limit = 16384
         # Precompila pattern per SSE message_start rewrite
         sse_model_pat = re_module.compile(rb'"model":"[^"]*"')
+        # Traccia lo stato del loop per il rilevamento empty/truncated nel finally.
+        # forward_anthropic/forward_minimax restituiscono la ClientResponse NON
+        # letta: il relay e' l'unico imbuto che vede il corpo di TUTTE le risposte
+        # 200 delle modalita' pure (anthropic/minimax/glm/qwen/local). Senza questo
+        # rilevamento, una risposta 200-ma-vuota o uno stream troncato non
+        # generano evento con la category corretta (audit 2026-08-09 #1).
+        _loop_exc = None
         try:
             async for chunk in iterator:
                 if not chunk:
@@ -292,6 +299,7 @@ class StreamingRelay:
                     # FIX #5: drain senza try/except - se fallisce vogliamo saperlo
                     await resp.drain()
         except Exception as e:
+            _loop_exc = e
             # FIX #3: log esplicito eccezioni nel loop streaming
             # DIAG stall 2026-08-01: distingue "client sparito" (effetto) da rottura
             # lato server (causa). Il calcolo e' difensivo: qualunque suo fallimento
@@ -542,6 +550,48 @@ class StreamingRelay:
                     # indovinare dal fingerprint del client.
                     synthetic=_is_synthetic,
                 )
+            except Exception:
+                pass
+            # Rilevamento empty/truncated (2026-08-09): _usage e' ora popolato.
+            # Va DENTRO il finally (12 spazi) per girare sia su loop completato
+            # (empty_response) sia su eccezione nel loop (truncated_response).
+            # Soglia: text_blocks==0 AND output_tokens (reale, da buffer, NON
+            # stimato) ==0 AND total_bytes<500. Il relay riga ~388 inflate
+            # _usage["output_tokens"] a max(1, total_bytes//4) quando l SSE
+            # riporta 0: leggere _usage maschera le vuote, per cui rileggo
+            # _acc_buf con lo stesso pattern di _glm_is_empty.
+            try:
+                if _loop_exc is not None:
+                    dl.capture(
+                        kind=f"truncated_response_{self.mode}",
+                        request=self.request, fp=chat_fp_for_rewrite,
+                        client_model=orig_model or "",
+                        status=upstream.status, stage="relay",
+                        upstream_status=upstream.status,
+                        note=(f"bytes={total_bytes} chunks={chunk_count} "
+                              f"exc={type(_loop_exc).__name__}"),
+                        orig=self.orig, mode=self.mode, severity="error",
+                    )
+                elif upstream.status == 200:
+                    _txt_blk = int(_usage.get("text_blocks", 0) or 0)
+                    _partial = bool(_usage.get("measure_partial"))
+                    if _txt_blk == 0 and not _partial and total_bytes < 500:
+                        _ot_m = re_module.findall(
+                            rb'"output_tokens"\s*:\s*(\d+)', _acc_buf)
+                        _real_out = int(_ot_m[-1]) if _ot_m else 0
+                        if _real_out == 0:
+                            dl.capture(
+                                kind=f"empty_response_{self.mode}",
+                                request=self.request, fp=chat_fp_for_rewrite,
+                                client_model=orig_model or "",
+                                status=200, stage="relay", upstream_status=200,
+                                upstream_raw=bytes(_acc_buf[:512]),
+                                upstream_encoding=upstream.headers.get(
+                                    "Content-Encoding", ""),
+                                note=(f"bytes={total_bytes} text_blocks={_txt_blk} "
+                                      f"real_out_tokens={_real_out}"),
+                                orig=self.orig, mode=self.mode, severity="error",
+                            )
             except Exception:
                 pass
         # GUARD pseudo-toolcall (2026-07-22): se la request aveva `tools` ma la

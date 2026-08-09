@@ -131,6 +131,10 @@ def get_chat_mode(fp: str):
 
 
 def set_chat_mode(fp: str, mode: str):
+    # NON sincronizzare ai-router-mode qui: il file globale e' il DEFAULT per le
+    # chat nuove (senza fingerprint in chats.json), scritto solo da `ai-mode` CLI.
+    # Sincronizzarlo qui contaminerebbe le altre chat: il 93% delle 1608 entry in
+    # chats.json diverge dal default globale. Verificato 2026-08-09.
     d = _load_chats()
     d[fp] = {"mode": mode, "ts": time.time()}
     _save_chats(d)
