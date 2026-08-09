@@ -158,3 +158,15 @@ def synthetic_rate_limit(
         headers=headers,
         url=url,
     )
+
+def buffered_upstream(status: int, body: bytes, headers=None, url: str = "") -> SyntheticResponse:
+    """Risposta upstream reale gia' letta (body bufferizzato), da passare al relay.
+
+    Diversamente da synthetic_error non e' un errore sintetico: e' una risposta
+    sana il cui body e' stato letto per intero dal backend (es. GLM empty-check
+    sulle THINK glm-5.x). Rimuove il marker diagnostico x-ai-router: synthetic,
+    che non appartiene a una risposta reale inoltrata al client.
+    """
+    r = SyntheticResponse(status=status, body=body, headers=headers, url=url)
+    r.headers.pop("x-ai-router", None)
+    return r

@@ -21,6 +21,7 @@ import gzip
 import json
 import os
 import random
+import re
 import subprocess
 import time
 import aiohttp
@@ -32,7 +33,7 @@ import secrets_provider
 
 import tool_isolation
 import debug_catalog
-from synthetic_response import synthetic_error, synthetic_rate_limit
+from synthetic_response import synthetic_error, synthetic_rate_limit, buffered_upstream
 
 
 # _log_usage rimossa il 2026-08-07: nessun chiamante. Il ciclo di import che documentava resta valido e vale per _non_stream_timeout qui sotto:
@@ -400,6 +401,16 @@ def set_body_model(body: bytes, model: str) -> bytes:
 _GLM_SEM = asyncio.Semaphore(int(os.environ.get("AIROUTER_GLM_SEMAPHORE", "8")))
 
 
+
+def _glm_is_empty(decompressed: bytes) -> bool:
+    if not decompressed:
+        return True
+    toks = re.findall(rb'"output_tokens"\s*:\s*(\d+)', decompressed)
+    if not toks:
+        return False
+    return int(toks[-1]) == 0
+
+
 async def forward_glm(request, body: bytes, session, model: str,
                       log_fn=print, passthrough: bool = False,
                       upstream_model: str = ""):
@@ -536,6 +547,28 @@ async def forward_glm(request, body: bytes, session, model: str,
             # Connessione volutamente APERTA: la release avviene nel finally
             # di StreamingRelay.relay() dopo aver consumato lo stream.
             if passthrough:
+                if model.startswith("glm-5"):
+                    raw = await resp.read()
+                    resp.release()
+                    _dec = raw
+                    if raw[:2] == bytes.fromhex("1f8b"):
+                        try:
+                            _dec = gzip.decompress(raw)
+                        except Exception as e:
+                            log_fn(f"GLM empty-check gzip fail: {e}")
+                    if _glm_is_empty(_dec):
+                        log_fn(f"GLM empty-200 attempt {attempt + 1} model={model}")
+                        debug_catalog.record_event(
+                            severity="error", category="glm",
+                            kind="glm_empty_response", code=200,
+                            snippet=f"attempt={attempt + 1} model={model} bytes={len(raw)}")
+                        if attempt == 0:
+                            await asyncio.sleep(0.5 + random.uniform(0, 1))
+                            continue
+                        return _err(502, "glm_empty_response",
+                                    "GLM returned an empty body after 2 attempts",
+                                    headers={"x-should-retry": "true"})
+                    return buffered_upstream(resp.status, raw, headers=dict(resp.headers))
                 return resp
 
             # Non-passthrough: leggi body, gestisci gzip, ritorna web.Response
