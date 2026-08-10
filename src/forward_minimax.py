@@ -191,7 +191,7 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
                 up = await session.request(
                     request.method, url, **req_kwargs
                 )
-        if up.status != 429:
+        if up.status not in (429, 529):
             MINIMAX_LIMITER.record(entry, est, success=True)
             MINIMAX_LIMITER.on_success()
             try:
@@ -203,32 +203,40 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
         try:
             raw = await up.read()
         except Exception:
-            raw = b""
+            raw = b''
         try:
             await up.release()
         except Exception:
             pass
         MINIMAX_LIMITER.record(entry, 0, success=False)
+        if up.status == 529:
+            step = MINIMAX_LIMITER.on_429_rpm()
+            _log(f'minimax 529 cluster-overload: backoff {step}s (budget left {budget_left:.0f}s) model={model}')
+            dl.capture(kind='minimax_529_overload', request=request, fp='',
+                      upstream_status=529, upstream_raw=raw,
+                      note=f'backoff {step}s, budget {budget_left:.0f}s', mode='minimax',
+                      severity='block')
+            continue
         kind = _classify_429(raw)
-        if kind == "token_plan":
-            snippet = raw[:400].decode("utf-8", "replace")
+        if kind == 'token_plan':
+            snippet = raw[:400].decode('utf-8', 'replace')
             MINIMAX_LIMITER.set_plan_exhausted(snippet)
-            _log(f"minimax 429 TOKEN-PLAN: {snippet[:200]}")
-            _minimax_alert(f"Token Plan esaurito: {snippet[:200]}")
-            dl.capture(kind="minimax_429_token_plan", request=request, fp="",
-                      upstream_status=429, upstream_raw=raw, mode="minimax",
-                      snippet=snippet[:300], severity="error")
+            _log(f'minimax 429 TOKEN-PLAN: {snippet[:200]}')
+            _minimax_alert(f'Token Plan esaurito: {snippet[:200]}')
+            dl.capture(kind='minimax_429_token_plan', request=request, fp='',
+                      upstream_status=429, upstream_raw=raw, mode='minimax',
+                      snippet=snippet[:300], severity='error')
             if not plan_retry_done:
                 plan_retry_done = True
                 await asyncio.sleep(10)
                 continue
-            return _synthetic_429(f"MiniMax Token Plan esaurito. {snippet[:300]}")
+            return _synthetic_429(f'MiniMax Token Plan esaurito. {snippet[:300]}')
         step = MINIMAX_LIMITER.on_429_rpm()
-        _log(f"minimax 429 RPM/TPM: backoff {step}s (budget left {budget_left:.0f}s) model={model}")
-        dl.capture(kind="minimax_429_rpm", request=request, fp="",
+        _log(f'minimax 429 RPM/TPM: backoff {step}s (budget left {budget_left:.0f}s) model={model}')
+        dl.capture(kind='minimax_429_rpm', request=request, fp='',
                   upstream_status=429, upstream_raw=raw,
-                  note=f"backoff {step}s, budget {budget_left:.0f}s", mode="minimax",
-                  severity="block")
+                  note=f'backoff {step}s, budget {budget_left:.0f}s', mode='minimax',
+                  severity='block')
 
 
 
@@ -265,7 +273,7 @@ async def _forward_minimax_generative(request, body: bytes, session,
             if _to is not None:
                 _kw["timeout"] = _to
             up = await session.request(request.method, url, **_kw)
-        if up.status != 429:
+        if up.status not in (429, 529):
             MINIMAX_LIMITER.record(entry, est_tokens, success=True)
             MINIMAX_LIMITER.on_success()
             try:
@@ -273,7 +281,7 @@ async def _forward_minimax_generative(request, body: bytes, session,
                 up._airouter_limiter_est = est_tokens
             except Exception:
                 pass
-            raw = b""
+            raw = b''
             async for chunk in up.content.iter_chunked(65536):
                 raw += chunk
             await up.release()
@@ -282,22 +290,23 @@ async def _forward_minimax_generative(request, body: bytes, session,
                 resp_json = json.loads(raw)
                 return web.json_response(resp_json, status=up.status)
             except Exception:
-                return web.Response(body=raw, content_type=up.content_type or "application/octet-stream", status=up.status)
+                return web.Response(body=raw, content_type=up.content_type or 'application/octet-stream', status=up.status)
         try:
             raw = await up.read()
         except Exception:
-            raw = b""
+            raw = b''
         try:
             await up.release()
         except Exception:
             pass
         MINIMAX_LIMITER.record(entry, 0, success=False)
         step = MINIMAX_LIMITER.on_429_rpm()
-        log(f"minimax-generative 429: backoff {step}s")
-        dl.capture(kind="minimax_generative_429", request=request, fp="",
-                  upstream_status=429,
-                  note=f"generative path, backoff {step}s", mode="minimax",
-                  severity="block")
+        _kind = 'minimax_generative_529' if up.status == 529 else 'minimax_generative_429'
+        log(f'minimax-generative {up.status}: backoff {step}s')
+        dl.capture(kind=_kind, request=request, fp='',
+                  upstream_status=up.status,
+                  note=f'generative path, backoff {step}s', mode='minimax',
+                  severity='block')
         await asyncio.sleep(step)
 
 
