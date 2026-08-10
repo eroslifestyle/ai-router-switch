@@ -578,7 +578,15 @@ class StreamingRelay:
                 elif upstream.status == 200:
                     _txt_blk = int(_usage.get("text_blocks", 0) or 0)
                     _partial = bool(_usage.get("measure_partial"))
-                    if _txt_blk == 0 and not _partial and total_bytes < 500:
+                    # count_tokens: body JSON minuscolo senza blocchi testo (es.
+                    # {"input_tokens":N}) non e' una risposta vuota. Escluso dal
+                    # guard per evitare il falso positivo empty_response_*
+                    # documentato nel TODO #1 di CP_20260810_debug_sweep.md.
+                    _is_count_tokens = self.request.path.endswith("/count_tokens")
+                    if (not _is_count_tokens
+                            and _txt_blk == 0
+                            and not _partial
+                            and total_bytes < 500):
                         _ot_m = re_module.findall(
                             rb'"output_tokens"\s*:\s*(\d+)', _acc_buf)
                         _real_out = int(_ot_m[-1]) if _ot_m else 0
