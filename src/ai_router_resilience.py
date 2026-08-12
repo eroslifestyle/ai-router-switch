@@ -60,7 +60,7 @@ class Resilience:
     # Minimo intervallo tra due stack dump di stall (anti-spam)
     LOOP_STALL_DUMP_COOLDOWN_S = 60
 
-    def __init__(self, port: int, log_fn=None, get_pid=None):
+    def __init__(self, port: int, log_fn=None, get_pid=None, **kwargs):
         self.port = port
         self.log = log_fn or (lambda m: None)
         self.get_pid = get_pid or (lambda: os.getpid())
@@ -75,7 +75,7 @@ class Resilience:
         self._loop_beat_ts = 0.0  # ultimo beat eseguito DAL loop
         self._loop_stalled = False
         self._last_stall_dump_ts = 0.0
-        self._faulthandler_file = None
+        self._should_test_oauth_fn = kwargs.get('should_test_oauth_fn')
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         CRASH_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -298,6 +298,10 @@ class Resilience:
             return
 
         # Token presente e non scaduto: facciamo self-test live (sessione LOCALE)
+        # Skip se modalità non-anthropic (es. minimax, glm, qwen)
+        if self._should_test_oauth_fn is not None and not self._should_test_oauth_fn():
+            self.log("resilience: self-test OAuth skip: modalità non-anthropic")
+            return
         ok, msg = self.self_test_oauth(session=None, timeout_s=10.0)
         if ok:
             if self._state != self.STATE_OK:
