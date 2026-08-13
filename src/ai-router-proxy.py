@@ -49,7 +49,7 @@ from anthropic_body import strip_thinking_blocks
 from router_constants import (
     LISTEN_HOST, LISTEN_PORT, LISTEN_PORTS, SHUTDOWN_TIMEOUT_S,
     ANTHROPIC_UPSTREAM, MINIMAX_UPSTREAM, MINIMAX_MODEL,
-    VALID_MODES, GLM_AVAILABLE, QWEN_AVAILABLE,
+    VALID_MODES, MODES_USING_ANTHROPIC, GLM_AVAILABLE, QWEN_AVAILABLE,
     MODE_FILE, LOG_FILE, HOP_HEADERS, PORT_MODE, _HEALTH_CHECK_PATHS,
 )
 from router_utils import (
@@ -627,8 +627,11 @@ async def handle(request):
         return web.Response(status=404, text="not found")
 
     # RESILIENZA: blocco traffico in modalita' DEGRADED
+    # Solo le modalita che usano Anthropic (MODES_USING_ANTHROPIC) dipendono
+    # da un OAuth vivo. Le altre (minimax/glm/qwen/local/mix-gm) non lo toccano
+    # mai e continuano a funzionare anche se Anthropic e' in 429-quota o giu'.
     if (_RESILIENCE_AVAILABLE and RESILIENCE_INST is not None
-            and mode not in ("minimax", "glm")
+            and mode in MODES_USING_ANTHROPIC
             and not RESILIENCE_INST.state_is_ok()):
         if (request.path not in {"/", "/health", "/readyz", "/livez", "/stats",
                                  "/metrics", "/status", "/__router_health",

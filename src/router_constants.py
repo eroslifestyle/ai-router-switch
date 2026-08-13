@@ -112,6 +112,18 @@ HOP_HEADERS = frozenset({
 # ── Valid modes ────────────────────────────────────────────────────────────────
 VALID_MODES = ("anthropic", "minimax", "mix-am", "mix-am-2", "mix-ag", "mix-ag-2", "mix-gm", "mix-gm-2", "glm", "qwen", "mix-al", "local")
 
+# Modalita' che instradano traffico verso Anthropic (THINK o ESECUZIONE).
+# Sorgente: tabella gerarchica in ~/.claude/CLAUDE.md. Le modalita qui elencate
+# dipendono da un OAuth Anthropic vivo; tutte le altre (minimax, glm, qwen, local,
+# mix-gm, mix-gm-2) non lo toccano mai e NON devono essere bloccate dal gate
+# DEGRADED del resilience layer quando Anthropic e' giu' o in 429-quota.
+MODES_USING_ANTHROPIC = frozenset({
+    "anthropic",   # THINK+ESEC su Anthropic
+    "mix-am", "mix-am-2",   # Anthropic THINK + MiniMax ACT
+    "mix-ag", "mix-ag-2",   # Anthropic THINK + GLM ACT
+    "mix-al",      # Anthropic THINK/VERIFY + LLM locale ACT
+})
+
 # ── Port mode map ─────────────────────────────────────────────────────────────
 PORT_MODE = {
     8771: "anthropic",
