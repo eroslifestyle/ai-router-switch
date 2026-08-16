@@ -19,7 +19,7 @@ from router_auth import _load_oauth_token, _reload_oauth_token
 from router_debug import dl
 # A livello modulo, MAI dentro le funzioni: un import locale renderebbe il nome
 # locale all'intera funzione (vedi test_module_names_resolved.py).
-from anthropic_body import sanitize_server_tool_ids
+from anthropic_body import sanitize_server_tool_ids, declassa_thinking_estranei
 import anthropic_capabilities
 
 # Rate limiter preventivo (sliding window RPM/TPM + cooldown 429 burst).
@@ -294,12 +294,19 @@ async def forward_anthropic(request, body, session):
     # finiscono nella history). Fast path interno: se il body non contiene
     # "server_tool_use" non viene nemmeno parsato.
     safe_body, _n_srv = sanitize_server_tool_ids(safe_body)
+    # Stesso problema degli id server_tool_use, altro campo: nelle modalita' miste
+    # l'ACT non-Anthropic firma i propri thinking block con una firma che Anthropic
+    # non riconosce, e la cronologia che li riporta indietro prende 400 (1.001 turni
+    # persi nei 7 giorni al 2026-08-16). Vengono declassati a text, non eliminati.
+    safe_body, _n_think = declassa_thinking_estranei(safe_body)
     # Copre la coda della conversazione con il breakpoint di cache rimasto libero:
     # senza, un contesto lungo viene riprocessato a ogni turno (creation=0) e lo
     # stream rallenta fino a farsi chiudere dal client. No-op se i 4 slot sono pieni.
     safe_body = cache_optimizer.ensure_tail_cache_breakpoint(safe_body)
     if _n_srv:
         log(f"anthropic: sanificati {_n_srv} id server_tool_use non conformi")
+    if _n_think:
+        log(f"anthropic: declassati a text {_n_think} thinking block con firma non-Anthropic")
 
     # Deep debug (gated: default OFF, vedi _emit_deep_debug)
     if _DEEP_DEBUG:
@@ -513,12 +520,16 @@ async def forward_anthropic_direct(request, body, session):
     # rescue chain delle modalità miste, dove la history contiene proprio i
     # blocchi prodotti dall'esecutore non-Anthropic.
     safe_body, _n_srv = sanitize_server_tool_ids(safe_body)
+    # Gemella della riga in forward_anthropic: modificarne una sola le fa divergere.
+    safe_body, _n_think = declassa_thinking_estranei(safe_body)
     # Copre la coda della conversazione con il breakpoint di cache rimasto libero:
     # senza, un contesto lungo viene riprocessato a ogni turno (creation=0) e lo
     # stream rallenta fino a farsi chiudere dal client. No-op se i 4 slot sono pieni.
     safe_body = cache_optimizer.ensure_tail_cache_breakpoint(safe_body)
     if _n_srv:
         log(f"anthropic-direct: sanificati {_n_srv} id server_tool_use non conformi")
+    if _n_think:
+        log(f"anthropic-direct: declassati a text {_n_think} thinking block con firma non-Anthropic")
 
     # Deep debug (gated: default OFF, vedi _emit_deep_debug)
     if _DEEP_DEBUG:

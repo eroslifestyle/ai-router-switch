@@ -44,6 +44,11 @@ from context_rewrite import rewrite_for_context
 from context_alert import notify_context_threshold
 from sse_utils import _sse_events_from_message, _send_sse_message
 from anthropic_body import strip_thinking_blocks
+# A livello di modulo di proposito: importarla dentro handle() renderebbe il nome
+# LOCALE all'intera funzione e il primo uso, che sta piu' in alto, solleverebbe
+# UnboundLocalError. E' gia' successo con get_safe_input_limit (vedi il commento
+# nel blocco bottleneck-shrink).
+from role_routing import modes_with_act_provider
 
 # ── Router modules (this refactoring) ─────────────────────────────────────────
 from router_constants import (
@@ -520,7 +525,13 @@ async def handle(request):
     # limit_MiniMax, INDIPENDENTEMENTE dal ctx_check (che usa il limite client).
     # FIX 2026-07-26: gate sul provider effettivo per non shrinkare richieste
     # THINK inoltrate ad Anthropic (es. mix-am con claude-opus-*).
-    _MINIMAX_BACKEND_MODES = {"minimax", "mix-am", "mix-gm"}
+    # Derivato, non scritto a mano: l'elenco letterale {"minimax","mix-am","mix-gm"}
+    # non e' stato aggiornato quando sono nate mix-am-2 e mix-gm-2, che hanno lo
+    # stesso routing delle basi. Risultato: la modalita' con il 47% del traffico
+    # (mix-am-2, 6.988 richieste in 7 giorni al 2026-08-16) mandava a MiniMax il body
+    # pieno da 1M di contesto senza alcuno shrink preventivo — esattamente il bug del
+    # 2026-07-20 che questo blocco doveva chiudere, riaperto per una modalita' nuova.
+    _MINIMAX_BACKEND_MODES = modes_with_act_provider("minimax")
     _shrink_for_minimax = mode in _MINIMAX_BACKEND_MODES and (_early_provider == "minimax" or _early_provider is None)
     if mode in _MINIMAX_BACKEND_MODES and not _shrink_for_minimax:
         log(f"ctx: bottleneck-shrink SKIP provider={_early_provider} mode={mode} bytes={len(body)} fp={fp}")

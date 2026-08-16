@@ -106,6 +106,20 @@ _MODE_DEFAULT_PROVIDER = {
 VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-am-2", "mix-ag", "mix-ag-2", "mix-gm", "mix-gm-2", "mix-al", "local")
 
 
+def modes_with_act_provider(provider: str) -> frozenset:
+    """Modalita' il cui ESECUTORE (ACT) e' ``provider``.
+
+    Esiste perche' l'elenco a mano si dimentica le modalita' nuove. Il proxy
+    teneva ``{"minimax", "mix-am", "mix-gm"}`` scritto a mano per decidere se
+    applicare lo shrink proattivo verso il collo di bottiglia MiniMax: quando
+    sono arrivate ``mix-am-2`` e ``mix-gm-2`` — stesso routing delle basi —
+    nessuno ha aggiornato il set, e mix-am-2 (il 47% del traffico, misurato il
+    2026-08-16) e' rimasta senza shrink. Derivandolo da qui, una modalita' nuova
+    e' coperta il giorno stesso in cui entra in ``_MODE_DEFAULT_PROVIDER``.
+    """
+    return frozenset(m for m, p in _MODE_DEFAULT_PROVIDER.items() if p == provider)
+
+
 # ── Native executor per provider ─────────────────────────────────────────────
 # It's the NATIVE EXECUTOR of the provider, never the THINK (the THINK is
 # chosen manually by the user, it should never be decided by code).

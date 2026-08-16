@@ -96,6 +96,85 @@ def sanitize_server_tool_ids(body: bytes) -> tuple[bytes, int]:
     return sanitized_body, corrected_count
 
 
+_FIRMA_ESTRANEA_MAX_LEN = 64
+_HEX = set("0123456789abcdefABCDEF")
+
+
+def _firma_e_estranea(signature) -> bool:
+    """True se la ``signature`` di un thinking block NON puo' venire da Anthropic.
+
+    Misurato il 2026-08-16 con sonde dirette sulle porte di modalita':
+    GLM (8775) firma con 24 caratteri esadecimali, MiniMax (8781, ACT di mix-am-2)
+    con 64. Anthropic firma con un blob crittografico in base64, quindi molto piu'
+    lungo e con caratteri fuori dall'alfabeto esadecimale (maiuscole miste, ``+``,
+    ``/``, ``=``). Il criterio e' deliberatamente conservativo — solo firme corte E
+    interamente esadecimali — perche' sbagliare in difetto lascia le cose come sono
+    oggi, mentre sbagliare in eccesso toglierebbe un thinking block valido.
+    """
+    if signature is None or signature == "":
+        return True
+    s = str(signature)
+    if len(s) > _FIRMA_ESTRANEA_MAX_LEN:
+        return False
+    return all(c in _HEX for c in s)
+
+
+def declassa_thinking_estranei(body: bytes) -> tuple[bytes, int]:
+    """Converte in blocchi ``text`` i thinking block con firma non-Anthropic.
+
+    Anthropic rifiuta con 400 ``messages.N.content.M: Invalid `signature` in
+    `thinking` block`` la cronologia che contiene blocchi thinking prodotti da un
+    altro provider. Succede per costruzione nelle modalita' miste: l'ACT (MiniMax
+    o GLM) emette thinking nel 98-99% delle risposte, il client li conserva nella
+    conversazione, e al turno THINK successivo tornano ad Anthropic che li rifiuta.
+    Misurato sui 7 giorni al 2026-08-16: 1.001 turni utente falliti, 553 in
+    mix-am-2, 442 in mix-am, 6 in anthropic (cronologie contaminate da sessioni
+    miste precedenti), sempre a ``messages.1`` o ``messages.3`` — cioe' il turno
+    eseguito dall'ACT.
+
+    Si converte invece di eliminare per due motivi: il ragionamento resta a
+    disposizione del modello (nessuna perdita di contesto) e un messaggio il cui
+    unico blocco fosse il thinking non resta con ``content`` vuoto, che sarebbe un
+    altro 400. La trasformazione e' deterministica, quindi due turni consecutivi
+    danno lo stesso prefisso e il prompt caching non ne risente.
+
+    Gemella in uscita di ``strip_thinking_blocks``: quella toglie i thinking di
+    Anthropic prima di mandarli altrove, questa neutralizza quelli altrui prima di
+    riportarli ad Anthropic. Stesso schema gia' usato da
+    ``sanitize_server_tool_ids`` per gli id ``server_tool_use``.
+    """
+    if b'"thinking"' not in body:
+        return body, 0
+    try:
+        data = json.loads(body)
+    except Exception:
+        return body, 0
+
+    convertiti = 0
+    try:
+        for msg in data.get("messages", []):
+            if not isinstance(msg, dict):
+                continue
+            cl = msg.get("content")
+            if not isinstance(cl, list):
+                continue
+            for i, blk in enumerate(cl):
+                if not isinstance(blk, dict) or blk.get("type") != "thinking":
+                    continue
+                if not _firma_e_estranea(blk.get("signature")):
+                    continue
+                testo = blk.get("thinking")
+                cl[i] = {"type": "text",
+                         "text": testo if isinstance(testo, str) and testo else "[ragionamento]"}
+                convertiti += 1
+    except Exception:
+        return body, 0
+
+    if convertiti == 0:
+        return body, 0
+    return json.dumps(data, ensure_ascii=False).encode("utf-8"), convertiti
+
+
 def strip_thinking_blocks(body: bytes) -> bytes:
     """Rimuove i thinking content blocks dai messaggi prima di forwardare a
     upstream non-Anthropic (MiniMax/GLM/Qwen/local).

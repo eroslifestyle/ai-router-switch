@@ -339,6 +339,41 @@ GLM_SHRINK_TARGET_BYTES = int(os.environ.get(
     "AIROUTER_GLM_CONTEXT_SHRINK_TARGET", "600000"))
 
 
+def glm_shrink_target_for(model: str | None) -> int:
+    """Byte oltre i quali comprimere il contesto, per il modello GLM risolto.
+
+    Il target era una costante unica da 600.000 byte, tarata sul modello piu'
+    piccolo. Ma in mix-gm il THINK e' ``glm-5.2``, che ha 1M di token di
+    contesto: comprimere il suo body a 600 KB significa buttare via meta'
+    conversazione per un limite che quel modello non ha. Misurato il 2026-08-16:
+    1.371 shrink preventivi, di cui uno osservato dal vivo comprimeva i primi 50
+    messaggi su 301 (647.762b -> 523.491b) su una richiesta diretta a glm-5.2.
+    Il modello riceveva un riassunto troncato a 1.800 caratteri per messaggio al
+    posto di un terzo della conversazione, e ne rispondeva senza saperlo.
+
+    Il limite si deriva da quelli gia' dichiarati — ``get_safe_input_limit``
+    (contesto meno lo spazio per l'output) convertito in byte da
+    ``bytes_per_token`` — invece di essere un numero scelto a mano: glm-4.7 e
+    glm-5-turbo restano a ~640 KB, quindi per loro non cambia nulla, mentre
+    glm-5.2 sale a ~3,2 MB. Un modello sconosciuto ricade sul limite piu' basso
+    della mappa, cioe' sul comportamento prudente di prima.
+
+    ``AIROUTER_GLM_CONTEXT_SHRINK_TARGET`` resta un override esplicito: se e'
+    impostato nell'ambiente vince su tutto, com'era prima.
+    """
+    if os.environ.get("AIROUTER_GLM_CONTEXT_SHRINK_TARGET"):
+        return GLM_SHRINK_TARGET_BYTES
+    try:
+        from model_context_map import get_safe_input_limit
+        from token_counter import bytes_per_token
+        target = int(get_safe_input_limit(model or "") * bytes_per_token(model or ""))
+    except Exception:
+        return GLM_SHRINK_TARGET_BYTES
+    # Mai sotto il valore storico: se la mappa non conosce il modello, il
+    # comportamento resta quello prudente di sempre invece di stringersi.
+    return max(target, GLM_SHRINK_TARGET_BYTES)
+
+
 def clamp_glm_max_tokens(body: bytes, log_fn=None) -> bytes:
     """Clampa max_tokens nel body in uscita verso z.ai a GLM_MAX_TOKENS_LIMIT.
     z.ai rifiuta con 400 [1210] i valori fuori range [1, 32768]. No-op se assente
@@ -458,11 +493,13 @@ async def forward_glm(request, body: bytes, session, model: str,
     # SHRINK TESTO PREVENTIVO: se il body supera il target, riduce il contesto
     # prima di chiamare z.ai. GLM non risponde sempre con un 400 leggibile
     # (puo' dare 500 opaco o troncare), quindi la guardia e' preventiva.
-    if len(body) > GLM_SHRINK_TARGET_BYTES:
+    _shrink_target = glm_shrink_target_for(upstream_model or model)
+    if len(body) > _shrink_target:
         from context_shrink import shrink_body_to_budget
-        _shrunk = await shrink_body_to_budget(body, GLM_SHRINK_TARGET_BYTES)
+        _shrunk = await shrink_body_to_budget(body, _shrink_target)
         if _shrunk is not None and len(_shrunk) < len(body):
-            log_fn(f"GLM preventivo shrink {len(body)}b -> {len(_shrunk)}b")
+            log_fn(f"GLM preventivo shrink {len(body)}b -> {len(_shrunk)}b "
+                   f"(target {_shrink_target}b per {upstream_model or model})")
             body = _shrunk
 
     url = GLM_UPSTREAM + request.path_qs
