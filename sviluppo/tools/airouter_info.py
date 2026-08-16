@@ -256,7 +256,13 @@ def cmd_orfani(args):
                     testi[p] = p.read_text(encoding="utf-8", errors="replace")
                 except Exception:
                     pass
+    def _mai_riferito(nome, f):
+        pat = re.compile(rf"\b{re.escape(nome)}\b")
+        rif = sum(len(pat.findall(t)) - (1 if p == f else 0) for p, t in testi.items())
+        return rif <= 0
+
     orfani, totale = [], 0
+    orfani_metodi, totale_metodi = [], 0
     for f in sorted(src.glob("*.py")):
         try:
             albero = ast.parse(f.read_text(encoding="utf-8", errors="replace"))
@@ -267,17 +273,34 @@ def cmd_orfani(args):
                 continue
             totale += 1
             nome = nodo.name
-            if nome.startswith("__") or nome in ("main", "setup", "handle"):
-                continue
-            pat = re.compile(rf"\b{re.escape(nome)}\b")
-            rif = sum(len(pat.findall(t)) - (1 if p == f else 0) for p, t in testi.items())
-            if rif <= 0:
-                orfani.append(f"{f.relative_to(REPO)}:{nodo.lineno}  {nome}")
+            if not (nome.startswith("__") or nome in ("main", "setup", "handle")):
+                if _mai_riferito(nome, f):
+                    orfani.append(f"{f.relative_to(REPO)}:{nodo.lineno}  {nome}")
+            # I metodi di classe non erano contati, e ci si nascondeva del residuo:
+            # ContextManager.post_check, .reassign e .acquire erano l'API pubblica
+            # del modulo, mai chiamate da nessuno, e questo comando dichiarava
+            # comunque «0 mai referenziati» (2026-08-16, rimosse).
+            if isinstance(nodo, ast.ClassDef):
+                for m in nodo.body:
+                    if not isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        continue
+                    if m.name.startswith("__") and m.name.endswith("__"):
+                        continue
+                    totale_metodi += 1
+                    if _mai_riferito(m.name, f):
+                        orfani_metodi.append(
+                            f"{f.relative_to(REPO)}:{m.lineno}  {nome}.{m.name}()")
+
     print(f"simboli top-level in src/: {totale}   mai referenziati: {len(orfani)}")
     for o in orfani:
         print(f"    {o}")
+    print(f"metodi di classe in src/:  {totale_metodi}   mai referenziati: {len(orfani_metodi)}")
+    for o in orfani_metodi:
+        print(f"    {o}")
     print("\n  «mai referenziato» non e' una diagnosi: puo' essere un residuo da togliere")
     print("  oppure una funzionalita' mai agganciata. Va deciso caso per caso.")
+    print("  Il criterio e' il nome nudo, quindi e' prudente: un metodo che si chiama")
+    print("  come qualcos'altro nel repo (close, run, acquire) risulta vivo comunque.")
 
 
 def main():

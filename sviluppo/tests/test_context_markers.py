@@ -59,21 +59,22 @@ def test_marker_essenziali_presenti():
 
 
 def test_tutte_le_copie_riconoscono_lo_stesso_insieme():
-    """Le quattro implementazioni storiche devono ora rispondere allo stesso modo;
-    se qualcuno reintroduce una lista locale, questo test se ne accorge."""
-    import providers.base as base
-    from context_manager import ContextManager
+    """Le implementazioni storiche devono rispondere allo stesso modo; se qualcuno
+    reintroduce una lista locale di marker, questo test se ne accorge.
 
-    cm = ContextManager()
+    La copia di context_manager era `_is_context_error`, un wrapper di una riga su
+    `is_context_exceeded_body` tenuto in vita solo da questo test: rimosso il
+    2026-08-16 insieme a `post_check`, il suo unico chiamante di produzione. Qui
+    resta il confronto fra le due implementazioni ancora esistenti.
+    """
+    import providers.base as base
+
     for errore in ERRORI_REALI:
         risultato_router = is_context_exceeded_body(errore)
         risultato_base = base._is_context_exceed_400(errore)[0]
-        risultato_cm = cm._is_context_error(errore)
 
         assert risultato_router == risultato_base, \
             f"Atteso: router={risultato_router} == base={risultato_base}, Ottenuto: divergenza per {errore}"
-        assert risultato_router == risultato_cm, \
-            f"Atteso: router={risultato_router} == context_manager={risultato_cm}, Ottenuto: divergenza per {errore}"
 
 
 def test_estrattore_testo_fonte_unica():

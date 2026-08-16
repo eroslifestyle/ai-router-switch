@@ -6,25 +6,27 @@ Storage: SQLite per-chat, isolato per chat_fp + modo.
 """
 import sqlite3
 import threading
-import time
 
 from model_context_map import get_context_limit
 
+# Le tre costanti dopo WARN_PCT erano scritte due volte di fila, con gli stessi
+# valori: la seconda copia riassegnava la prima e non cambiava nulla. Rimossa il
+# 2026-08-16 insieme al resto del residuo.
 WARN_PCT    = 0.80
-WARN2_PCT   = 0.88   # secondo alert, urgente: compressione (90%) imminente
-COMPACT_PCT = 0.90
-ERROR_PCT   = 1.00
 WARN2_PCT   = 0.88   # secondo alert, urgente: compressione (90%) imminente
 COMPACT_PCT = 0.90
 ERROR_PCT   = 1.00
 
 
 class ContextManager:
-    """Gestisce context window e rate limit per chat_fp + modo.
+    """Misura quanto contesto sta usando una chat e con quale soglia.
 
-    Pre-check: stima byte//4 vs limit → action warn/compact/error.
-    Post-check: 400 context error → _compact_or_clear (compact primo, clear se fallisce).
-    Storage SQLite: una riga per (chat_fp, modo).
+    `pre_check` stima i token del body e li confronta col limite del modello,
+    ritornando ok/warn/warn2/compact/error. E' l'unico metodo pubblico: chi
+    chiama decide cosa farne (oggi il proxy registra soltanto, perche' il router
+    e' un tunnel trasparente e non decide da se' di compattare).
+    Storage SQLite: una riga per (chat_fp, modo), in sola lettura da quando
+    `_update_state` e' stato rimosso col codice che lo chiamava.
     """
 
     def __init__(self, db_path: str | None = None):
@@ -95,78 +97,34 @@ class ContextManager:
                 return {'action': 'warn', 'est_tokens': est, 'limit': limit, 'pct': pct, 'model_used': limit_model}
             return {'action': 'ok', 'est_tokens': est, 'limit': limit, 'pct': pct, 'model_used': limit_model}
 
-    # ── Post-check (AQ-7) ─────────────────────────────────────────────────────
+    # ── Rimosso il 2026-08-16: post_check / _compact_or_clear / reassign ──────
+    #
+    # Erano l'API pubblica di questo modulo e nessuno le ha mai chiamate: zero
+    # riferimenti in src/, negli script e nei test. `post_check` doveva reagire al
+    # 400 di contesto pieno decidendo un compact o un clear, `reassign` doveva
+    # passare a un modello con finestra piu' grande. Entrambe funzionalita'
+    # sensate, mai cablate — e non le si aggancia adesso, perche' farebbero
+    # decidere al router quale modello risponde, che e' esattamente cio' che la
+    # regola del tunnel trasparente vieta.
+    #
+    # Con loro se ne va `_update_state`, che scriveva la tabella `context_state`:
+    # i suoi due unici chiamanti erano dentro `_compact_or_clear`. La tabella era
+    # quindi gia' vuota nei fatti, e `_get_state` — che `pre_check` usa ancora —
+    # continua a leggerne una vuota esattamente come prima. Nessun cambiamento di
+    # comportamento a runtime: e' rimozione di residuo, non di funzionalita'.
+    #
+    # `_is_context_error` era un wrapper di una riga su
+    # `router_constants.is_context_exceeded_body`, tenuto in vita solo dal proprio
+    # test: il test ora chiama direttamente la funzione canonica, che e' l'unica
+    # implementazione da quando le quattro copie divergenti sono state unificate
+    # il 2026-08-06.
 
-    def post_check(self, chat_fp: str, modo: str,
-                   response_status: int, response_body: bytes,
-                   model: str) -> dict:
-        """Gestisce la risposta upstream.
-
-        400 context window → _compact_or_clear.
-        Altrimenti action 'ok'.
-        """
-        if response_status == 400 and self._is_context_error(response_body):
-            return self._compact_or_clear(chat_fp, modo, model)
-        return {'action': 'ok'}
-
-    # ── Azioni a soglia (AQ-3, AQ-4) ─────────────────────────────────────────
-
-    def _compact_or_clear(self, chat_fp: str, modo: str, model: str) -> dict:
-        """Compact primo, clear se già compactato."""
-        with self._lock:
-            row = self._get_state(chat_fp, modo)
-            compact_count = (row['compact_count'] or 0) if row else 0
-            if compact_count == 0:
-                self._update_state(chat_fp, modo, model,
-                                   status='compact', compact_count=1)
-                return {'action': 'compact', 'reason': 'ctx_90pct'}
-            # già compactato e fallito: clear
-            self._update_state(chat_fp, modo, model,
-                               status='clear', clear_count=1, tokens_used=0)
-            return {'action': 'clear', 'reason': 'compact_failed'}
-
-    def _is_context_error(self, body: bytes) -> bool:
-        """Rileva errore context window nella risposta upstream."""
-        # I marker erano definiti qui in una copia locale, una delle quattro
-        # divergenti trovate il 2026-08-06: questa non conteneva "context_length"
-        # né "maximum context". Ora la lista è unica, in router_constants.
-        from router_constants import is_context_exceeded_body
-        return is_context_exceeded_body(body)
-
-    # ── Reassign (AQ-6) ───────────────────────────────────────────────────────
-
-    def reassign(self, chat_fp: str, modo: str, user_model: str) -> str | None:
-        """Riassegna a modello con contesto piú grande. Solo entro la selezione utente."""
-        provider = self._provider_for(modo)
-        chain = {
-            'anthropic': ['haiku', 'sonnet-4-7', 'claude-opus-4-8'],
-            'minimax':   ['MiniMax-M2', 'MiniMax-M2.5', 'MiniMax-M2.7', 'MiniMax-M3'],
-            'glm':       ['glm-4.7', 'glm-5-turbo', 'glm-5.2'],
-        }.get(provider, [])
-        if user_model in chain:
-            idx = chain.index(user_model)
-            return chain[idx + 1] if idx + 1 < len(chain) else None
-        return None
-
-    # ── Rate limit acquire (AQ-10) ─────────────────────────────────────────────
-
-    async def acquire(self, model: str, est_tokens: int,
-                      budget_sec: float, session) -> bool:
-        """Acquire rate limit slot per il modello. Unificato per backend."""
-        provider = self._provider_for_model(model)
-        if provider == 'minimax':
-            # Nessun rate limiter per MiniMax: il modulo minimax_rate_limiter non
-            # è mai esistito e l'import viveva dentro un except che lo ingoiava
-            # (rimosso il 2026-08-06). Le costanti MINIMAX_RATE_LIMITS restano in
-            # router_constants, usate altrove.
-            pass
-        elif provider == 'glm':
-            try:
-                from glm_backend import GLM_LIMITER
-                await GLM_LIMITER.acquire(model, est_tokens, budget_sec)
-            except Exception:
-                pass
-        return True
+    # Rimosso il 2026-08-16 anche `acquire` (AQ-10): "rate limit unificato per
+    # backend" che nessuno invocava. Ogni backend acquisisce dal proprio limiter
+    # sul posto — forward_minimax, glm_backend, qwen_backend, forward_anthropic —
+    # e il ramo minimax di questo metodo non faceva comunque nulla. Con lui esce
+    # `_provider_for_model`, che restava usato solo da `_update_state`, rimosso
+    # sopra.
 
     # ── DB helpers ─────────────────────────────────────────────────────────────
 
@@ -206,21 +164,6 @@ class ContextManager:
                                     .fetchall()]
         return dict(zip(cols, row))
 
-    def _update_state(self, chat_fp: str, modo: str, model: str, **kwargs) -> None:
-        provider = self._provider_for_model(model)
-        update_cols = list(kwargs.keys())
-        update_vals = list(kwargs.values())
-        set_clause = ", ".join(f"{k}=?" for k in update_cols) + ", last_update=?"
-        conn = sqlite3.connect(self._db_path)
-        conn.execute(
-            f"INSERT INTO context_state (chat_fp,modo,provider,model,{','.join(update_cols)}) "
-            f"VALUES (?,?,?,?,{','.join('?'*len(update_vals))}) "
-            f"ON CONFLICT(chat_fp,modo) DO UPDATE SET {set_clause}",
-            [chat_fp, modo, provider, model] + update_vals + update_vals + [time.time()]
-        )
-        conn.commit()
-        conn.close()
-
     def _resolve_model(self, modo: str) -> str:
         defaults = {
             'anthropic': 'sonnet-4-7',
@@ -239,10 +182,3 @@ class ContextManager:
             return 'minimax'
         return 'glm'
 
-    def _provider_for_model(self, model: str) -> str:
-        m = model.lower()
-        if 'glm' in m:
-            return 'glm'
-        if 'minimax' in m:
-            return 'minimax'
-        return 'anthropic'
