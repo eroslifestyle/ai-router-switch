@@ -2,6 +2,7 @@
 """Mode management and chat fingerprint extracted from ai-router-proxy.py (~lines 683-866)."""
 import hashlib
 import json
+import re
 import threading
 import time
 
@@ -42,18 +43,64 @@ def _err_response(message: str, status: int = 502) -> web.Response:
 
 # ── Chat fingerprint ────────────────────────────────────────────────────────────
 def conversation_fingerprint(data: dict) -> str:
-    """Identifica una chat senza session-id: hash(system + primo messaggio utente)."""
-    system = data.get("system", "")
-    if isinstance(system, list):
-        system = " ".join(b.get("text", "") for b in system if isinstance(b, dict))
-    first_user = ""
-    for m in data.get("messages", []):
-        if m.get("role") == "user":
-            c = m.get("content", "")
-            first_user = c if isinstance(c, str) else " ".join(
-                b.get("text", "") for b in c if isinstance(b, dict))
-            break
-    return hashlib.sha256((str(system) + "||" + str(first_user)).encode()).hexdigest()[:12]
+    """Identifica una chat senza session-id: hash(primo messaggio utente normalizzato).
+
+    NON include il campo 'system' nell'hash (2026-08-16):
+    Includere il system rende il fingerprint instabile: ogni modifica a CLAUDE.md
+    che finisce nel system prompt cambia l'identità della chat a metà sessione,
+    facendo perdere l'override di modalità per-chat.
+
+    Estrae il primo messaggio utente, rimuove i blocchi <system-reminder>...</system-reminder>
+    (che contengono contenuti variabili iniettati da Claude Code), normalizza gli spazi
+    e calcola SHA256 dei primi 12 caratteri hex. Se il risultato è <32 char o vuoto,
+    restituisce 'default' (non identificabile in modo affidabile).
+
+    Non solleva eccezioni: input malformato → 'default'.
+    """
+    try:
+        # Estrai il primo messaggio utente.
+        first_user = ""
+        messages = data.get("messages", [])
+        # Proteggi contro messages non-lista
+        if not isinstance(messages, list):
+            return "default"
+
+        for m in messages:
+            # Proteggi contro elemento non-dict
+            if not isinstance(m, dict):
+                continue
+            if m.get("role") == "user":
+                c = m.get("content", "")
+                # Proteggi contro content di tipo inatteso (non str, non lista)
+                if isinstance(c, str):
+                    first_user = c
+                elif isinstance(c, list):
+                    first_user = " ".join(
+                        b.get("text", "") for b in c if isinstance(b, dict))
+                else:
+                    # Content è un tipo inatteso (int, bool, ecc.)
+                    first_user = str(c)
+                break
+
+        # Rimuovi i blocchi <system-reminder>...</system-reminder> (non-greedy, DOTALL).
+        # Se il blocco non è chiuso, tronca da lì in poi.
+        first_user = re.sub(r'<system-reminder>.*?</system-reminder>', '', first_user, flags=re.DOTALL)
+        # Tronca se il tag di apertura è presente ma non chiuso.
+        if '<system-reminder>' in first_user:
+            first_user = first_user[:first_user.index('<system-reminder>')]
+
+        # Normalizza gli spazi (collassa whitespace multiplo).
+        normalized = " ".join(first_user.split())
+
+        # Se il testo è troppo corto o vuoto, due chat diverse collidereb­bero.
+        # Restituisci 'default' per indicare una conversazione non identificabile.
+        if len(normalized) < 32:
+            return "default"
+
+        return hashlib.sha256(normalized.encode()).hexdigest()[:12]
+    except Exception:
+        # Fallback assoluto su qualsiasi errore imprevisto.
+        return "default"
 
 
 def _resolve_chat_fingerprint(request) -> str:
