@@ -360,6 +360,18 @@ class StreamingRelay:
                                 elif _ev.get("type") == "message_delta":
                                     _u = _ev.get("usage") or {}
                                     _usage["output_tokens"] = int(_u.get("output_tokens", 0) or 0)
+                                    # Anthropic mette input/cache nel message_start; z.ai (GLM) li
+                                    # manda VUOTI li' e valorizzati qui nel delta. Leggendo solo il
+                                    # message_start, ogni richiesta GLM in streaming risultava
+                                    # input=0 e cache_read=0: 7.316 richieste su 7.332 con cache
+                                    # apparentemente morta, mentre lo stream riportava 32.000 token
+                                    # letti dalla cache (misurato 2026-08-16). Si aggiorna solo con
+                                    # valori non-zero, cosi' il dialetto Anthropic resta intatto.
+                                    for _k in ("input_tokens", "cache_read_input_tokens",
+                                               "cache_creation_input_tokens"):
+                                        _v = int(_u.get(_k, 0) or 0)
+                                        if _v:
+                                            _usage[_k] = _v
                                     _sr = (_ev.get("delta") or {}).get("stop_reason")
                                     if _sr:
                                         _usage["stop_reason"] = _sr

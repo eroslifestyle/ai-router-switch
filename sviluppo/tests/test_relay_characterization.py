@@ -223,3 +223,70 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+# ----------------------------------------------------------------------
+# Test 5: usage estratto da entrambi i dialetti SSE (Anthropic e z.ai)
+# ----------------------------------------------------------------------
+async def _esegui_usage(chunks):
+    """Come _esegui, ma restituisce il dict usage passato al logger del sidecar."""
+    catturato = {}
+
+    def _sink(*a, **k):
+        u = k.get("usage") or next((x for x in a if isinstance(x, dict) and "input_tokens" in x), None)
+        if u:
+            catturato.update(u)
+
+    async def handler(request):
+        relay = StreamingRelay(
+            request, b'{}', 'glm', None, {}, set(), 'MiniMax-M2.7',
+            lambda *a, **k: None, _sink, lambda *a, **k: None)
+        return await relay.relay(request.app['upstream'])
+
+    app = web.Application()
+    app['upstream'] = FakeUpstream(
+        headers={'Content-Type': 'text/event-stream'}, chunks=chunks)
+    app.router.add_post('/test', handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    try:
+        async with TestClient(TestServer(app, host='localhost', port=0)) as client:
+            await (await client.post('/test')).read()
+    finally:
+        await runner.cleanup()
+    return catturato
+
+
+def _sse(*eventi):
+    import json as _j
+    return [f"data: {_j.dumps(e)}\n\n".encode() for e in eventi]
+
+
+def test_usage_dialetto_anthropic():
+    """Anthropic: input e cache_read arrivano nel message_start."""
+    u = asyncio.run(_esegui_usage(_sse(
+        {"type": "message_start", "message": {"usage": {
+            "input_tokens": 120, "cache_read_input_tokens": 4000,
+            "cache_creation_input_tokens": 50}}},
+        {"type": "message_delta", "usage": {"output_tokens": 7},
+         "delta": {"stop_reason": "end_turn"}})))
+    assert u["input_tokens"] == 120
+    assert u["cache_read_input_tokens"] == 4000
+    assert u["output_tokens"] == 7
+
+
+def test_usage_dialetto_zai_nel_delta():
+    """z.ai (GLM): message_start vuoto, i valori veri stanno nel message_delta.
+
+    Regressione 2026-08-16: leggendo solo il message_start, ogni richiesta GLM in
+    streaming finiva nel sidecar con input=0 e cache_read=0 — la cache risultava
+    morta su 7.316 richieste mentre lo stream dichiarava 32.000 token letti."""
+    u = asyncio.run(_esegui_usage(_sse(
+        {"type": "message_start", "message": {"usage": {
+            "input_tokens": 0, "output_tokens": 0}}},
+        {"type": "message_delta", "usage": {
+            "input_tokens": 26, "output_tokens": 3,
+            "cache_read_input_tokens": 32000},
+         "delta": {"stop_reason": "end_turn"}})))
+    assert u["input_tokens"] == 26, "input del delta ignorato"
+    assert u["cache_read_input_tokens"] == 32000, "cache_read del delta ignorato"
