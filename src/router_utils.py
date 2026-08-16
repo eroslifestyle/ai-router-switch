@@ -427,6 +427,14 @@ def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
         # restano leggibili e gli strumenti che le leggono non cambiano.
         # ttfb_ms = dall'ingresso della richiesta nel router al primo byte
         # inoltrato al client; total_ms = fino alla fine dello stream.
+        # Il path arrivava gia' come parametro ma non veniva scritto: senza di
+        # esso le risposte a corpo vuoto non sono classificabili a posteriori —
+        # un count_tokens (vuoto per contratto) e' indistinguibile da una
+        # generazione abortita. Misurato il 2026-08-16: 553 entry outcome=empty
+        # in mix-am/mix-am-2 senza modo di separarle. In coda e solo se
+        # valorizzato, come ttfb_ms e total_ms.
+        if path:
+            entry["path"] = path
         if ttfb_ms is not None:
             entry["ttfb_ms"] = round(float(ttfb_ms), 1)
         if total_ms is not None:
