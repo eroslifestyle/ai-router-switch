@@ -6,6 +6,7 @@ from typing import Optional, Callable
 
 import aiohttp
 from aiohttp import web
+from multidict import CIMultiDict
 
 import debug_catalog
 import paths
@@ -309,8 +310,20 @@ class _StopReasonFixed:
 
     @property
     def headers(self):
-        return {k: v for k, v in self._orig.headers.items()
-                if k.lower() != "content-length"}
+        # CIMultiDict e NON dict: aiohttp conserva il case con cui l'header e'
+        # arrivato, e il lookup case-insensitive lo fa la struttura, non la chiave.
+        # Con una copia in dict normale, `headers.get("content-type")` del relay
+        # restituisce None se l'upstream ha mandato "Content-Type" — quindi
+        # `is_sse` diventa False, uno stream SSE viene trattato come JSON, il
+        # parser dell'usage non trova nulla e ripiega sulle stime `total_bytes//4`.
+        # E' il motivo per cui in mode `local` il sidecar registrava sempre
+        # `stop_reason=""`, `text_blocks=0`, `outcome=unknown` e conteggi inventati
+        # (misurato il 2026-08-16: 36 righe su 37, e una sonda con max_tokens=16
+        # che risultava con 698 token di output).
+        return CIMultiDict(
+            (k, v) for k, v in self._orig.headers.items()
+            if k.lower() != "content-length"
+        )
 
     def __getattr__(self, name):
         return getattr(self._orig, name)
