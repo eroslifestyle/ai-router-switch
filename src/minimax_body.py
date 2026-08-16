@@ -29,7 +29,12 @@ MINIMAX_UNSUPPORTED_FIELDS = ("context_management", "mcp_servers", "thinking")
 # Resta una deviazione dal contratto API, e colpisce le richieste piccole: con
 # max_tokens=8 si generano 1024 token, 128 volte il richiesto. Per questo ogni
 # innalzamento viene ora LOGGATO: e' contabile, non piu' invisibile.
-MINIMAX_MIN_MAX_TOKENS = int(os.environ.get("AIROUTER_MINIMAX_MIN_MAX_TOKENS", "1024"))
+# Soglia minima imposta a max_tokens verso MiniMax. Se il client ne chiede meno,
+# il proxy la alza: 8192 dal 2026-08-15 (era 1024, troppa bassa: tronca risposte
+# di coding/file-generazione). I client che gia' mandano max_tokens alto non
+# vengono toccati. Il costo (max_tokens alto) ha impatto trascurabile per i
+# task normali e scongiura troncamenti silenziosi.
+MINIMAX_MIN_MAX_TOKENS = int(os.environ.get("AIROUTER_MINIMAX_MIN_MAX_TOKENS", "8192"))
 
 
 # Le due funzioni _system_to_text e _inject_system_as_message sono state rimosse.

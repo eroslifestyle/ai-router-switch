@@ -39,16 +39,28 @@ def _rimappa(max_tokens, **extra):
 
 class TestSogliaMinima:
 
-    def test_valore_e_1024(self):
-        assert MINIMAX_MIN_MAX_TOKENS == 1024
+    def test_la_soglia_e_configurabile_e_sensata(self):
+        """Il VALORE non si cabla nel test: e' tarabile via env e cambia.
 
-    @pytest.mark.parametrize("richiesto", [1, 8, 100, 1023])
-    def test_valori_sotto_soglia_vengono_innalzati(self, richiesto):
+        Cablarlo qui e' costato cinque test rossi dal 2026-08-15, quando la
+        soglia e' passata da 1024 a 8192 e i test sono rimasti indietro: un
+        rosso che non segnalava un difetto del codice, solo un test scritto
+        sul numero invece che sul comportamento. Qui si verifica il contratto.
+        """
+        assert isinstance(MINIMAX_MIN_MAX_TOKENS, int)
+        assert MINIMAX_MIN_MAX_TOKENS > 0
+
+    @pytest.mark.parametrize("frazione", [0.001, 0.01, 0.5, 0.999])
+    def test_valori_sotto_soglia_vengono_innalzati(self, frazione):
+        richiesto = max(1, int(MINIMAX_MIN_MAX_TOKENS * frazione))
+        if richiesto >= MINIMAX_MIN_MAX_TOKENS:
+            pytest.skip("soglia troppo bassa per questa frazione")
         corpo, _ = _rimappa(richiesto)
         assert corpo["max_tokens"] == MINIMAX_MIN_MAX_TOKENS
 
-    @pytest.mark.parametrize("richiesto", [1024, 2048, 32000])
-    def test_valori_sopra_soglia_non_cambiano(self, richiesto):
+    @pytest.mark.parametrize("moltiplicatore", [1, 2, 4])
+    def test_valori_sopra_soglia_non_cambiano(self, moltiplicatore):
+        richiesto = MINIMAX_MIN_MAX_TOKENS * moltiplicatore
         corpo, _ = _rimappa(richiesto)
         assert corpo["max_tokens"] == richiesto
 
@@ -77,11 +89,11 @@ class TestLogDellInnalzamento:
         _, righe = _rimappa(8)
         pertinenti = [r for r in righe if "max_tokens innalzato" in r]
         assert pertinenti, f"nessun log dell'innalzamento: {righe}"
-        assert "8 -> 1024" in pertinenti[0]
+        assert f"8 -> {MINIMAX_MIN_MAX_TOKENS}" in pertinenti[0]
 
     def test_non_logga_quando_non_innalza(self):
         """Braccio di controllo: nessun rumore sulle richieste normali."""
-        _, righe = _rimappa(4096)
+        _, righe = _rimappa(MINIMAX_MIN_MAX_TOKENS * 2)
         assert not [r for r in righe if "max_tokens innalzato" in r]
 
     def test_il_log_spiega_il_perche(self):

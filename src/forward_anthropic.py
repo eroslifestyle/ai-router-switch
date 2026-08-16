@@ -49,26 +49,39 @@ _ANTHROPIC_SHRINK_TARGET = int(os.environ.get(
     "AIROUTER_ANTHROPIC_CONTEXT_SHRINK_TARGET", "700000"))
 
 
+def _decompress_raw(raw: bytes) -> bytes:
+    """Prova a decomprimere raw con brotli, gzip, zlib in ordine.
+    
+    Ritorna raw invariato se nessun formato funziona."""
+    if not raw:
+        return raw
+    try:
+        import brotli
+        return brotli.decompress(raw)
+    except Exception:
+        pass
+    if raw[:2] == b"\x1f\x8b":
+        try:
+            import gzip
+            return gzip.decompress(raw)
+        except Exception:
+            pass
+    try:
+        import zlib
+        return zlib.decompress(raw)
+    except Exception:
+        pass
+    return raw
+
 def _readable_err(raw: bytes) -> str:
     """Rende leggibile un body d'errore upstream per il log.
 
     Anthropic risponde compresso: finora il log stampava i byte gzip grezzi
     (b'\\x1f\\x8b...'), inutili per capire cosa fosse andato storto. Prova
-    gzip, poi zlib/deflate, poi testo semplice."""
+    brotli, gzip, zlib/deflate, poi testo semplice."""
     if not raw:
         return "(vuoto)"
-    if raw[:2] == b"\x1f\x8b":
-        try:
-            import gzip
-            return gzip.decompress(raw).decode("utf-8", "replace")
-        except Exception:
-            pass
-    try:
-        import zlib
-        return zlib.decompress(raw).decode("utf-8", "replace")
-    except Exception:
-        pass
-    return raw.decode("utf-8", "replace")
+    return _decompress_raw(raw).decode("utf-8", "replace")
 
 
 class _PreReadResponse:
@@ -256,15 +269,17 @@ async def forward_anthropic(request, body, session):
             # elimina i messaggi role=system, e fino al 2026-08-08 ne buttava il
             # contenuto (verificato: un system con "rispondi solo ANANAS" veniva
             # ignorato dalla risposta). Ora il testo passa nel campo `system`,
-            # dove l'API Anthropic lo vuole. Il blocco si aggiunge in CODA e
-            # senza cache_control: il prompt caching lavora per prefissi, quindi
-            # la parte gia' in cache resta valida.
+            # convertendo il messaggio in role=user, in loco. Fino al 2026-08-16
+            # il testo veniva spostato in coda al campo `system`: quel campo sta
+            # a monte di TUTTI i messaggi, quindi cresceva a ogni turno e
+            # invalidava il prompt caching dell'intera conversazione (670M
+            # token-equivalenti in 8 giorni). Vedi promote_system_messages.
             # NB: questo blocco esiste in DUE gemelle, forward_anthropic e
             # forward_anthropic_direct. Modificarne una sola le fa divergere.
             from router_utils import promote_system_messages
             _promossi = promote_system_messages(body_dict)
             if _promossi:
-                log(f"promossi {_promossi} messaggi role=system nel campo system (anthropic), {getattr(promote_system_messages, 'ultimi_caratteri', 0)} caratteri")
+                log(f"convertiti {_promossi} messaggi role=system in role=user (anthropic), {getattr(promote_system_messages, 'ultimi_caratteri', 0)} caratteri")
             msgs = body_dict.get("messages", [])
             role_sys = sum(1 for m in msgs if m.get("role") == "system")
             if role_sys > 0 or msgs:
@@ -335,7 +350,7 @@ async def forward_anthropic(request, body, session):
             # quindi l'errore più frequente di Anthropic, "prompt is too long:
             # N tokens > M maximum", non veniva riconosciuto e il retry senza
             # immagini non scattava mai. Ora la lista è unica, in router_constants.
-            is_ctx = is_context_exceeded_body(raw_err)
+            is_ctx = is_context_exceeded_body(_decompress_raw(raw_err))
             if is_ctx:
                 from providers.base import strip_images_body
                 stripped = strip_images_body(safe_body)
@@ -474,15 +489,17 @@ async def forward_anthropic_direct(request, body, session):
             # elimina i messaggi role=system, e fino al 2026-08-08 ne buttava il
             # contenuto (verificato: un system con "rispondi solo ANANAS" veniva
             # ignorato dalla risposta). Ora il testo passa nel campo `system`,
-            # dove l'API Anthropic lo vuole. Il blocco si aggiunge in CODA e
-            # senza cache_control: il prompt caching lavora per prefissi, quindi
-            # la parte gia' in cache resta valida.
+            # convertendo il messaggio in role=user, in loco. Fino al 2026-08-16
+            # il testo veniva spostato in coda al campo `system`: quel campo sta
+            # a monte di TUTTI i messaggi, quindi cresceva a ogni turno e
+            # invalidava il prompt caching dell'intera conversazione (670M
+            # token-equivalenti in 8 giorni). Vedi promote_system_messages.
             # NB: questo blocco esiste in DUE gemelle, forward_anthropic e
             # forward_anthropic_direct. Modificarne una sola le fa divergere.
             from router_utils import promote_system_messages
             _promossi = promote_system_messages(body_dict)
             if _promossi:
-                log(f"promossi {_promossi} messaggi role=system nel campo system (anthropic), {getattr(promote_system_messages, 'ultimi_caratteri', 0)} caratteri")
+                log(f"convertiti {_promossi} messaggi role=system in role=user (anthropic), {getattr(promote_system_messages, 'ultimi_caratteri', 0)} caratteri")
             msgs = body_dict.get("messages", [])
             role_sys = sum(1 for m in msgs if m.get("role") == "system")
             if role_sys > 0 or msgs:

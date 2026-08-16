@@ -1,6 +1,7 @@
 # ~160 lines
 """MiniMax pipeline (orchestrate/think/act) extracted from ai-router-proxy.py (~lines 2798-2994)."""
 import json
+import sys
 
 from aiohttp import web  # usato nei rami d'errore (righe ~65 e ~98): senza questo
                          # import il gestore stesso sollevava NameError e aiohttp
@@ -163,6 +164,7 @@ async def _try_shrink_body(orig: dict, target_bytes: int):
             if system_content:
                 shrunk["system"] = system_content
             shrunk.pop("thinking", None)
+            original_bytes = len(json.dumps(orig).encode())
             shrunk_bytes = json.dumps(shrunk).encode()
             if len(shrunk_bytes) <= target_bytes:
                 log(f"shrink: budget ridotto a {budget}b, tail={len(tail_msgs)} msg")
@@ -183,7 +185,21 @@ async def _try_shrink_body(orig: dict, target_bytes: int):
             log(f"shrink: budget ridotto a {final_budget}b, tail={len(tail_msgs)} msg")
             return shrunk_bytes
 
-        return None
+        # 2026-08-15: shrink eccessivo = probabile perdita di informazioni utili.
+        # Se togliamo piu' del 50%, logghiamo warning visibile (cliente + log).
+        if shrunk_bytes < original_bytes * 0.5:
+            pct = 100 * (original_bytes - shrunk_bytes) // max(original_bytes, 1)
+            warn_msg = (
+                f"WARN pipeline_minimax: _try_shrink_body ha rimosso {pct}% del body "
+                f"({original_bytes}->{shrunk_bytes} byte). Possibile perdita di contesto "
+                f"inviato a MiniMax. Verifica spec/Intent."
+            )
+            print(warn_msg, file=sys.stderr)
+            try:
+                _log_warn(warn_msg)
+            except NameError:
+                pass
+        return shrunk_bytes if shrunk_bytes else None
     except Exception as e:
         log(f"try_shrink_body EXC: {e}")
         return None
