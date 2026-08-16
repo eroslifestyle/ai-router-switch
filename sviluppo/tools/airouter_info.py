@@ -13,9 +13,9 @@ Principi:
 4. Ogni numero e' riproducibile: `--come` stampa il criterio usato.
 
 Uso:
-    airouter-info cache [--giorni N] [--mode M]   efficienza del prompt caching
-    airouter-info costo [--giorni N]              da cosa e' fatto l'input pagato
-    airouter-info sprechi [--giorni N]            contesto ri-pagato invece che riusato
+    airouter-info cache [--giorni N|--ore N] [--mode M]   efficienza del prompt caching
+    airouter-info costo [--giorni N|--ore N]              da cosa e' fatto l'input pagato
+    airouter-info sprechi [--giorni N|--ore N]            contesto ri-pagato invece che riusato
     airouter-info scritture                       Write vs Edit per modalita'
     airouter-info salute                          router, porte, modalita' attiva
     airouter-info orfani                          simboli src/ mai referenziati
@@ -60,9 +60,22 @@ def _provider(final: str) -> str | None:
     return None
 
 
-def _leggi_sidecar(giorni: int | None, mode: str | None):
+def _finestra(args) -> str:
+    """Etichetta leggibile della finestra temporale richiesta."""
+    ore = getattr(args, "ore", None)
+    if ore:
+        return f"ultime {ore} ore"
+    return f"ultimi {args.giorni} giorni" if args.giorni else "tutto lo storico"
+
+
+def _leggi_sidecar(args):
+    # --ore vince su --giorni: serve a isolare una finestra stretta (es. il traffico
+    # dopo un restart), dove 24h di granularita' mescolano il prima e il dopo.
     taglio = 0.0
-    if giorni:
+    giorni, mode = args.giorni, args.mode
+    if getattr(args, "ore", None):
+        taglio = (dt.datetime.now() - dt.timedelta(hours=args.ore)).timestamp()
+    elif giorni:
         taglio = (dt.datetime.now() - dt.timedelta(days=giorni)).timestamp()
     righe = []
     if not SIDECAR.exists():
@@ -91,7 +104,7 @@ def _tab(intestazioni, righe):
 
 def cmd_cache(args):
     """Quanto del contesto viene riletto dalla cache invece che ricreato."""
-    righe = _leggi_sidecar(args.giorni, args.mode)
+    righe = _leggi_sidecar(args)
     agg = defaultdict(lambda: {"n": 0, "cr": 0, "cc": 0, "in": 0, "hit": 0})
     for d in righe:
         p = _provider(d.get("final"))
@@ -109,14 +122,14 @@ def cmd_cache(args):
         n = s["n"] or 1
         out.append([p, f"{s['n']:,}", f"{s['hit']/n:.0%}", f"{s['cr']/n:,.0f}",
                     f"{s['cc']/n:,.0f}", f"{s['cc']/s['cr']:.3f}" if s["cr"] else "-"])
-    print(f"efficienza cache — ultimi {args.giorni} giorni" if args.giorni else "efficienza cache — tutto lo storico")
+    print(f"efficienza cache — {_finestra(args)}")
     _tab(["provider", "richieste", "con cache", "read/req", "creation/req", "creation/read"], out)
     print("\n  creation/read alto = il prefisso cambia a ogni turno: qualcosa a monte cresce.")
 
 
 def cmd_costo(args):
     """Da cosa e' fatto l'input che paghiamo: definizioni tool o conversazione."""
-    righe = _leggi_sidecar(args.giorni, args.mode)
+    righe = _leggi_sidecar(args)
     agg = defaultdict(lambda: {"n": 0, "in": 0, "tb": 0, "mcp": 0, "n_tb": 0})
     for d in righe:
         p = _provider(d.get("final"))
@@ -137,14 +150,14 @@ def cmd_costo(args):
         out.append([p, f"{s['n']:,}", f"{inp:,.0f}", f"{tool_tok:,.0f}",
                     f"{tool_tok/inp:.0%}" if inp else "-",
                     f"{(s['mcp']/max(s['n_tb'],1))/4:,.0f}"])
-    print("composizione dell'input pagato (stima tool: byte/4)")
+    print(f"composizione dell'input pagato — {_finestra(args)} (stima tool: byte/4)")
     _tab(["provider", "richieste", "input/req", "tool tok/req", "quota tool", "di cui MCP"], out)
     print("\n  senza caching le definizioni tool si ripagano a ogni richiesta.")
 
 
 def cmd_sprechi(args):
     """Contesto ri-pagato che sarebbe stato riusabile dalla cache."""
-    righe = _leggi_sidecar(args.giorni, args.mode)
+    righe = _leggi_sidecar(args)
     righe.sort(key=lambda d: d.get("ts") or 0)
     SOGLIA, FINESTRA = 5000, 300
     ultimo, agg = {}, defaultdict(lambda: {"n": 0, "sprec": 0, "tok": 0, "tot": 0})
@@ -167,8 +180,8 @@ def cmd_sprechi(args):
         tot += s["tok"]
         out.append([p, f"{s['n']:,}", f"{s['sprec']:,}", f"{s['tok']/1e6:,.1f}M",
                     f"{s['tok']/max(s['tot'],1):.0%}"])
-    print(f"contesto ri-pagato (input>{SOGLIA:,}, cache_read=0, entro {FINESTRA}s da una richiesta "
-          f"dello stesso provider)")
+    print(f"contesto ri-pagato — {_finestra(args)} (input>{SOGLIA:,}, cache_read=0, entro {FINESTRA}s "
+          f"da una richiesta dello stesso provider)")
     _tab(["provider", "richieste", "a vuoto", "token", "% del suo input"], out)
     print(f"\n  totale: {tot/1e6:,.0f}M token che la cache avrebbe coperto.")
 
@@ -278,6 +291,7 @@ def main():
         p.set_defaults(fn=fn)
         if nome in ("cache", "costo", "sprechi"):
             p.add_argument("--giorni", type=int, default=None, help="finestra in giorni")
+            p.add_argument("--ore", type=int, default=None, help="finestra in ore (vince su --giorni)")
             p.add_argument("--mode", default=None, help="filtra per modalita' del router")
     args = ap.parse_args()
     if args.fonti:
