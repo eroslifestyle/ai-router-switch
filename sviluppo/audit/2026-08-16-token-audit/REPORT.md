@@ -264,6 +264,46 @@ due soli 400 di firma sono le due esecuzioni della controprova T2 (19:47:02 e 19
   era sopravvalutata — l'ha smontata il test T4, che nella prima versione cercava una riga
   di log invece dell'effetto. Resta corretto rimuovere l'elenco scritto a mano.
 
+### Il secondo giro: F4, F6, F9 chiusi
+
+- **F4 — `local`/`mix-al` erano cieche per un `dict` al posto di un `CIMultiDict`.** Non era
+  il backend: lo stream di LiteLLM è SSE conforme (letto grezzo: `message_start`,
+  `content_block_start`, `message_delta` con `stop_reason` e `usage`). Era il wrapper
+  `_StopReasonFixed`, che copiava gli header in un dict normale — e aiohttp conserva il case
+  con cui l'header è arrivato, delegando alla struttura il lookup case-insensitive. Con la
+  copia, `headers.get("content-type")` del relay torna `None` su un `Content-Type` maiuscolo,
+  `is_sse` diventa `False`, uno stream SSE viene letto come JSON e il parser ripiega sulle
+  stime `total_bytes // 4`. Prova diretta sulla stessa sonda:
+
+  | | prima | dopo |
+  |---|---|---|
+  | input_tokens | 2 | **140** |
+  | output_tokens | 698 (con `max_tokens=16`) | **16** |
+  | stop_reason | `""` | **max_tokens** |
+  | text_blocks | 0 | **1** |
+  | outcome | unknown | **truncated** |
+
+  Conseguenza da ricordare: **ogni numero storico su `local`/`mix-al` è una stima dai byte,
+  non una misura** — incluso l'«output medio 8.047 token» riportato nella sezione 1 di questo
+  report. Vanno riletti solo i dati successivi a `426ebfb`.
+
+- **F6 — i 333 timeout MiniMax.** Il `sock_read=120` della sessione condivisa si dava per
+  buono in streaming («i chunk arrivano di continuo»), ma non copre il tratto prima del primo
+  chunk. Sulle 9.898 richieste MiniMax di 21 giorni il TTFB dei *successi* arriva a 87,6s —
+  sta sotto i 120 per costruzione, perché quelle oltre non sono successi. `STREAM_SOCK_READ_SEC
+  = 300`: 3,4× sul massimo osservato, e resta metà del valore non-streaming, così uno stall
+  vero a metà stream viene ancora rilevato prima.
+
+- **F9 — `sprechi` e `costo` rapportavano tutto a `input_tokens`**, che con la cache sana vale
+  ~2: da qui «anthropic 99% del suo input» e «quota tool 242878%». Il denominatore è ora il
+  contesto processato, e `costo` distingue una colonna «di cui nuovo» — quello che si paga
+  pieno. Effetto collaterale utile: la riga `local` segnava 1263%, ed è stata la traccia che
+  ha portato a F4.
+
+- **F8 resta aperto e non è correggibile con un commit**: `mix-ag-2` ha visto 2 richieste in
+  assoluto, `mix-al` 34, `mix-ag` 69, `qwen` 948, tutte ferme all'8-9/08. Serve traffico, non
+  codice.
+
 ### Verificato e NON problematico: gli id `tool_use`
 
 Dopo F1 la domanda naturale è se altri campi soffrano dello stesso difetto. Tutti e tre i
