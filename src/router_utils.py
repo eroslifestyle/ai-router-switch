@@ -659,16 +659,24 @@ def promote_system_messages(body_dict: dict) -> int:
     """
     Problema: _repair_message_sequence elimina i messaggi role='system' da messages
     per conformita' all'API Anthropic (che richiede system come campo top-level),
-    ma ne perde il contenuto invece di promuoverlo.
+    ma ne perde il contenuto invece di conservarlo.
 
-    Comportamento:
-    - Estrae il testo da ogni messaggio role='system' in body_dict['messages']
-    - Il testo viene aggiunto al campo body_dict['system'] IN CODA, mai in testa
-    - Non modifica mai il contenuto preesistente di system
-    - Rimuove i messaggi system dall'array messages
+    Comportamento: il messaggio role='system' viene convertito IN LOCO in
+    role='user', contenuto e posizione invariati.
+
+    Perche' NON si sposta il testo nel campo `system` (com'era fino al 2026-08-16):
+    il campo `system` sta a MONTE di tutti i messaggi. Appendergli un blocco a
+    ogni turno cambia il prefisso di TUTTA la conversazione e invalida il prompt
+    caching a valle. Misurato su traffico reale (mix-am + mix-am-2, 8 giorni):
+    cache_read fermo a 71.039 token identici a ogni richiesta mentre
+    cache_creation cresceva a 120-163k per turno, con dose-risposta monotona fra
+    caratteri spostati e cache ricreata (46k car -> 37k creation, 117k -> 176k).
+    Costo: 670M token-equivalenti, il 69% del consumo del periodo. Convertire in
+    loco tiene la cronologia append-only, quindi il prefisso gia' in cache resta
+    valido e si ricrea solo la coda nuova.
 
     Valore di ritorno:
-    - Numero di messaggi promossi (0 se nessuno o in caso di errore)
+    - Numero di messaggi convertiti (0 se nessuno o in caso di errore)
 
     Questa trasformazione e' accessoria: non deve mai impedire l'inoltro della richiesta.
     """
@@ -678,7 +686,7 @@ def promote_system_messages(body_dict: dict) -> int:
             return 0
 
         promoted_count = 0
-        system_texts = []
+        caratteri = 0
 
         for msg in messages:
             if not (isinstance(msg, dict) and msg.get('role') == 'system'):
@@ -699,37 +707,25 @@ def promote_system_messages(body_dict: dict) -> int:
             else:
                 text = ''
 
-            if text and text.strip():
-                system_texts.append(text)
+            # Il messaggio senza testo utile resta com'e': _repair_message_sequence
+            # lo scartera', e non c'e' contenuto da salvare.
+            if not (text and text.strip()):
+                continue
 
-        if not system_texts:
+            msg['role'] = 'user'
+            promoted_count += 1
+            caratteri += len(text)
+
+        if not promoted_count:
             return 0
 
-        promoted_count = len(system_texts)
-        combined_text = '\n\n'.join(system_texts)
+        # Il campo `system` non si tocca: e' il prefisso di tutta la conversazione.
+        # I messaggi restano nell'array, al loro posto, con role='user'.
 
-        # Aggiunge al campo system IN CODA, senza toccare il contenuto preesistente
-        current_system = body_dict.get('system')
-        if current_system is None:
-            body_dict['system'] = combined_text
-        elif isinstance(current_system, str):
-            body_dict['system'] = current_system + '\n\n' + combined_text
-        elif isinstance(current_system, list):
-            # Caso (c): prompt caching funziona per PREFISSI. Aggiungere un blocco in CODA
-            # senza cache_control preserva i breakpoint gia' in cache e non invalida
-            # il prefisso gia' elaborato. Non modificare MAI la lista esistente
-            # (errore gia' commesso: convertire in stringa ha azzerato la cache,
-            # facendo passare l'input da 2 token a oltre 200.000).
-            body_dict['system'].append({'type': 'text', 'text': combined_text})
-
-        # Rimuove i messaggi system da messages
-        body_dict['messages'] = [m for m in messages if not (isinstance(m, dict) and m.get('role') == 'system')]
-
-        # Il volume promosso va reso contabile: una richiesta reale ne ha
-        # portati 183 in una volta sola. Non si tronca — il contenuto e' del
-        # client — ma si misura, cosi' un eventuale gonfiamento del system
-        # prompt si vede nei log invece di essere una sorpresa in fattura.
-        promote_system_messages.ultimi_caratteri = len(combined_text)
+        # Il volume convertito resta contabile: una richiesta reale ne ha portati
+        # 183 in una volta sola. Serve a vedere nei log un eventuale gonfiamento
+        # invece di scoprirlo in fattura.
+        promote_system_messages.ultimi_caratteri = caratteri
         return promoted_count
     except Exception:
         return 0
