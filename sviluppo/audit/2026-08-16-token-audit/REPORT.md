@@ -201,7 +201,70 @@ colonna «% del suo input» va ricalcolata su `input + cache_read`, o tolta.
 
 ---
 
-## 4. Priorità suggerita
+## 4. Esito degli interventi — 2026-08-16 sera
+
+Corretti F1, F2, F3 e un quinto problema emerso durante lo stress test (F5, sotto).
+Commit `cf36996`, `ccec75f` e seguenti. Suite **760 passed**. Router riavviato tre
+volte con la sequenza obbligatoria, `src/` sempre pulito prima del restart.
+
+### Cosa è stato fatto
+
+| | intervento | verifica |
+|---|---|---|
+| F1 | `declassa_thinking_estranei` converte in `text` i thinking con firma non-Anthropic, in entrambe le gemelle di `forward_anthropic` | 14 test + controprova (togliendo il criterio, 6 diventano rossi) + T1/T2 end-to-end |
+| F2 | il target di shrink GLM si deriva dal modello risolto invece di essere una costante | 6 test + T3: 700 KB verso glm-5.2 passano senza compressione |
+| F3 | l'elenco delle modalità con ACT su MiniMax si deriva da `role_routing` | 6 test + T4 |
+| F5 | pavimento di `max_tokens` verso z.ai (`GLM_MIN_MAX_TOKENS = 4096`) | 8 test + A/B sullo stress: 11 risposte inutilizzabili → 0 |
+| — | rimossa l'API morta di `ContextManager`; `airouter-info orfani` ora entra nelle classi | 0 orfani su 271 simboli, 108 metodi, 54 simboli fuori da `src/*.py` |
+
+### F5, trovato dallo stress test
+
+Lo stress con `max_tokens=128` ha prodotto **11 risposte su 40 con `stop_reason=max_tokens`
+e zero blocchi `text`**, tutte su GLM: il modello spende l'intero budget nel blocco
+`thinking` e al client arriva un 200 inutilizzabile. Il tetto superiore esisteva da luglio
+(z.ai rifiuta oltre 32.768), il pavimento no — mentre MiniMax ce l'ha da tempo
+(`MINIMAX_MIN_MAX_TOKENS`). Il valore viene dalla distribuzione reale di 450 risposte GLM
+concluse: p50 105, p90 1.413, p95 2.112; un tetto di 128 ne avrebbe troncate il 46,9%, uno
+di 4.096 l'1,6%. Alzare un tetto non fa spendere di più — si paga l'output davvero generato.
+
+Ripetuto lo stress dopo il fix: **0 risposte senza testo, `end_turn` su 10/10** sia in `glm`
+sia in `mix-gm-2`.
+
+### Stress test — esiti
+
+`sviluppo/tools/stress_fix_20260816.py` (7 prove mirate): **7/7**. Include la controprova
+T2, che manda una firma in stile Anthropic inventata e verifica che Anthropic la rifiuti
+ancora con 400: senza, "nessun errore" significherebbe solo che stiamo declassando tutto
+alla cieca.
+
+`sviluppo/tools/stress_volume_20260816.py` (4 modalità × 5 turni × 2 conversazioni, con un
+thinking di firma estranea nella cronologia — la forma che prima faceva fallire ogni turno):
+**40/40 riuscite, 0 errori, 0 risposte vuote**, 89 s.
+
+Nel log del router dopo il restart: 42 blocchi declassati, 66 `max_tokens` innalzati, e i
+due soli 400 di firma sono le due esecuzioni della controprova T2 (19:47:02 e 19:49:40).
+
+### Il bilancio in token, senza gonfiarlo
+
+- **F1 non risparmia token direttamente.** Un 400 di validazione non fattura inferenza: il
+  costo dei 1.001 turni persi era il lavoro rifatto, non i token bruciati. Ciò che elimina
+  è il fallimento — 1.001 turni utente a settimana che non arrivavano a destinazione.
+- **F5 risparmia, e si misura.** Nello scenario dello stress (max_tokens basso), 11
+  risposte su 40 erano da rifare: ~7.250 token di contesto letto + 128 di output buttati
+  ciascuna, cioè ~81.000 token evitati, al prezzo di ~6.500 token di output in più. Netto:
+  **−74.500 token su 40 richieste**. In produzione l'effetto è però piccolo: solo lo 0,5%
+  delle richieste GLM reali si ferma a `max_tokens`, perché il CLI manda tetti alti. È una
+  perdita rara ma totale quando capita.
+- **F2 spende di più, apposta.** Restituisce a glm-5.2 fino a 124 KB di conversazione per
+  richiesta (~31.000 token) che prima venivano compressi in un riassunto. Con la cache di
+  z.ai la maggior parte finisce in `cache_read`. È un baratto qualità/costo, non un
+  risparmio, e va detto così.
+- **F3 non ha impatto misurato.** Il `ctx gate` comprimeva già in mix-am-2 usando il limite
+  di MiniMax: il bottleneck-shrink era una seconda rete, non l'unica. La mia stima iniziale
+  era sopravvalutata — l'ha smontata il test T4, che nella prima versione cercava una riga
+  di log invece dell'effetto. Resta corretto rimuovere l'elenco scritto a mano.
+
+## 5. Priorità suggerita
 
 1. **F1** — un turno utente su cento in mix-am/mix-am-2 finisce in 400 evitabile, e il fix ha
    già un precedente identico nello stesso file.

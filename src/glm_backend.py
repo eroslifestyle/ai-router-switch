@@ -374,10 +374,27 @@ def glm_shrink_target_for(model: str | None) -> int:
     return max(target, GLM_SHRINK_TARGET_BYTES)
 
 
+# Pavimento di max_tokens verso z.ai. GLM emette un blocco `thinking` prima del
+# testo e quel blocco consuma output_tokens: con un tetto basso il budget finisce
+# nel ragionamento e al client arriva un 200 con `stop_reason=max_tokens` e zero
+# blocchi text — una risposta pagata e inutilizzabile. Misurato il 2026-08-16 con
+# uno stress a max_tokens=128: 11 risposte su 40 senza testo, tutte su GLM.
+# Il valore viene dalla distribuzione reale (450 risposte GLM concluse con
+# end_turn negli ultimi 14 giorni): p50=105, p90=1.413, p95=2.112. Un tetto di
+# 128 avrebbe troncato il 46,9% di quelle risposte, 2.048 il 5,3%, 4.096 l'1,6%.
+# Alzare un TETTO non fa spendere di piu': si paga l'output davvero generato, e
+# il modello si ferma da solo a end_turn. E' lo stesso rimedio che MiniMax ha da
+# tempo con MINIMAX_MIN_MAX_TOKENS, mai portato su GLM.
+GLM_MIN_MAX_TOKENS = int(os.environ.get("AIROUTER_GLM_MIN_MAX_TOKENS", "4096"))
+
+
 def clamp_glm_max_tokens(body: bytes, log_fn=None) -> bytes:
-    """Clampa max_tokens nel body in uscita verso z.ai a GLM_MAX_TOKENS_LIMIT.
-    z.ai rifiuta con 400 [1210] i valori fuori range [1, 32768]. No-op se assente
-    o già valido."""
+    """Riporta max_tokens dentro [GLM_MIN_MAX_TOKENS, GLM_MAX_TOKENS_LIMIT].
+
+    z.ai rifiuta con 400 [1210] i valori fuori dal range [1, 32768]; sotto il
+    minimo non rifiuta nulla ma restituisce una risposta senza testo (vedi
+    GLM_MIN_MAX_TOKENS). No-op se il campo e' assente o gia' nell'intervallo.
+    """
     try:
         d = json.loads(body)
     except Exception:
@@ -390,8 +407,11 @@ def clamp_glm_max_tokens(body: bytes, log_fn=None) -> bytes:
         if log_fn:
             log_fn(f"GLM clamp max_tokens {mt} -> {GLM_MAX_TOKENS_LIMIT}")
         return json.dumps(d).encode()
-    if mt < 1:
-        d["max_tokens"] = 1
+    if mt < GLM_MIN_MAX_TOKENS:
+        d["max_tokens"] = GLM_MIN_MAX_TOKENS
+        if log_fn:
+            log_fn(f"GLM max_tokens innalzato {mt} -> {GLM_MIN_MAX_TOKENS} "
+                   f"(sotto il minimo il budget si esaurisce nel thinking)")
         return json.dumps(d).encode()
     return body
 
