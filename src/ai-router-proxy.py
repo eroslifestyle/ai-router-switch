@@ -54,6 +54,7 @@ from router_constants import (
 )
 from router_utils import (
     log, MINIMAX_LIMITER, _request_orig_model, log_router_usage,
+    promote_system_messages,
 )
 from router_debug import debug_auth_middleware, dl
 from router_mode import (
@@ -717,9 +718,10 @@ async def handle(request):
     # e il model_override per la richiesta, poi la inoltra al provider appropriato.
     # Questo blocco ritorna SEMPRE e rende irraggiungibile il codice sottostante.
     try:
-        _req_model = (json.loads(body).get("model") or "").strip()
+        _body_dict = json.loads(body)
+        _req_model = (_body_dict.get("model") or "").strip()
     except Exception:
-        _req_model = ""
+        _body_dict, _req_model = None, ""
 
     from role_routing import resolve_route
     try:
@@ -751,6 +753,28 @@ async def handle(request):
         pass
 
     log(f"tunnel {mode}: model={_req_model or '?'} -> provider={_provider} override={_model_override or '-'}")
+
+    # I messaggi role=system si convertono PRIMA dello smistamento, per tutti i
+    # provider. Nessun upstream li accetta in quel ruolo, ma finora solo
+    # anthropic e minimax li trattavano: verso glm, qwen e local partivano
+    # intatti e li normalizzava l'upstream a modo suo. Misurato il 2026-08-16:
+    # su z.ai il caching regge sulla conversazione pulita (cache_read fino a
+    # 6.656 al quarto turno) e si sfalda con i role=system intercalati (il
+    # quarto turno cacha MENO del terzo, 3.072 contro 4.352) — la stessa classe
+    # di problema che sul campo `system` di Anthropic e' costata 670M token.
+    # Idempotente: dopo la conversione non ce ne sono piu', quindi i due call
+    # site dentro forward_anthropic/forward_minimax restano come rete di
+    # sicurezza per chi li invoca direttamente e diventano no-op qui.
+    if _body_dict is not None and "/v1/messages" in request.path:
+        try:
+            _n_sys = promote_system_messages(_body_dict)
+            if _n_sys:
+                body = json.dumps(_body_dict).encode()
+                log(f"convertiti {_n_sys} messaggi role=system in role=user "
+                    f"(pre-dispatch, provider={_provider}), "
+                    f"{getattr(promote_system_messages, 'ultimi_caratteri', 0)} caratteri")
+        except Exception as _e:
+            log(f"conversione role=system pre-dispatch fallita: {type(_e).__name__}: {_e}")
 
     # Smistamento per provider
     if _provider == "anthropic":
