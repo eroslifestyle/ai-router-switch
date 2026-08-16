@@ -11,7 +11,8 @@ per richiesta. Misurato il 2026-08-04.
 import json
 import os
 from debug_catalog import record_event
-from tool_isolation import sanitize_defer_loading, sanitize_tool_choice
+from tool_isolation import (sanitize_defer_loading, sanitize_tool_choice,
+                            preserva_cache_control)
 
 
 _HEAVY_CONNECTOR_PREFIX = 'mcp__claude_ai_'
@@ -57,21 +58,7 @@ def strip_heavy_connectors(body: bytes) -> bytes:
     )
     
     if kept:
-        # Cerca il cache_control dell'ultimo tool rimosso
-        cc = None
-        for removed_tool in reversed(tools):
-            if removed_tool in kept:
-                continue
-            if isinstance(removed_tool, dict) and 'cache_control' in removed_tool:
-                cc = removed_tool['cache_control']
-                break
-        
-        # Se nessun elemento di kept ha già un cache_control, assegna a ultimo
-        if cc is not None and not any(isinstance(t, dict) and t.get('cache_control') for t in kept):
-            last_kept = kept[-1]
-            if isinstance(last_kept, dict):
-                kept[-1] = {**last_kept, 'cache_control': cc}
-        
+        preserva_cache_control(tools, kept)
         data['tools'] = kept
     else:
         data.pop('tools', None)

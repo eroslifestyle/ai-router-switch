@@ -87,3 +87,40 @@ def test_tutti_i_tool_rimossi_non_esplode():
         assert d['tools'] == [], \
             f"Expected 'tools' to be absent or empty list, got {d['tools']}"
     # No exception thrown: test passes
+
+
+# ---------------------------------------------------------------------------
+# Il breakpoint va preservato da TUTTI i percorsi di strip, non solo da questo.
+# Prima del 2026-08-16 la logica esisteva in tre copie: due divergenti e una
+# assente (lo strip dei server tool verso MiniMax).
+# ---------------------------------------------------------------------------
+
+def test_strip_minimax_preserva_il_breakpoint():
+    """Un server tool Anthropic in coda porta con se' il cache_control.
+
+    Claude Code chiude `tools` con il breakpoint sull'ultimo elemento. Se quello
+    e' un server tool (privo di input_schema), lo strip verso MiniMax lo rimuove:
+    senza trasferimento il blocco tools resta senza breakpoint e il caching non si
+    estende alla conversazione."""
+    from minimax_body import strip_server_tools_for_minimax
+    data = {
+        'tools': [_tool('Bash'), _tool('Read'),
+                  {'name': 'web_search_20250305', 'type': 'web_search_20250305',
+                   'cache_control': {'type': 'ephemeral'}}],
+        'messages': [],
+    }
+    strip_server_tools_for_minimax(data)
+    rimasti = data['tools']
+    assert len(rimasti) == 2, 'il server tool doveva essere rimosso'
+    assert rimasti[-1].get('cache_control') == {'type': 'ephemeral'}, \
+        'breakpoint perso: il caching non si estende oltre i tool'
+
+
+def test_preserva_cache_control_con_elemento_spurio_in_coda():
+    """Un `tools` con un elemento non-dict in coda non deve far perdere il
+    breakpoint (ne' sollevare TypeError): va risalito all'ultimo dict."""
+    from tool_isolation import preserva_cache_control
+    originali = [_tool('Bash'), _tool('mcp__minimax__x', cc=True), 'spurio']
+    kept = [_tool('Bash'), 'spurio']
+    preserva_cache_control(originali, kept)
+    assert kept[0].get('cache_control') == {'type': 'ephemeral'}

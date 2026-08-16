@@ -139,6 +139,36 @@ def sanitize_defer_loading(data: dict) -> bool:
     return rimossi
 
 
+def preserva_cache_control(originali: list, kept: list) -> None:
+    """Riporta su `kept` il breakpoint `cache_control` dei tool rimossi. Muta `kept`.
+
+    Claude Code chiude il blocco `tools` con un `cache_control` sull'ultimo elemento:
+    se lo strip porta via proprio quel tool, il breakpoint sparisce, il prompt caching
+    non si estende piu' e ogni turno riprocessa l'intera conversazione — lo stream
+    rallenta finche' il client chiude con "Response stalled mid-stream" (2026-08-01,
+    3.263 occorrenze).
+
+    Esisteva in tre copie: due divergenti (`filter_tools_for_backend` risaliva
+    all'ultimo dict di `kept`, `qwen_tool_trim` guardava solo `kept[-1]` e con un
+    elemento spurio in coda perdeva comunque il breakpoint) e una mancante del tutto
+    (`strip_server_tools_for_minimax`). Unificata qui il 2026-08-16.
+    """
+    if not kept:
+        return
+    if any(isinstance(t, dict) and t.get("cache_control") for t in kept):
+        return
+    cc = next((t.get("cache_control") for t in reversed(originali)
+               if isinstance(t, dict) and t not in kept and t.get("cache_control")), None)
+    if cc is None:
+        return
+    # L'ultimo elemento di `kept` che sia un dict: un client puo' mandare un `tools`
+    # con un elemento spurio in coda, e lo spread su una stringa solleverebbe
+    # TypeError che nessun chiamante intercetta (500 al client).
+    i = next((k for k in reversed(range(len(kept))) if isinstance(kept[k], dict)), None)
+    if i is not None:
+        kept[i] = {**kept[i], "cache_control": cc}
+
+
 def filter_tools_for_backend(body: bytes, backend: str) -> bytes:
     """Rimuove dall'array `tools` i tool brandizzati di provider DIVERSI da
     `backend` ('anthropic'|'minimax'|'glm'). I tool locali di Claude Code
@@ -167,23 +197,7 @@ def filter_tools_for_backend(body: bytes, backend: str) -> bytes:
         snippet=f"stripped={stripped_names[:10]} kept={len(kept)}/{len(tools)}",
     )
     if kept:
-        # Il cache_control del tool rimosso va TRASFERITO all'ultimo tool rimasto.
-        # Claude Code chiude il blocco `tools` con un breakpoint sull'ultimo elemento:
-        # rimuovere quel tool cancellava il breakpoint, il prompt caching non si
-        # estendeva piu' (creation=0) e ogni turno riprocessava l'intera conversazione
-        # -> stream sempre piu' lento -> il client chiude con "Response stalled
-        # mid-stream". Colpiva le sole modalita' pure: le miste non fanno strip.
-        _cc = next((t.get("cache_control") for t in reversed(tools)
-                    if isinstance(t, dict) and t not in kept and t.get("cache_control")), None)
-        if _cc and not any(isinstance(t, dict) and t.get("cache_control") for t in kept):
-            # Il breakpoint va sull'ultimo elemento di `kept` CHE SIA UN DICT.
-            # Un client puo' mandare un `tools` con un elemento spurio in coda:
-            # `kept[-1]` era allora una stringa e lo spread sollevava TypeError,
-            # che nessun chiamante intercetta (500 al client). Il gemello in
-            # qwen_tool_trim.py questa guardia ce l'aveva gia'.
-            _i = next((i for i in reversed(range(len(kept))) if isinstance(kept[i], dict)), None)
-            if _i is not None:
-                kept[_i] = {**kept[_i], "cache_control": _cc}
+        preserva_cache_control(tools, kept)
         data["tools"] = kept
     else:
         data.pop("tools", None)

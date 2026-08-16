@@ -86,6 +86,13 @@ def strip_server_tools_for_minimax(data: dict) -> None:
         ]
         if len(kept) != len(tools):
             if kept:
+                # Se il tool rimosso portava il breakpoint di fine blocco, va
+                # spostato su un tool superstite: senza, il prompt caching di
+                # MiniMax non si estende oltre i tool e ogni turno ri-paga la
+                # conversazione. Gli altri due percorsi di strip lo facevano gia',
+                # questo no (2026-08-16).
+                from tool_isolation import preserva_cache_control
+                preserva_cache_control(tools, kept)
                 data["tools"] = kept
             else:
                 data.pop("tools", None)
