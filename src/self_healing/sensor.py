@@ -48,6 +48,17 @@ def classify_outcome(
     if status >= 400 or stop_reason == "error":
         return "error"
     if measure_partial and text_blocks == 0 and tool_use_blocks == 0:
+        # stop_reason valorizzato = lo stream HA raggiunto il message_delta finale:
+        # la generazione e' conclusa e mancano solo i content_block_start caduti nel
+        # buco dei 16KB centrali. Marcarla "unknown" (misura interrotta) gonfiava il
+        # conteggio delle generazioni improduttive: 575 delle 1.089 unknown storiche
+        # erano risposte concluse, alcune da 3.682 token di output (2026-08-16).
+        if stop_reason == "max_tokens":
+            return "truncated"
+        if stop_reason == "tool_use":
+            return "tool_only"
+        if stop_reason:
+            return "ok"
         return "unknown"
     # The relay accumulates only the first and last 16KB of the response.
     # A "text" content_block_start that falls in the middle 16KB gap

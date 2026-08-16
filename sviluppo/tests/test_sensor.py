@@ -75,3 +75,18 @@ def test_outcome_retrocompatibile_senza_thinking():
     assert result2 == "tool_only", f"atteso='tool_only', ottenuto={result2}"
     result3 = classify_outcome(200, "max_tokens", 0, 0, 8000)
     assert result3 == "empty", f"atteso='empty', ottenuto={result3}"
+
+
+def test_measure_partial_con_stop_reason_non_e_unknown():
+    """Misura incompleta ma stream concluso: classifica per stop_reason.
+
+    Il relay accumula solo i primi e gli ultimi 16KB: i content_block_start di
+    una risposta lunga cadono nel buco e risultano zero blocchi. Se pero' il
+    message_delta finale e' arrivato (stop_reason valorizzato), la generazione
+    NON e' stata interrotta. Misurato il 2026-08-16: 575 delle 1.089 entry
+    'unknown' erano cosi', una con 3.682 token di output prodotti."""
+    assert classify_outcome(200, "tool_use", 0, 0, 3682, True, 1) == "tool_only"
+    assert classify_outcome(200, "end_turn", 0, 0, 900, True, 1) == "ok"
+    assert classify_outcome(200, "max_tokens", 0, 0, 4096, True, 0) == "truncated"
+    # senza stop_reason resta una misura davvero incompleta
+    assert classify_outcome(200, "", 0, 0, 120, True, 1) == "unknown"
