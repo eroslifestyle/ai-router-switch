@@ -39,8 +39,3 @@ def get_request_id() -> str:
         return _request_id.get()
     except LookupError:
         return ''
-
-
-def reset_request_id() -> None:
-    """Riporta il request_id a stringa vuota nel contesto corrente."""
-    _request_id.set('')
