@@ -25,10 +25,25 @@ from router_constants import NON_STREAM_SOCK_READ_SEC
 SESSION_SOCK_READ_SEC = 120
 
 
-def test_streaming_eredita_timeout_sessione():
-    """Con stream=True nessun override: i chunk continui rendono utile il 120 s."""
+def test_streaming_ha_il_suo_sock_read():
+    """Con stream=True l'override c'e' comunque, ma piu' stretto del non-streaming.
+
+    Fino al 2026-08-16 questo test asseriva `is None`: si dava per scontato che in
+    streaming i chunk arrivassero di continuo e che il 120 s della sessione fosse
+    quindi un rilevatore di stall. Non vale per il tratto PRIMA del primo chunk,
+    mentre il modello ragiona: li' e' un tetto sul time-to-first-byte. Sulle 9.898
+    richieste MiniMax dei 21 giorni precedenti il TTFB dei successi arriva a 87,6s
+    — sotto i 120 per costruzione, perche' quelle oltre non sono successi: sono i
+    333 `Timeout on reading data from socket` fra il 26/07 e il 14/08.
+    """
+    from router_constants import STREAM_SOCK_READ_SEC
     body = json.dumps({"model": "x", "stream": True}).encode()
-    assert upstream_timeout_for(body) is None
+    result = upstream_timeout_for(body)
+    assert result is not None
+    assert result.sock_read == STREAM_SOCK_READ_SEC
+    # Piu' largo di quello che tagliava, piu' stretto di quello non-streaming:
+    # uno stall vero a meta' stream va comunque rilevato, e prima.
+    assert SESSION_SOCK_READ_SEC < STREAM_SOCK_READ_SEC < NON_STREAM_SOCK_READ_SEC
 
 
 def test_non_streaming_riceve_sock_read_generoso():

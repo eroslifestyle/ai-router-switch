@@ -13,7 +13,7 @@ from aiohttp import ClientTimeout
 from router_constants import (
     MINIMAX_RATE_LIMITS, MINIMAX_RATE_LIMITS_DEFAULT, MINIMAX_SAFETY,
     MINIMAX_BACKOFF_STEPS, MINIMAX_ALERTS_LOG, MINIMAX_CONCURRENCY,
-    USAGE_SIDECAR, NON_STREAM_SOCK_READ_SEC,
+    USAGE_SIDECAR, NON_STREAM_SOCK_READ_SEC, STREAM_SOCK_READ_SEC,
 )
 
 
@@ -24,10 +24,20 @@ def upstream_timeout_for(body):
     generazione non e' conclusa: il `sock_read` della sessione smette di essere
     una protezione contro gli stall e diventa un tetto sulla durata della
     generazione, che si manifesta al client come 502 "Timeout on reading data
-    from socket". Lo streaming non ha il problema — i chunk arrivano di continuo
-    — e li' il valore stretto della sessione serve davvero a rilevare gli stall.
+    from socket". Di qui NON_STREAM_SOCK_READ_SEC, generoso.
 
-    Ritorna None quando va ereditato il timeout di sessione.
+    Anche lo streaming ha un tratto muto, pero': quello PRIMA del primo chunk,
+    mentre il modello ragiona. Li' i 120 secondi della sessione non rilevano uno
+    stall, sono un tetto sul time-to-first-byte. Misurato il 2026-08-16 sulle
+    9.898 richieste MiniMax degli ultimi 21 giorni: il TTFB dei successi arriva
+    a 87,6s (p99 22,0s) — sotto i 120 per definizione, perche' quelle oltre non
+    sono successi. Sono i 333 `forward_exception: Timeout on reading data from
+    socket` in mode minimax fra il 26/07 e il 14/08. STREAM_SOCK_READ_SEC da'
+    margine su quel massimo osservato restando molto sotto il valore
+    non-streaming: uno stall vero a meta' stream va ancora rilevato, e prima.
+
+    Ritorna sempre un ClientTimeout per un body JSON valido; None solo quando il
+    body non e' interpretabile e conviene ereditare la sessione.
     """
     if body is None:
         return None
@@ -38,7 +48,8 @@ def upstream_timeout_for(body):
     if not isinstance(data, dict):
         return None
     if data.get("stream") is True:
-        return None
+        return ClientTimeout(connect=30, sock_connect=15,
+                             sock_read=STREAM_SOCK_READ_SEC)
     return ClientTimeout(connect=30, sock_connect=15,
                          sock_read=NON_STREAM_SOCK_READ_SEC)
 

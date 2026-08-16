@@ -130,14 +130,19 @@ def cmd_cache(args):
 def cmd_costo(args):
     """Da cosa e' fatto l'input che paghiamo: definizioni tool o conversazione."""
     righe = _leggi_sidecar(args)
-    agg = defaultdict(lambda: {"n": 0, "in": 0, "tb": 0, "mcp": 0, "n_tb": 0})
+    agg = defaultdict(lambda: {"n": 0, "in": 0, "fresco": 0, "tb": 0, "mcp": 0, "n_tb": 0})
     for d in righe:
         p = _provider(d.get("final"))
         if not p or p == "router-internal":
             continue
         s = agg[p]
         s["n"] += 1
-        s["in"] += d.get("input_tokens") or 0
+        # Il contesto processato e' input + cache: rapportare le definizioni tool al
+        # solo `input_tokens` dava «quota tool 242878%» da quando la cache funziona,
+        # perche' quel campo vale ~2 mentre il contesto vero sta in `cache_read`.
+        s["in"] += ((d.get("input_tokens") or 0) + (d.get("cache_read") or 0)
+                    + (d.get("cache_creation") or 0))
+        s["fresco"] += d.get("input_tokens") or 0
         if d.get("tools_bytes"):
             s["tb"] += d["tools_bytes"]
             s["mcp"] += d.get("tools_mcp_bytes") or 0
@@ -146,13 +151,15 @@ def cmd_costo(args):
     for p, s in sorted(agg.items(), key=lambda kv: -kv[1]["n"]):
         n = s["n"] or 1
         tool_tok = (s["tb"] / max(s["n_tb"], 1)) / 4  # stima: 4 byte per token
-        inp = s["in"] / n
-        out.append([p, f"{s['n']:,}", f"{inp:,.0f}", f"{tool_tok:,.0f}",
-                    f"{tool_tok/inp:.0%}" if inp else "-",
+        ctx = s["in"] / n
+        out.append([p, f"{s['n']:,}", f"{ctx:,.0f}", f"{s['fresco']/n:,.0f}",
+                    f"{tool_tok:,.0f}", f"{tool_tok/ctx:.0%}" if ctx else "-",
                     f"{(s['mcp']/max(s['n_tb'],1))/4:,.0f}"])
-    print(f"composizione dell'input pagato — {_finestra(args)} (stima tool: byte/4)")
-    _tab(["provider", "richieste", "input/req", "tool tok/req", "quota tool", "di cui MCP"], out)
-    print("\n  senza caching le definizioni tool si ripagano a ogni richiesta.")
+    print(f"composizione del contesto processato — {_finestra(args)} (stima tool: byte/4)")
+    _tab(["provider", "richieste", "contesto/req", "di cui nuovo", "tool tok/req",
+          "quota tool", "di cui MCP"], out)
+    print("\n  «di cui nuovo» e' l'input NON coperto dalla cache: e' quello che si paga pieno.")
+    print("  Con la cache sana le definizioni tool si pagano una volta per conversazione.")
 
 
 def cmd_sprechi(args):
@@ -168,7 +175,12 @@ def cmd_sprechi(args):
         s = agg[p]
         s["n"] += 1
         inp = d.get("input_tokens") or 0
-        s["tot"] += inp
+        # Denominatore: TUTTO il contesto processato, non il solo input non-cachato.
+        # Con la cache sana `input_tokens` vale ~2 e ogni rapporto costruito su di
+        # esso esplode: la colonna dichiarava «anthropic 99% del suo input» mentre
+        # il 99% del contesto veniva letto dalla cache. Stesso difetto che rende
+        # illeggibile `costo` da quando la cache funziona (2026-08-16).
+        s["tot"] += inp + (d.get("cache_read") or 0) + (d.get("cache_creation") or 0)
         ts = d.get("ts") or 0
         prec = ultimo.get(p)
         if inp > SOGLIA and not (d.get("cache_read") or 0) and prec and (ts - prec) <= FINESTRA:
@@ -182,7 +194,7 @@ def cmd_sprechi(args):
                     f"{s['tok']/max(s['tot'],1):.0%}"])
     print(f"contesto ri-pagato — {_finestra(args)} (input>{SOGLIA:,}, cache_read=0, entro {FINESTRA}s "
           f"da una richiesta dello stesso provider)")
-    _tab(["provider", "richieste", "a vuoto", "token", "% del suo input"], out)
+    _tab(["provider", "richieste", "a vuoto", "token", "% del contesto"], out)
     print(f"\n  totale: {tot/1e6:,.0f}M token che la cache avrebbe coperto.")
 
 

@@ -90,10 +90,19 @@ MINIMAX_ALERTS_LOG = str(paths.log_file("minimax-alerts.log"))
 # smettono di proteggere dagli stall e diventano un tetto sulla DURATA della
 # generazione -> 502 "Timeout on reading data from socket" (59 casi nei log fra il
 # 26 e il 28/07). Misura di riferimento: una generazione MiniMax da 32.000 max_tokens
-# impiega 144s, quindi 600s lascia ~4x di margine. Lo streaming NON usa questo valore:
-# li' i chunk arrivano di continuo e sock_read=120 fa il suo mestiere.
+# impiega 144s, quindi 600s lascia ~4x di margine.
 NON_STREAM_SOCK_READ_SEC = float(
     os.environ.get("AIROUTER_NON_STREAM_SOCK_READ_SEC", "600"))
+# Anche lo streaming ha un tratto muto: quello prima del primo chunk, mentre il
+# modello ragiona. I 120s della sessione non vi rilevano uno stall, sono un tetto
+# sul time-to-first-byte. Misurato il 2026-08-16 su 9.898 richieste MiniMax in 21
+# giorni: il TTFB dei successi arriva a 87,6s (p50 2,9 · p90 6,2 · p99 22,0) —
+# sotto i 120 per costruzione, perche' quelle oltre non sono successi: sono i 333
+# `forward_exception: Timeout on reading data from socket` fra il 26/07 e il 14/08.
+# 300s da' 3,4x sul massimo osservato e resta la meta' del valore non-streaming,
+# cosi' uno stall vero a meta' stream viene ancora rilevato, e prima.
+STREAM_SOCK_READ_SEC = float(
+    os.environ.get("AIROUTER_STREAM_SOCK_READ_SEC", "300"))
 # TRIM_TARGET_BYTES, TRIM_MIN_MESSAGES e SUMMARY_BUDGET rimossi il 2026-08-07:
 # politiche superate. Lo shrink punta a MINIMAX_CONTEXT_BYTE_LIMIT pieno
 # (pipeline_minimax.py:71) e il budget del riassunto lo calcola ogni call site.
