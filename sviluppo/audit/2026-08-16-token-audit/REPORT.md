@@ -264,6 +264,18 @@ due soli 400 di firma sono le due esecuzioni della controprova T2 (19:47:02 e 19
   era sopravvalutata — l'ha smontata il test T4, che nella prima versione cercava una riga
   di log invece dell'effetto. Resta corretto rimuovere l'elenco scritto a mano.
 
+### Verificato e NON problematico: gli id `tool_use`
+
+Dopo F1 la domanda naturale è se altri campi soffrano dello stesso difetto. Tutti e tre i
+provider non-Anthropic generano `tool_use.id` in formato `call_...`, non conforme al
+pattern `^toolu_[a-zA-Z0-9_]+$`: MiniMax `call_mMG8UVtqjGVpxhqOqD4yrmGS`, GLM
+`call_d52eab76a630490abfa37494`, l'ACT di mix-am-2 `call_function_3ax3dooxei5r_1`.
+
+Sembra il gemello del problema delle firme, e non lo è: mandando ad Anthropic una
+cronologia con `tool_use.id = "call_..."` più il suo `tool_result`, la risposta è **200**.
+Il vincolo di pattern vale solo per `server_tool_use.id`, che `sanitize_server_tool_ids`
+copre già dal 26/07. Nessun intervento necessario — annotato perché non venga ri-indagato.
+
 ## 5. Priorità suggerita
 
 1. **F1** — un turno utente su cento in mix-am/mix-am-2 finisce in 400 evitabile, e il fix ha
