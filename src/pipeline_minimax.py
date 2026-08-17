@@ -130,68 +130,46 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
 
 
 async def _try_shrink_body(orig: dict, target_bytes: int):
-    """Prova a shrinkare il body per farlo stare in target_bytes, mantenendo sempre un riassunto."""
-    from pipeline_anthropic import _repair_message_sequence, build_shrink_summary, SHRINK_KEEP_TAIL, _shrink_images_in_messages
+    """Prova a shrinkare il body per farlo stare in target_bytes, mantenendo sempre un riassunto.
+
+    Interfaccia: dict -> bytes | None, con side-effect su orig per le immagini.
+
+    L'orchestrazione del budget è delegata a shrink_body_to_budget(context_shrink.py),
+    che preserva il prompt caching tramite taglio sticky (K quantizzato, prefisso identico
+    fra turni consecutivi). La copia locale aveva il summary nel campo 'system' e una coda
+    scorrevole, che cambiavano a ogni turno rifacendo il prefisso e uccidendo la cache.
+    """
     try:
         msgs = orig.get("messages", []) or []
         if not msgs:
             return None
-        _shrink_images_in_messages(orig)
 
-        # Extract system content correctly (Bug 2 fix)
-        system_val = orig.get("system", "")
-        if isinstance(system_val, list):
-            parts = []
-            for v in system_val:
-                if isinstance(v, str):
-                    parts.append(v)
-                elif isinstance(v, dict):
-                    if v.get("type") == "text":
-                        parts.append(v.get("text", ""))
-            system_str = "\n\n".join(parts)
-        else:
-            system_str = system_val or ""
+        # Side-effect: riduci le immagini in-place su orig
+        try:
+            from pipeline_anthropic import _shrink_images_in_messages
+            _shrink_images_in_messages(orig)
+        except Exception:
+            pass
 
-        # Budget progression list
-        budgets = [560_000, 280_000, 140_000, 70_000, 35_000, 16_000, 8_000]
+        # Serializza orig a bytes (corpo della richiesta JSON)
+        orig_bytes = json.dumps(orig).encode()
+        original_bytes_len = len(orig_bytes)
 
-        for budget in budgets:
-            summary_content = build_shrink_summary(msgs, budget)
-            tail_msgs = _repair_message_sequence(msgs[-SHRINK_KEEP_TAIL:])
-            system_content = system_str + "\n\n" + summary_content if system_str else summary_content
-            shrunk = dict(orig)
-            shrunk["messages"] = tail_msgs
-            if system_content:
-                shrunk["system"] = system_content
-            shrunk.pop("thinking", None)
-            original_bytes = len(json.dumps(orig).encode())
-            shrunk_bytes = json.dumps(shrunk).encode()
-            if len(shrunk_bytes) <= target_bytes:
-                log(f"shrink: budget ridotto a {budget}b, tail={len(tail_msgs)} msg")
-                return shrunk_bytes
+        # Delega a shrink_body_to_budget: orchestrazione del budget + sticky caching
+        from context_shrink import shrink_body_to_budget
+        shrunk_bytes = await shrink_body_to_budget(orig_bytes, target_bytes, shrink_images=False)
 
-        # Final fallback: reduce tail to last 2 messages, keep summary with smallest budget (8000)
-        final_budget = 8_000
-        summary_content = build_shrink_summary(msgs, final_budget)
-        tail_msgs = _repair_message_sequence(msgs[-2:] if len(msgs) >= 2 else msgs)
-        system_content = system_str + "\n\n" + summary_content if system_str else summary_content
-        shrunk = dict(orig)
-        shrunk["messages"] = tail_msgs
-        if system_content:
-            shrunk["system"] = system_content
-        shrunk.pop("thinking", None)
-        shrunk_bytes = json.dumps(shrunk).encode()
-        if len(shrunk_bytes) <= target_bytes:
-            log(f"shrink: budget ridotto a {final_budget}b, tail={len(tail_msgs)} msg")
-            return shrunk_bytes
+        if shrunk_bytes is None:
+            return None
 
         # 2026-08-15: shrink eccessivo = probabile perdita di informazioni utili.
-        # Se togliamo piu' del 50%, logghiamo warning visibile (cliente + log).
-        if shrunk_bytes < original_bytes * 0.5:
-            pct = 100 * (original_bytes - shrunk_bytes) // max(original_bytes, 1)
+        # Se togliamo più del 50%, logghiamo warning visibile (cliente + log).
+        shrunk_len = len(shrunk_bytes)
+        if shrunk_len < original_bytes_len * 0.5:
+            pct = 100 * (original_bytes_len - shrunk_len) // max(original_bytes_len, 1)
             warn_msg = (
                 f"WARN pipeline_minimax: _try_shrink_body ha rimosso {pct}% del body "
-                f"({original_bytes}->{shrunk_bytes} byte). Possibile perdita di contesto "
+                f"({original_bytes_len}->{shrunk_len} byte). Possibile perdita di contesto "
                 f"inviato a MiniMax. Verifica spec/Intent."
             )
             print(warn_msg, file=sys.stderr)
@@ -199,7 +177,9 @@ async def _try_shrink_body(orig: dict, target_bytes: int):
                 _log_warn(warn_msg)
             except NameError:
                 pass
-        return shrunk_bytes if shrunk_bytes else None
+
+        return shrunk_bytes
+
     except Exception as e:
         log(f"try_shrink_body EXC: {e}")
         return None
