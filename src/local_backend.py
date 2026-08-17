@@ -14,6 +14,7 @@ import secrets_provider
 from synthetic_response import synthetic_error
 
 LOCAL_MODEL_CODE = 'code-max'
+LOCAL_MODEL_FAST = 'code-fast'
 # Nessun fallback: il modello locale ha una sola via, llama.cpp :8083 dietro LiteLLM.
 # L'alias Ollama code-max-ollama e' stato rimosso il 2026-08-04 (duplicazione da 48GB).
 LOCAL_MODEL_FALLBACK = LOCAL_MODEL_CODE
@@ -56,7 +57,7 @@ def set_body_model(body: bytes, model: str) -> bytes:
 
 def resolve_local_model(requested: Optional[str]) -> str:
     """Restituisce il modello richiesto se consentito, altrimenti LOCAL_MODEL_CODE."""
-    if requested in (LOCAL_MODEL_CODE, LOCAL_MODEL_FALLBACK):
+    if requested in (LOCAL_MODEL_CODE, LOCAL_MODEL_FALLBACK, LOCAL_MODEL_FAST):
         return requested
     return LOCAL_MODEL_CODE
 

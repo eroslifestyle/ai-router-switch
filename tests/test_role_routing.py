@@ -473,8 +473,8 @@ class TestLocalMode:
         assert rr.resolve_route('local', 'claude-fable-5') == ('local', 'code-max')
 
     def test_local_act(self):
-        """Verifica nativizzazione modello ACT a code-max."""
-        assert rr.resolve_route('local', 'claude-haiku-4-5-20251001') == ('local', 'code-max')
+        """Verifica nativizzazione modello ACT a code-fast."""
+        assert rr.resolve_route('local', 'claude-haiku-4-5-20251001') == ('local', 'code-fast')
 
     def test_local_nativizza_modelli_stranieri(self):
         """Modelli di altri provider vengono nativizzati a code-max."""
@@ -485,6 +485,7 @@ class TestLocalMode:
     def test_local_modello_nativo_non_riscritto(self):
         """Un modello gia' nativo non va riscritto."""
         assert rr.resolve_route('local', 'code-max') == ('local', None)
+        assert rr.resolve_route('local', 'code-fast') == ('local', None)
 
     def test_local_ruolo_sconosciuto(self):
         """Un modello mai visto in mode local cade su provider local con override None."""

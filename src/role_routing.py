@@ -33,6 +33,9 @@ QWEN_ACT = "qwen3-coder-plus"
 # llama.cpp dietro LiteLLM). Il provider 'local' NON ha un modello THINK:
 # in mix-al il THINK resta su Anthropic.
 LOCAL_ACT = "code-max"
+# code-fast: Laguna XS 2.1 (33B-A3B, 256K ctx, 63 tok/s via Ollama). Dal
+# 2026-08-17 è l'esecutore ACT della modalità local.
+LOCAL_ACT_FAST = "code-fast"
 
 # ── Role constants ─────────────────────────────────────────────────────────────
 ROLE_THINK = "think"
@@ -81,9 +84,9 @@ ROUTING_TABLE = {
     ("mix-gm-2", ROLE_ACT): ("minimax", MINIMAX_ACT),
     ("mix-al", ROLE_THINK): ("anthropic", None),
     ("mix-al", ROLE_ACT): ("local", LOCAL_ACT),
-    # local è una modalità pura, THINK ACT e VERIFY vanno tutti al modello locale code-max su llama.cpp 8083, nessuna escalation remota, isolamento totale, e il _nativize riscrive ogni modello incluso claude-opus del THINK su code-max.
+    # local è una modalità pura: THINK/VERIFY -> code-max, ACT -> code-fast (Laguna XS 2.1).
     ("local", ROLE_THINK): ("local", LOCAL_ACT),
-    ("local", ROLE_ACT): ("local", LOCAL_ACT),
+    ("local", ROLE_ACT): ("local", LOCAL_ACT_FAST),
 }
 
 # ── Default provider per mode (used for unknown roles) ────────────────────────
@@ -196,7 +199,7 @@ def model_provider(model_name: str | None) -> str | None:
     # Modelli locali (LiteLLM/llama.cpp su questa macchina): confronto ESATTO o
     # startswith, mai `in`, per non catturare per sbaglio altri nomi. Serve
     # all'isolamento fra modalita': un modello locale non va mai a un provider remoto.
-    if model_lower in ("code-max", "code-max-ollama") or model_lower.startswith("qcnext"):
+    if model_lower in ("code-max", "code-max-ollama", "code-fast") or model_lower.startswith("qcnext"):
         return "local"
 
     return None
