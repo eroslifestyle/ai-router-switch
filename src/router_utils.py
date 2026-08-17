@@ -479,11 +479,18 @@ def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
             _partial = bool(usage.get("measure_partial"))
             if _partial:
                 entry["measure_partial"] = True
-            entry["outcome"] = classify_outcome(
-                status, entry.get("stop_reason", ""),
-                entry.get("text_blocks", 0), entry.get("tool_use_blocks", 0),
-                entry.get("output_tokens", 0), _partial,
-                entry.get("thinking_blocks", 0))
+            # /v1/messages/count_tokens non genera nulla: niente stop_reason, niente
+            # blocchi. Classificarla "unknown" (misura interrotta) la faceva sembrare
+            # una generazione persa. Discriminato qui e non in classify_outcome, che
+            # non riceve il path ed e' una funzione pura gia' coperta dai test.
+            if str(entry.get("path", "")).endswith("/count_tokens"):
+                entry["outcome"] = "count_tokens"
+            else:
+                entry["outcome"] = classify_outcome(
+                    status, entry.get("stop_reason", ""),
+                    entry.get("text_blocks", 0), entry.get("tool_use_blocks", 0),
+                    entry.get("output_tokens", 0), _partial,
+                    entry.get("thinking_blocks", 0))
             entry["task_class"] = usage.get("task_class") or (classify_task(body) if body else "")
         except Exception:
             pass
