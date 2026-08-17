@@ -83,7 +83,7 @@ ROUTING_TABLE = {
     ("mix-gm-2", ROLE_THINK): ("glm", GLM_THINK),
     ("mix-gm-2", ROLE_ACT): ("minimax", MINIMAX_ACT),
     ("mix-al", ROLE_THINK): ("anthropic", None),
-    ("mix-al", ROLE_ACT): ("local", LOCAL_ACT),
+    ("mix-al", ROLE_ACT): ("local", LOCAL_ACT_FAST),
     # local è una modalità pura: THINK/VERIFY -> code-max, ACT -> code-fast (Laguna XS 2.1).
     ("local", ROLE_THINK): ("local", LOCAL_ACT),
     ("local", ROLE_ACT): ("local", LOCAL_ACT_FAST),
@@ -127,11 +127,13 @@ def modes_with_act_provider(provider: str) -> frozenset:
 # It's the NATIVE EXECUTOR of the provider, never the THINK (the THINK is
 # chosen manually by the user, it should never be decided by code).
 _NATIVE_EXECUTOR = {
+    # ponytail: local ACT = code-fast (Laguna XS 2.1)
+
     "anthropic": "claude-haiku-4-5-20251001",
     "minimax": MINIMAX_ACT,
     "glm": GLM_ACT,
     "qwen": QWEN_ACT,
-    "local": LOCAL_ACT,
+    "local": LOCAL_ACT_FAST,
 }
 
 

@@ -430,11 +430,11 @@ class TestMixALMode:
 
     def test_act_claude_haiku(self):
         """ACT with claude-haiku-4-5-20251001 routes to local."""
-        assert rr.resolve_route('mix-al', 'claude-haiku-4-5-20251001') == ('local', rr.LOCAL_ACT)
+        assert rr.resolve_route('mix-al', 'claude-haiku-4-5-20251001') == ('local', rr.LOCAL_ACT_FAST)
 
     def test_minimax_nativized(self):
         """MiniMax-M2.7 in mix-al must be nativized to local, never MiniMax."""
-        assert rr.resolve_route('mix-al', 'MiniMax-M2.7') == ('local', rr.LOCAL_ACT)
+        assert rr.resolve_route('mix-al', 'MiniMax-M2.7') == ('local', rr.LOCAL_ACT_FAST)
 
     def test_unknown_model_routes_local(self):
         """Unknown model in mix-al routes to local without exception."""
@@ -478,9 +478,9 @@ class TestLocalMode:
 
     def test_local_nativizza_modelli_stranieri(self):
         """Modelli di altri provider vengono nativizzati a code-max."""
-        assert rr.resolve_route('local', 'MiniMax-M3') == ('local', 'code-max')
-        assert rr.resolve_route('local', 'glm-5.2') == ('local', 'code-max')
-        assert rr.resolve_route('local', 'qwen3.8-max') == ('local', 'code-max')
+        assert rr.resolve_route('local', 'MiniMax-M3') == ('local', rr.LOCAL_ACT_FAST)
+        assert rr.resolve_route('local', 'glm-5.2') == ('local', rr.LOCAL_ACT_FAST)
+        assert rr.resolve_route('local', 'qwen3.8-max') == ('local', rr.LOCAL_ACT_FAST)
 
     def test_local_modello_nativo_non_riscritto(self):
         """Un modello gia' nativo non va riscritto."""
