@@ -272,12 +272,12 @@ class DebugLogger:
             self._debug_err(f"_append_jsonl({path.name}) failed: {e}")
 
     # ── Catalog ──────────────────────────────────────────────────────────────
-    def _catalog_event(self, severity, category, kind, fp, code, snippet, detail) -> None:
+    def _catalog_event(self, severity, category, kind, fp, code, snippet, detail, synthetic: bool = False) -> None:
         try:
             import debug_catalog
             debug_catalog.record_event(
                 severity=severity, category=category, kind=kind, chat_fp=fp,
-                code=code, snippet=snippet, detail=detail,
+                code=code, snippet=snippet, detail=detail, synthetic=synthetic,
             )
         except Exception as e:
             self._debug_err(f"_catalog_event failed: {e}")
@@ -306,7 +306,7 @@ class DebugLogger:
                 upstream_encoding: str = "", sent_bytes: int = 0,
                 orig: dict | None = None, sent_analysis: dict | None = None,
                 note: str = "", mode: str = None, severity: str = "error",
-                category: str = None) -> None:
+                category: str = None, synthetic: bool = False) -> None:
         try:
             if mode is None:
                 from router_mode import get_mode
@@ -341,7 +341,8 @@ class DebugLogger:
             self._catalog_event(severity, mode, kind, fp, upstream_status or status,
                                err_text, {"client_model": client_model,
                                           "upstream_model": upstream_model,
-                                          "stage": stage, "path": record["path"]})
+                                          "stage": stage, "path": record["path"]},
+                               synthetic=synthetic)
             if orig:
                 self._write_last_request(orig)
 

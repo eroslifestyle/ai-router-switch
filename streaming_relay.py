@@ -43,6 +43,18 @@ class StreamingRelay:
         self.log_router_usage_fn = log_router_usage_fn
         self.trim_context_fn = trim_context_fn
 
+    @property
+    def is_synthetic(self) -> bool:
+        """True se la richiesta viene da una sonda o dalla suite di test.
+
+        L'header lo manda chi genera traffico sintetico; senza questo flag le
+        sonde risultano traffico reale nelle analisi per modalita'.
+        """
+        try:
+            return self.request.headers.get("x-airouter-synthetic", "").strip().lower() in ("1", "true", "yes")
+        except Exception:
+            return False
+
     def _modelli_orig_e_finale(self, final_override, orig_model):
         """Ritorna (modello chiesto dal client, modello che ha davvero risposto).
 
@@ -530,14 +542,6 @@ class StreamingRelay:
                             self.log_fn(f"cache: OK bp=s{_cc_s}/m{_cc_m}/t{_cc_t} read={_usage['cache_read_input_tokens']} creation={_usage['cache_creation_input_tokens']} input={_usage['input_tokens']}")
                 except Exception:
                     pass
-                _is_synthetic = False
-                try:
-                    _is_synthetic = (
-                        self.request.headers.get("x-airouter-synthetic", "").strip().lower()
-                        in ("1", "true", "yes")
-                    )
-                except Exception:
-                    pass
                 self.log_router_usage_fn(
                     chat_id=chat_fp_for_rewrite,
                     orig=_orig,
@@ -561,7 +565,7 @@ class StreamingRelay:
                     # 'x-airouter-synthetic: 1' e l'entry viene marcata, cosi' le
                     # analisi per modalita' possono escluderla invece di doverla
                     # indovinare dal fingerprint del client.
-                    synthetic=_is_synthetic,
+                    synthetic=self.is_synthetic,
                 )
             except Exception:
                 pass
@@ -586,6 +590,7 @@ class StreamingRelay:
                         orig=self.orig, mode=self.mode,
                         category=_category_for_mode(self.mode),
                         severity="error",
+                        synthetic=self.is_synthetic,
                     )
                 elif upstream.status == 200:
                     _txt_blk = int(_usage.get("text_blocks", 0) or 0)
@@ -616,6 +621,7 @@ class StreamingRelay:
                                 orig=self.orig, mode=self.mode,
                                 category=_category_for_mode(self.mode),
                                 severity="error",
+                                synthetic=self.is_synthetic,
                             )
             except Exception:
                 pass
@@ -642,6 +648,7 @@ class StreamingRelay:
                         orig=self.orig, mode=self.mode,
                         category=_category_for_mode(self.mode),
                         note=f"marker={_hit}",
+                        synthetic=self.is_synthetic,
                     )
         except Exception:
             pass
@@ -669,6 +676,7 @@ class StreamingRelay:
                         orig=self.orig, mode=self.mode,
                         category=_category_for_mode(self.mode),
                         note=f"foreign={_foreign} backend={_bk}",
+                        synthetic=self.is_synthetic,
                     )
         except Exception:
             pass

@@ -112,7 +112,7 @@ def _save_catalog(d: dict) -> None:
 
 
 def record_event(*, severity: str, category: str, kind: str, chat_fp: str = "",
-                  detail: dict = None, snippet: str = "", code=None) -> str:
+                  detail: dict = None, snippet: str = "", code=None, synthetic: bool = False) -> str:
     """Registra un evento bug/block/error nel catalogo unificato. Ritorna la firma.
 
     severity: 'bug' | 'block' | 'error' | 'info' (osservativo, non anomalia)
@@ -121,6 +121,9 @@ def record_event(*, severity: str, category: str, kind: str, chat_fp: str = "",
               richiesta (get_mode/self.mode), mai il file globale.
     kind: tipo specifico (es. 'relay_error_404', 'tool_isolation_strip', 'hhem_reject')
     detail: dizionario diagnostico; viene serializzato in JSON e conservato (troncato) come example_detail dell'ultima occorrenza.
+    synthetic: True se l'evento proviene da una sonda o dalla suite di test. Il campo
+               synthetic_count registra quante di quelle occorrenze vengono da sonde,
+               mentre count rimane il totale di tutte le occorrenze (retrocompatibilità).
     """
     if severity not in VALID_SEVERITIES:
         severity = "error"
@@ -165,6 +168,8 @@ def record_event(*, severity: str, category: str, kind: str, chat_fp: str = "",
                 # cosi' resta corretto anche se un giorno la firma cambiasse.
                 "last_mode": category,
             }
+            if synthetic:
+                entry["synthetic_count"] = 1
         else:
             entry["last_seen"] = ts
             entry["count"] = entry.get("count", 0) + 1
@@ -183,6 +188,8 @@ def record_event(*, severity: str, category: str, kind: str, chat_fp: str = "",
                 entry["example_fp"] = chat_fp
             if _detail_safe:
                 entry["example_detail"] = _detail_safe
+            if synthetic:
+                entry["synthetic_count"] = entry.get("synthetic_count", 0) + 1
         catalog[sig] = entry
         _save_catalog(catalog)
     except Exception as e:
