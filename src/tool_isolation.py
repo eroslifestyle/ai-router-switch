@@ -91,22 +91,43 @@ _BRAND_CHECK = {
 def sanitize_tool_choice(data: dict) -> None:
     """Riallinea `tool_choice` all'array `tools` dopo uno strip. Muta `data`.
 
-    Un tool_choice del tipo {"type":"tool","name":"web_search"} che punta a un
-    tool appena rimosso fa rispondere 400 all'upstream ("unknown tool"): lo
-    strip da solo non basta, va sanato anche il riferimento. Se il tool citato
-    non c'e' piu' si degrada a "auto" (il modello sceglie tra quelli rimasti);
-    senza piu' alcun tool, tool_choice sparisce del tutto."""
+    Un tool_choice che punta a un tool appena rimosso fa rispondere 400
+    all'upstream ("unknown tool" per type=tool; contraddizione per type=any/none).
+    Lo strip da solo non basta: va sanato anche il riferimento.
+
+    Regole:
+    - Senza alcun tool rimasto, `tool_choice` sparisce del tutto, indipendentemente
+      dal `type` (auto/any/tool/none o futuri). I tipi validi sono quelli che
+      il protocollo Anthropic riconosce; il criterio applicato è «restano tool
+      dopo lo strip oppure no», NON un enum di tipi: così un tipo nuovo introdotto
+      in futuro è gestito correttamente senza modificare il codice.
+    - Con almeno un tool rimasto:
+      - Se type=tool e il tool citato per nome esiste ancora -> nessuna modifica
+      - Se type=tool e il tool citato NON esiste più -> degrada a {"type":"auto"}
+      - Se type=auto/any/none -> nessuna modifica, sono legittimi con tool presenti
+    - Se `tool_choice` è assente o non è un dict -> nessuna modifica."""
     tc = data.get("tool_choice")
-    if not isinstance(tc, dict) or tc.get("type") != "tool":
+    if not isinstance(tc, dict):
         return
+
     tools = data.get("tools")
     names = {t.get("name") for t in tools if isinstance(t, dict)} if isinstance(tools, list) else set()
+
+    # Nessun tool: rimuovi sempre tool_choice, indipendentemente dal type
+    if not names:
+        data.pop("tool_choice", None)
+        return
+
+    # Con tool presenti: solo type=tool ha regole speciali
+    if tc.get("type") != "tool":
+        return
+
+    # type=tool con tool presente: controlla se il tool citato esiste ancora
     if tc.get("name") in names:
         return
-    if names:
-        data["tool_choice"] = {"type": "auto"}
-    else:
-        data.pop("tool_choice", None)
+
+    # type=tool ma il tool citato non esiste più: degrada a auto
+    data["tool_choice"] = {"type": "auto"}
 
 
 def sanitize_defer_loading(data: dict) -> bool:
