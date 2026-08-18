@@ -57,7 +57,7 @@ class TestNessunFalsoPositivo:
     @pytest.mark.parametrize("modello", [
         "claude-haiku-4-5-20251001", "claude-opus-5", "claude-sonnet-5",
         "claude-fable-5", "MiniMax-M2.7", "MiniMax-M3", "minimax-m2.7-hs",
-        "glm-5.2", "glm-4.7", "qwen3-coder-plus", "qwen3.7-max",
+        "glm-5.3", "glm-4.7", "qwen3-coder-plus", "qwen3.7-max",
         "code-max", "fast-max", "local:code-max",
     ])
     def test_modello_legittimo_non_segnalato(self, modello):

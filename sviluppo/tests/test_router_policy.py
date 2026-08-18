@@ -29,14 +29,14 @@ def test_modello_degradato_sopra_soglia(policy_file):
     """Verifica che un modello con ewma >= 0.5 venga riconosciuto come degradato."""
     policy = {
         "degraded": {
-            "glm-5.2": {
+            "glm-5.3": {
                 "task_class": "coding",
                 "ewma": 0.71
             }
         }
     }
     policy_file(policy)
-    result = rp.is_degraded("glm-5.2", "coding")
+    result = rp.is_degraded("glm-5.3", "coding")
     assert result is True, (
         f"Atteso: True (ewma 0.71 >= soglia 0.5), "
         f"Ottenuto: {result}"
@@ -47,19 +47,19 @@ def test_task_class_diversa_non_degrada(policy_file):
     """Verifica che una task_class diversa non attivi il degraded per lo stesso modello."""
     policy = {
         "degraded": {
-            "glm-5.2": {
+            "glm-5.3": {
                 "task_class": "coding",
                 "ewma": 0.71
             }
         }
     }
     policy_file(policy)
-    result_chat = rp.is_degraded("glm-5.2", "chat")
+    result_chat = rp.is_degraded("glm-5.3", "chat")
     assert result_chat is False, (
         f"Atteso: False (task_class 'chat' diversa da 'coding'), "
         f"Ottenuto: {result_chat}"
     )
-    result_default = rp.is_degraded("glm-5.2")
+    result_default = rp.is_degraded("glm-5.3")
     assert result_default is False, (
         f"Atteso: False (task_class default '*' diversa da 'coding'), "
         f"Ottenuto: {result_default}"

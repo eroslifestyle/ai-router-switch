@@ -60,13 +60,13 @@ def test_blocco_modelli_costosi_in_peak():
 def test_moltiplicatore_costo():
     """Verifica cost_multiplier in peak e fuori."""
     # Ore 15 -> peak
-    risultato_peak = run_with_hour(15, ps.cost_multiplier, 'glm-5.2')
+    risultato_peak = run_with_hour(15, ps.cost_multiplier, 'glm-5.3')
     assert risultato_peak == 3.0, \
-        f"cost_multiplier('glm-5.2') a 15: atteso 3.0, ottenuto {risultato_peak}"
+        f"cost_multiplier('glm-5.3') a 15: atteso 3.0, ottenuto {risultato_peak}"
     # Ore 9 -> fuori peak
-    risultato_off = run_with_hour(9, ps.cost_multiplier, 'glm-5.2')
+    risultato_off = run_with_hour(9, ps.cost_multiplier, 'glm-5.3')
     assert risultato_off == 1.0, \
-        f"cost_multiplier('glm-5.2') a 9: atteso 1.0, ottenuto {risultato_off}"
+        f"cost_multiplier('glm-5.3') a 9: atteso 1.0, ottenuto {risultato_off}"
 
 def test_scheduling_status_coerente():
     """Verifica che scheduling_status()['peak_active'] sia coerente."""
@@ -85,14 +85,14 @@ def test_ripristino_datetime():
         "ps.datetime non è stato ripristinato al valore originale dopo run_with_hour"
 
 def test_peak_cap_declassa_modello_costoso_in_peak():
-    """Il cap in fascia peak declassa il modello costoso a glm-4.7. E il caso REALE dal 2026-07-25: il proxy riceve da role_routing un NOME MODELLO (glm-5.2 per il THINK), non una tier key."""
+    """Il cap in fascia peak declassa il modello costoso a glm-4.7. E il caso REALE dal 2026-07-25: il proxy riceve da role_routing un NOME MODELLO (glm-5.3 per il THINK), non una tier key."""
     import glm_backend as gb
     import importlib
     ps_vivo = importlib.import_module("peak_scheduler")  # la STESSA istanza che apply_peak_cap risolvera con import lazy
     # Ora in fascia peak (15:00)
-    risultato = run_with_hour(15, gb.apply_peak_cap, "glm-5.2", modulo=ps_vivo)
+    risultato = run_with_hour(15, gb.apply_peak_cap, "glm-5.3", modulo=ps_vivo)
     assert risultato == ("glm-4.7", True), \
-        f"apply_peak_cap('glm-5.2') a 15h: atteso ('glm-4.7', True), ottenuto {risultato}"
+        f"apply_peak_cap('glm-5.3') a 15h: atteso ('glm-4.7', True), ottenuto {risultato}"
     risultato = run_with_hour(15, gb.apply_peak_cap, "glm-5-turbo", modulo=ps_vivo)
     assert risultato == ("glm-4.7", True), \
         f"apply_peak_cap('glm-5-turbo') a 15h: atteso ('glm-4.7', True), ottenuto {risultato}"
@@ -103,9 +103,9 @@ def test_peak_cap_declassa_modello_costoso_in_peak():
     assert risultato == ("glm-4.6V", False), \
         f"apply_peak_cap('glm-4.6V') a 15h: atteso ('glm-4.6V', False), ottenuto {risultato}"
     # Ora fuori fascia peak (9:00)
-    risultato = run_with_hour(9, gb.apply_peak_cap, "glm-5.2", modulo=ps_vivo)
-    assert risultato == ("glm-5.2", False), \
-        f"apply_peak_cap('glm-5.2') a 9h: atteso ('glm-5.2', False), ottenuto {risultato}"
+    risultato = run_with_hour(9, gb.apply_peak_cap, "glm-5.3", modulo=ps_vivo)
+    assert risultato == ("glm-5.3", False), \
+        f"apply_peak_cap('glm-5.3') a 9h: atteso ('glm-5.3', False), ottenuto {risultato}"
     risultato = run_with_hour(9, gb.apply_peak_cap, "glm-5-turbo", modulo=ps_vivo)
     assert risultato == ("glm-5-turbo", False), \
         f"apply_peak_cap('glm-5-turbo') a 9h: atteso ('glm-5-turbo', False), ottenuto {risultato}"

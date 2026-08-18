@@ -21,7 +21,7 @@ Anthropic  MiniMax   GLM/z.ai   Qwen    local model
 |---|---|---|
 | anthropic | Claude | Claude |
 | minimax | MiniMax | MiniMax |
-| glm | glm-5.2 | glm-4.7 |
+| glm | glm-5.3 | glm-4.7 |
 | qwen | qwen3.8-max | qwen3-coder-plus |
 | mix-am | Claude | MiniMax |
 | mix-ag | Claude | GLM |

@@ -23,7 +23,7 @@ def _body(n_scambi, testo="contenuto di prova "):
     for i in range(n_scambi):
         msgs.append({"role": "user", "content": f"domanda {i}: " + testo * 40})
         msgs.append({"role": "assistant", "content": f"risposta {i}: " + testo * 40})
-    return json.dumps({"model": "glm-5.2", "system": "PROMPT BASE",
+    return json.dumps({"model": "glm-5.3", "system": "PROMPT BASE",
                        "messages": msgs}).encode()
 
 
@@ -67,7 +67,7 @@ def test_conversazione_corta_non_viene_toccata():
 def test_messaggio_singolo_gigante_usa_il_fallback():
     """Un body dominato da UN messaggio enorme non e' comprimibile per numero di
     messaggi: deve intervenire lo shrink classico, non un crash."""
-    body = json.dumps({"model": "glm-5.2", "system": "BASE", "messages": [
+    body = json.dumps({"model": "glm-5.3", "system": "BASE", "messages": [
         {"role": "user", "content": "x" * 400_000},
         {"role": "assistant", "content": "ok"},
         {"role": "user", "content": "e adesso?"},

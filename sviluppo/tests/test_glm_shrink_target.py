@@ -1,7 +1,7 @@
 """Il target dello shrink GLM segue il modello risolto, non una costante (F2).
 
 Prima il target era 600.000 byte per chiunque, tarato sul modello piu' piccolo.
-In mix-gm il THINK e' glm-5.2 (1M di token): comprimere il suo body a 600 KB
+In mix-gm il THINK e' glm-5.3 (1M di token): comprimere il suo body a 600 KB
 buttava via un terzo della conversazione per un limite inesistente su quel
 modello. Misurato il 2026-08-16: 1.371 shrink preventivi.
 """
@@ -33,7 +33,7 @@ def glm(monkeypatch):
 
 def test_glm_5_2_non_viene_compresso_a_600k(glm):
     """Il caso che il fix esiste per risolvere."""
-    t = glm.glm_shrink_target_for("glm-5.2")
+    t = glm.glm_shrink_target_for("glm-5.3")
     assert t > 3_000_000, t
 
 
@@ -54,11 +54,11 @@ def test_ordinamento_coerente_col_contesto(glm):
     """Piu' contesto ha il modello, piu' alto e' il target. Controprova indipendente
     dai numeri esatti: se un giorno la mappa cambia, la relazione deve reggere."""
     from model_context_map import get_context_limit
-    modelli = ["glm-4.7", "glm-5-turbo", "glm-5.2"]
+    modelli = ["glm-4.7", "glm-5-turbo", "glm-5.3"]
     per_ctx = sorted(modelli, key=get_context_limit)
     per_target = sorted(modelli, key=glm.glm_shrink_target_for)
     assert [get_context_limit(m) for m in per_ctx] == sorted(get_context_limit(m) for m in modelli)
-    assert per_target[-1] == per_ctx[-1] == "glm-5.2"
+    assert per_target[-1] == per_ctx[-1] == "glm-5.3"
 
 
 def test_override_ambiente_vince(monkeypatch):
@@ -67,7 +67,7 @@ def test_override_ambiente_vince(monkeypatch):
         sys.modules.pop(m, None)
     mod = importlib.import_module("glm_backend")
     try:
-        assert mod.glm_shrink_target_for("glm-5.2") == 123456
+        assert mod.glm_shrink_target_for("glm-5.3") == 123456
     finally:
         sys.modules.pop("glm_backend", None)
 

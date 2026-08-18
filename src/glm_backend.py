@@ -3,7 +3,7 @@
 GLM Backend — Zhipu AI (Z.ai) Anthropic-compatible endpoint.
 
 2 modelli GLM instradati per ruolo (role_routing):
-  - THINK: glm-5.2  — 1M ctx, 128K output
+  - THINK: glm-5.3  — 1M ctx, 128K output
   - ACT:   glm-4.7  — 128K ctx, cheap
 (TOP/TURBO/MID/VISION/MULTIMODAL e GLM_MODEL_FOR_TIER sopravvivono
  solo come input alternativo di apply_peak_cap)
@@ -13,7 +13,7 @@ R3 decisions:
   R3-#2: chiave da secrets.sh, mai stampata nei log
   R3-#3: circuit breaker con auto-recupero
   R3-#4: [2026-08-04] decaduto — classify_tier e heuristic_tier rimossi
-  R3-#5: peak scheduler (Asia/Shanghai 14-18 UTC+8); cap collegato al proxy il 2026-08-04, declassa glm-5.2 e glm-5-turbo a glm-4.7
+  R3-#5: peak scheduler (Asia/Shanghai 14-18 UTC+8); cap collegato al proxy il 2026-08-04, declassa glm-5.3 e glm-5-turbo a glm-4.7
   R3-#6: forward_glm con retry loop 2 tentativi
 """
 import asyncio
@@ -75,11 +75,11 @@ GLM_TIER_MULTIMODAL = "MULTIMODAL"  # glm-5V-Turbo (visione + video)
 
 # Rimosso il 2026-08-04: _ANTHROPIC_BLOCKED, marker del vecchio dirottamento su Anthropic
 # in fascia peak. Aveva la sola definizione e nessun lettore; oggi il peak cap declassa
-# dentro GLM (glm-5.2 → glm-4.7) e non esce mai dal provider.
+# dentro GLM (glm-5.3 → glm-4.7) e non esce mai dal provider.
 
 # Modello GLM per ogni tier
 GLM_MODEL_FOR_TIER = {
-    GLM_TIER_TOP: "glm-5.2",
+    GLM_TIER_TOP: "glm-5.3",
     GLM_TIER_TURBO: "glm-5-turbo",
     GLM_TIER_MID: "glm-4.7",
     GLM_TIER_VISION: "glm-4.6V",
@@ -103,11 +103,11 @@ try:
 
     _GLM_CONTEXT_LIMITS = {
         m: _safe_limit(m)
-        for m in ("glm-5.2", "glm-5-turbo", "glm-4.7", "glm-4.6V", "glm-5V-Turbo")
+        for m in ("glm-5.3", "glm-5-turbo", "glm-4.7", "glm-4.6V", "glm-5V-Turbo")
     }
 except Exception:  # pragma: no cover - fail-safe: il backend non deve morire per questo
     _GLM_CONTEXT_LIMITS = {
-        "glm-5.2": 800_000, "glm-5-turbo": 160_000, "glm-4.7": 160_000,
+        "glm-5.3": 800_000, "glm-5-turbo": 160_000, "glm-4.7": 160_000,
         "glm-4.6V": 104_800, "glm-5V-Turbo": 160_000,
     }
 
@@ -131,7 +131,7 @@ GLM_SAFETY = float(os.environ.get("AIROUTER_GLM_SAFETY", "0.8"))
 # GLM rate limits ufficiali (verificare dal piano Z.ai)
 # ponytail: limits placeholder — aggiornare con dati reali Z.ai
 GLM_RATE_LIMITS = {
-    "glm-5.2": (200, 10_000_000),      # (RPM, TPM)
+    "glm-5.3": (200, 10_000_000),      # (RPM, TPM)
     "glm-5-turbo": (500, 20_000_000),
     "glm-4.7": (500, 20_000_000),
     "glm-4.6V": (200, 10_000_000),    # ponytail: placeholder — verificare limiti reali
@@ -289,7 +289,7 @@ def classify_429_glm(raw: bytes) -> str:
 # Il tiering per COMPLESSITA non esiste piu dal refactoring del 2026-07-25, quando il router
 # e diventato un tunnel trasparente: classify_tier non aveva piu chiamanti, e heuristic_tier
 # la chiamava soltanto lei. Oggi il modello GLM lo decide il RUOLO e non la dimensione del
-# body: role_routing instrada glm-5.2 per il THINK e glm-4.7 per l'ACT. Cade con loro
+# body: role_routing instrada glm-5.3 per il THINK e glm-4.7 per l'ACT. Cade con loro
 # has_multimodal_content, di cui classify_tier era l'unico chiamante. Le costanti GLM_TIER_*
 # e la mappa GLM_MODEL_FOR_TIER RESTANO: le usa apply_peak_cap.
 
@@ -343,11 +343,11 @@ def glm_shrink_target_for(model: str | None) -> int:
     """Byte oltre i quali comprimere il contesto, per il modello GLM risolto.
 
     Il target era una costante unica da 600.000 byte, tarata sul modello piu'
-    piccolo. Ma in mix-gm il THINK e' ``glm-5.2``, che ha 1M di token di
+    piccolo. Ma in mix-gm il THINK e' ``glm-5.3``, che ha 1M di token di
     contesto: comprimere il suo body a 600 KB significa buttare via meta'
     conversazione per un limite che quel modello non ha. Misurato il 2026-08-16:
     1.371 shrink preventivi, di cui uno osservato dal vivo comprimeva i primi 50
-    messaggi su 301 (647.762b -> 523.491b) su una richiesta diretta a glm-5.2.
+    messaggi su 301 (647.762b -> 523.491b) su una richiesta diretta a glm-5.3.
     Il modello riceveva un riassunto troncato a 1.800 caratteri per messaggio al
     posto di un terzo della conversazione, e ne rispondeva senza saperlo.
 
@@ -355,7 +355,7 @@ def glm_shrink_target_for(model: str | None) -> int:
     (contesto meno lo spazio per l'output) convertito in byte da
     ``bytes_per_token`` — invece di essere un numero scelto a mano: glm-4.7 e
     glm-5-turbo restano a ~640 KB, quindi per loro non cambia nulla, mentre
-    glm-5.2 sale a ~3,2 MB. Un modello sconosciuto ricade sul limite piu' basso
+    glm-5.3 sale a ~3,2 MB. Un modello sconosciuto ricade sul limite piu' basso
     della mappa, cioe' sul comportamento prudente di prima.
 
     ``AIROUTER_GLM_CONTEXT_SHRINK_TARGET`` resta un override esplicito: se e'
@@ -719,7 +719,7 @@ async def forward_glm(request, body: bytes, session, model: str,
 
 def _rewrite_glm_model(raw: bytes, orig_model: str) -> bytes:
     """AQ-FIX1: riscrive 'model' nel body della risposta GLM con il modello
-    originale richiesto dal client (non il tier effettivo, es. 'glm-5.2').
+    originale richiesto dal client (non il tier effettivo, es. 'glm-5.3').
     Gestisce JSON non-streaming e SSE (data: JSON lines)."""
     try:
         decoded = raw.decode("utf-8")

@@ -61,7 +61,7 @@ if __name__ == "__main__":
         json.dump({
             "updated": 1785522000,
             "degraded": {
-                "glm-5.2": {"task_class": "coding", "ewma": 0.71, "fails": 8, "total": 12, "since": 1785521000}
+                "glm-5.3": {"task_class": "coding", "ewma": 0.71, "fails": 8, "total": 12, "since": 1785521000}
             }
         }, f)
     
@@ -71,9 +71,9 @@ if __name__ == "__main__":
     rp._cache = {"ts": 0.0, "data": {}}
     
     # Run assertions
-    assert rp.is_degraded("glm-5.2", "coding") is True
-    assert rp.is_degraded("glm-5.2", "chat") is False
-    assert rp.is_degraded("glm-5.2") is False
+    assert rp.is_degraded("glm-5.3", "coding") is True
+    assert rp.is_degraded("glm-5.3", "chat") is False
+    assert rp.is_degraded("glm-5.3") is False
     assert rp.is_degraded("minimax-m2.7", "coding") is False
     
     # Test fail-open: empty cache and file
@@ -82,6 +82,6 @@ if __name__ == "__main__":
         json.dump({}, f)
     
     assert rp.get_policy() == {}
-    assert rp.is_degraded("glm-5.2", "coding") is False
+    assert rp.is_degraded("glm-5.3", "coding") is False
     
     print("OK")

@@ -12,14 +12,14 @@ def _write_jsonl(path, entries):
 def test_process_file_aggregates(tmp_path):
     jsonl = tmp_path / "aggregates.jsonl"
     entries = (
-        [{"outcome": "ok", "final": "glm-5.2", "task_class": "coding", "ts": i} for i in range(1, 4)]
-        + [{"outcome": "empty", "final": "glm-5.2", "task_class": "coding", "ts": i} for i in range(4, 6)]
+        [{"outcome": "ok", "final": "glm-5.3", "task_class": "coding", "ts": i} for i in range(1, 4)]
+        + [{"outcome": "empty", "final": "glm-5.3", "task_class": "coding", "ts": i} for i in range(4, 6)]
         + [{"outcome": "ok", "final": "minimax", "task_class": "chat", "ts": 6}]
     )
     _write_jsonl(jsonl, entries)
     learner = OutcomeLearner(alpha=0.1, half_life_seconds=200)
     process_file(str(jsonl), learner, 0)  # il valore di ritorno non serve a questo test
-    coding_stats = learner._stats["glm-5.2|coding"]
+    coding_stats = learner._stats["glm-5.3|coding"]
     assert coding_stats["total"] == 5, f"expected total 5, got {coding_stats['total']}"
     assert coding_stats["fails"] == 2, f"expected fails 2, got {coding_stats['fails']}"
     assert coding_stats["ewma"] > 0, f"expected ewma > 0, got {coding_stats['ewma']}"
@@ -118,17 +118,17 @@ def test_decay_lowers_ewma(tmp_path):
 def test_ewma_satura_dopo_dieci_fallimenti():
     learner = OutcomeLearner(alpha=0.5, half_life_seconds=1000)
     for i in range(10):
-        learner.observe("glm-5.2", "coding", "error", 1000.0 + i)
-    ewma = learner._stats["glm-5.2|coding"]["ewma"]
+        learner.observe("glm-5.3", "coding", "error", 1000.0 + i)
+    ewma = learner._stats["glm-5.3|coding"]["ewma"]
     assert ewma > 0.9, f"ewma ({ewma}) should be greater than 0.9 after 10 errors"
 
 def test_ewma_scende_dopo_dieci_successi():
     learner = OutcomeLearner(alpha=0.5, half_life_seconds=1000)
     for i in range(10):
-        learner.observe("glm-5.2", "coding", "error", 1000.0 + i)
+        learner.observe("glm-5.3", "coding", "error", 1000.0 + i)
     for i in range(10):
-        learner.observe("glm-5.2", "coding", "ok", 1010.0 + i)
-    ewma = learner._stats["glm-5.2|coding"]["ewma"]
+        learner.observe("glm-5.3", "coding", "ok", 1010.0 + i)
+    ewma = learner._stats["glm-5.3|coding"]["ewma"]
     assert ewma < 0.5, f"ewma ({ewma}) should be less than 0.5 after 10 successes"
 
 def test_ewma_di_chiave_nuova_vale_alpha():

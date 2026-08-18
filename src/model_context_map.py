@@ -40,7 +40,7 @@ MODEL_CONTEXT_MAP = {
     "MiniMax-M3.5": 204_800,   # NON documentato (modello non ancora pubblico): valore prudente
     "MiniMax-Haiku": 204_800,  # NON documentato: valore prudente
     # GLM — doc ufficiale docs.z.ai/guides/llm/<modello> (verificata 2026-07-27)
-    "glm-5.2": 1_000_000,     # doc ufficiale: 1M di default, nessuna variante [1m] separata (max output 128k)
+    "glm-5.3": 1_000_000,     # doc ufficiale: 1M di default, nessuna variante [1m] separata (max output 128k)
     "glm-5-turbo": 200_000,   # doc ufficiale: 200K (max output 128k)
     "glm-4.7": 200_000,       # doc ufficiale: 200K — prima era 128_000, sottostima del 36%
     "glm-4.6v": 131_000,      # NON verificato sulla doc: valore storico

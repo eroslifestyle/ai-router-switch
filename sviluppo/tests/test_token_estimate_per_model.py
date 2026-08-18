@@ -43,7 +43,7 @@ def test_classificazione_altri_provider():
     assert bytes_per_token("minimax-m2.7-hs") == BYTES_PER_TOKEN["minimax"]
     # GLM
     assert bytes_per_token("glm-4.7") == BYTES_PER_TOKEN["glm"]
-    assert bytes_per_token("glm-5.2") == BYTES_PER_TOKEN["glm"]
+    assert bytes_per_token("glm-5.3") == BYTES_PER_TOKEN["glm"]
     # Sconosciuti
     assert bytes_per_token("modello_sconosciuto") == 4.0
     assert bytes_per_token(None) == 4.0

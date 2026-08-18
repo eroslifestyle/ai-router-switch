@@ -345,14 +345,14 @@ async def handle(request):
     # Anthropic rifiuta con 400 "prompt is too long".
     _ctx_model_map = {
         "anthropic": "claude-opus-4-8", "minimax": "MiniMax-M2.7",
-        "glm": "glm-5.2", "mix-am": "MiniMax-M2.7",
+        "glm": "glm-5.3", "mix-am": "MiniMax-M2.7",
         "mix-ag": "claude-opus-4-8", "mix-gm": "MiniMax-M2.7",
         "qwen": "qwen3.7-max",
     }
     _provider_ctx_model_map = {
         "anthropic": "claude-opus-4-8",
         "minimax": "MiniMax-M2.7",
-        "glm": "glm-5.2",
+        "glm": "glm-5.3",
         "qwen": "qwen3.7-max",
     }
     if _early_model:
@@ -539,7 +539,7 @@ async def handle(request):
         try:
             _ctx_bottleneck = {
                 "anthropic": "claude-opus-4-8", "minimax": "MiniMax-M2.7",
-                "glm": "glm-5.2", "mix-am": "MiniMax-M2.7",
+                "glm": "glm-5.3", "mix-am": "MiniMax-M2.7",
                 "mix-ag": "claude-opus-4-8", "mix-gm": "MiniMax-M2.7",
             }
             _bottleneck_model = _ctx_bottleneck.get(mode, "MiniMax-M2.7")
@@ -854,7 +854,7 @@ async def handle(request):
             _glm_model = _model_override or _glm_mod.resolve_glm_upstream_model(_glm_mod.GLM_TIER_MID)
             # Dal 2026-07-25 il tiering dinamico non esiste piu: il modello GLM
             # effettivo arriva da role_routing ed e' noto solo qui. In fascia
-            # peak (14-18 Asia/Shanghai) glm-5.2 e glm-5-turbo costano 3x e
+            # peak (14-18 Asia/Shanghai) glm-5.3 e glm-5-turbo costano 3x e
             # vengono declassati a glm-4.7 per evitare costi eccessivi.
             _glm_model_pre = _glm_model
             _glm_model, _peak_capped = _glm_mod.apply_peak_cap(_glm_model)

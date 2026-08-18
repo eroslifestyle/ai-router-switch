@@ -35,7 +35,7 @@ GPT_MODE_THINK = os.environ.get("AIROUTER_GPT_MODEL", "code-max")
 # ── Provider model overrides ───────────────────────────────────────────────────
 MINIMAX_THINK = "MiniMax-M3"
 MINIMAX_ACT = "MiniMax-M2.7"
-GLM_THINK = "glm-5.2"
+GLM_THINK = "glm-5.3"
 GLM_ACT = "glm-4.7"
 # qwen3.8-max: e' il piu' recente della linea max e il probe live del
 # 2026-08-03 lo trova DISPONIBILE sull'account (HTTP 200), insieme a

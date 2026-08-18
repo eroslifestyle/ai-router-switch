@@ -171,7 +171,7 @@ class ContextManager:
             'mix-am':    'MiniMax-M2.7',
             'mix-ag':    'claude-sonnet-4-7',
             'mix-gm':    'MiniMax-M2.7',
-            'glm':       'glm-5.2',
+            'glm':       'glm-5.3',
         }
         return defaults.get(modo, 'MiniMax-M2.7')
 

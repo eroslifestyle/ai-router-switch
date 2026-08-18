@@ -140,7 +140,7 @@ apply_mode(){
   case "$m" in
     glm|mix-gm|mix-ag)
       echo "ℹ️  GLM/z.ai attivo. Fascia peak 14-18 Asia/Shanghai (08-12 IT estate):"
-      echo "    glm-5.2/glm-5-turbo bloccati (3x) → task complessi su Anthropic, semplici su glm-4.7."
+      echo "    glm-5.3/glm-5-turbo bloccati (3x) → task complessi su Anthropic, semplici su glm-4.7."
       ;;
     mix-al)
       echo "ℹ️  Mix-al attivo: THINK e VERIFY su Anthropic, esecuzione sul modello locale code-max."

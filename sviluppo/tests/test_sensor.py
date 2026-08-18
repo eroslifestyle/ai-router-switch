@@ -48,7 +48,7 @@ def test_task_reasoning_large():
 def test_outcome_thinking_only_stream_interrotto():
     # thinking_blocks>=1, niente text ne tool, stop_reason VUOTO: lo stream non ha
     # raggiunto il message_delta finale, quindi la misura e incompleta -> unknown.
-    # Caso reale: entry glm-5.2 task_class vision con output_tokens 87770, che prima
+    # Caso reale: entry glm-5.3 task_class vision con output_tokens 87770, che prima
     # del 2026-08-04 risultava "empty" e penalizzava il modello (empty e in FAIL_OUTCOMES).
     result = classify_outcome(200, "", 0, 0, 87770, False, 1)
     assert result == "unknown", f"atteso='unknown', ottenuto={result}"

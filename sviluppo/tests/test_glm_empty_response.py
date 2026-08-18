@@ -48,7 +48,7 @@ def test_glm_is_empty_nonzero_output_tokens():
 def test_glm_is_empty_no_match():
     """Body senza campo output_tokens → comportamento conservativo (False)."""
     from glm_backend import _glm_is_empty
-    body = b'{"model":"glm-5.2","finish_reason":"stop"}'
+    body = b'{"model":"glm-5.3","finish_reason":"stop"}'
     assert _glm_is_empty(body) is False
 
 
@@ -88,7 +88,7 @@ class _RetryOnceThenOk:
         if self.call_count == 1:
             return _FakeResp(200, b'{"output_tokens":0}')
         else:
-            return _FakeResp(200, b'{"output_tokens":42}{"model":"glm-5.2"}')
+            return _FakeResp(200, b'{"output_tokens":42}{"model":"glm-5.3"}')
 
 
 class _BothEmpty:
@@ -139,7 +139,7 @@ async def test_forward_glm_glm5_empty_then_retry_then_success(monkeypatch):
 
     sess = _RetryOnceThenOk()
     result = await glm_backend.forward_glm(
-        _FakeRequest(), b"{}", sess, "glm-5.2", passthrough=True
+        _FakeRequest(), b"{}", sess, "glm-5.3", passthrough=True
     )
 
     assert sess.call_count == 2, "Devono essere stati fatti 2 tentativi"
@@ -165,7 +165,7 @@ async def test_forward_glm_glm5_empty_twice_returns_502(monkeypatch):
 
     sess = _BothEmpty()
     result = await glm_backend.forward_glm(
-        _FakeRequest(), b"{}", sess, "glm-5.2", passthrough=True
+        _FakeRequest(), b"{}", sess, "glm-5.3", passthrough=True
     )
 
     assert sess.call_count == 2, "Devono essere stati fatti 2 tentativi"
@@ -202,7 +202,7 @@ async def test_buffered_upstream_no_x_ai_router_header():
     """buffered_upstream rimuove x-ai-router:synthetic dalla risposta reale."""
     resp = synthetic_response.buffered_upstream(
         status=200,
-        body=b'{"model":"glm-5.2"}',
+        body=b'{"model":"glm-5.3"}',
         headers={"Content-Type": "application/json"},
     )
     assert resp.headers.get("x-ai-router") is None
