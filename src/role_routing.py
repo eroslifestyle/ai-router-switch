@@ -20,17 +20,17 @@ import os
 _THINK_MODELS = ("claude-opus", "claude-sonnet", "claude-fable")
 _ACT_MODELS = ("claude-haiku",)
 
-# GPT_MODE_THINK: modello locale della modalità `gpt` (pura: THINK e ACT sullo
-# stesso modello, nessuna delega fuori dalla macchina).
-# ATTENZIONE (verificato 2026-08-18): "coder-abliterated" NON è servito da nessuno
-# dei due backend locali — LiteLLM :4000 espone code-fast, code-max,
-# code-max-ollama; Ollama :11434 espone code-fast, chat-max, cyber-max e simili.
-# Finché quel modello non esiste, la modalità risolve ma l'upstream risponde
-# errore. Per puntarla a un modello reale senza toccare il codice:
-#   AIROUTER_GPT_MODEL=code-max
+# GPT_MODE_THINK: l'UNICO modello locale della modalità `gpt` — serve sia il
+# THINK sia l'ACT (decisione utente 2026-08-18). Deve essere un modello GIA'
+# RESIDENTE in memoria: la modalità nasce per non pagare mai un carico/scarico.
+# Default `code-max` = llama-qcnext.service su :8083 (persistente), l'unico
+# residente stabile. `coder-abliterated` (:8085) e' stato escluso come THINK
+# separato: 40 GB di GTT in piu' con la macchina al 99% di RAM.
+# Per puntarla altrove senza toccare il codice:
+#   AIROUTER_GPT_MODEL=<modello>
 # Verifica cosa è servito davvero:
 #   curl -s -H "Authorization: Bearer $KEY" http://127.0.0.1:4000/v1/models
-GPT_MODE_THINK = os.environ.get("AIROUTER_GPT_MODEL", "coder-abliterated")
+GPT_MODE_THINK = os.environ.get("AIROUTER_GPT_MODEL", "code-max")
 
 # ── Provider model overrides ───────────────────────────────────────────────────
 MINIMAX_THINK = "MiniMax-M3"
@@ -100,10 +100,14 @@ ROUTING_TABLE = {
     # local è una modalità pura: THINK/VERIFY -> code-max, ACT -> code-fast (Laguna XS 2.1).
     ("local", ROLE_THINK): ("local", LOCAL_ACT),
     ("local", ROLE_ACT): ("local", LOCAL_ACT_FAST),
-    # gpt: THINK locale coder-abliterated, ACT code-fast (come local: THINK pesante,
-    # esecutore veloce). Il THINK NON esegue mai, anche in locale.
+    # gpt: MODELLO UNICO, quello gia' residente in memoria (decisione utente
+    # 2026-08-18). Il THINK separato coder-abliterated e' stato escluso: teneva
+    # 40 GB di GTT con la macchina al 99% di RAM, e col contesto pieno di Claude
+    # Code il suo prefill (~250 tok/s su ~104k token di schemi MCP) sforava il
+    # LOCAL_TIMEOUT_SEC di 240 s. Un solo modello = zero carico/scarico, zero
+    # secondo residente. GPT_MODE_THINK resta configurabile via AIROUTER_GPT_MODEL.
     ("gpt", ROLE_THINK): ("local", GPT_MODE_THINK),
-    ("gpt", ROLE_ACT): ("local", LOCAL_ACT_FAST),
+    ("gpt", ROLE_ACT): ("local", GPT_MODE_THINK),
 }
 
 # ── Default provider per mode (used for unknown roles) ────────────────────────
