@@ -15,6 +15,10 @@ from synthetic_response import synthetic_error
 
 LOCAL_MODEL_CODE = 'code-max'
 LOCAL_MODEL_FAST = 'code-fast'
+# THINK locale della modalità gpt: coder-abliterated su llama.cpp :8085 (via LiteLLM).
+# Senza questa voce nell'allow-list di resolve_local_model, il THINK di gpt veniva
+# scartato su code-max (:8083) — resolve_route lo instrada bene, ma qui ripiegava.
+LOCAL_MODEL_THINK = 'coder-abliterated'
 # Nessun fallback: il modello locale ha una sola via, llama.cpp :8083 dietro LiteLLM.
 # L'alias Ollama code-max-ollama e' stato rimosso il 2026-08-04 (duplicazione da 48GB).
 LOCAL_MODEL_FALLBACK = LOCAL_MODEL_CODE
@@ -57,7 +61,7 @@ def set_body_model(body: bytes, model: str) -> bytes:
 
 def resolve_local_model(requested: Optional[str]) -> str:
     """Restituisce il modello richiesto se consentito, altrimenti LOCAL_MODEL_CODE."""
-    if requested in (LOCAL_MODEL_CODE, LOCAL_MODEL_FALLBACK, LOCAL_MODEL_FAST):
+    if requested in (LOCAL_MODEL_CODE, LOCAL_MODEL_FALLBACK, LOCAL_MODEL_FAST, LOCAL_MODEL_THINK):
         return requested
     return LOCAL_MODEL_CODE
 
