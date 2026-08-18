@@ -528,3 +528,143 @@ class TestPredicateGetFileMode:
             f"Riga 'should_test_oauth_fn=' non trovata in {proxy_file}. "
             f"Il fix potrebbe essere stato revertato."
         )
+
+
+class TestTickInvokesRefresh:
+    """Test della logica di refresh automatico del token OAuth nel tick."""
+
+    @pytest.fixture
+    def mock_paths(self):
+        """Mock dei path globali per evitare di scrivere su file reali."""
+        with patch("ai_router_resilience.STATE_DIR") as mock_state_dir, \
+             patch("ai_router_resilience.STATE_FILE") as mock_state_file, \
+             patch("ai_router_resilience.CRASH_DIR") as mock_crash_dir, \
+             patch("ai_router_resilience.CRED_FILE") as mock_cred_file:
+            mock_state_dir.mkdir = MagicMock()
+            mock_state_file.write_text = MagicMock()
+            mock_state_file.read_text = MagicMock(return_value="{}")
+            mock_state_file.exists = MagicMock(return_value=False)
+            mock_state_file.with_suffix = MagicMock(return_value=MagicMock())
+            mock_crash_dir.mkdir = MagicMock()
+            yield {
+                "state_dir": mock_state_dir,
+                "state_file": mock_state_file,
+                "crash_dir": mock_crash_dir,
+                "cred_file": mock_cred_file,
+            }
+
+    @pytest.fixture
+    def resilience_instance(self, mock_paths):
+        """Crea un'istanza di Resilience con mock dei path."""
+        res = Resilience(
+            port=8787,
+            log_fn=lambda m: None,
+            get_pid=lambda: 99999,
+            should_test_oauth_fn=lambda: False,  # modalità non-anthropic per default
+        )
+        return res
+
+    def test_tick_invoca_refresh_quando_dentro_il_margine(
+        self, resilience_instance, mock_paths
+    ):
+        """TEST 1: REFRESH INVOCATO QUANDO TOKEN SCADE ENTRO MARGINE.
+
+        Token con expiresAt fra 600 secondi (10 minuti) = dentro il margine di
+        1800 secondi. Il blocco di refresh deve essere invocato esattamente una volta.
+
+        Questo test verifica che il blocco di refresh del token dentro _tick_self_test()
+        sia agganciato e funzionante: il test CADE se la riga di refresh è stata
+        commentata o rimossa.
+        """
+        res = resilience_instance
+        res._state = Resilience.STATE_OK
+        res._oauth_tok = ""  # cache vuota
+
+        # Token scade fra 600 secondi (dentro il margine di 1800s)
+        fake_token = "sk-ant-oat-fake-token-12345678901234567890"
+        expires_at_ms = int((time.time() + 600) * 1000)
+        res._read_oauth = MagicMock(
+            return_value=(
+                fake_token,
+                {"expiresAt": expires_at_ms, "subscriptionType": "PRO"},
+            )
+        )
+
+        # Mock is_oauth_structurally_ok per ritornare True
+        res.is_oauth_structurally_ok = MagicMock(return_value=True)
+
+        # Mock try_refresh_oauth per registrare la chiamata
+        refresh_called = []
+
+        def fake_refresh(*args, **kwargs):
+            refresh_called.append(True)
+            return True, "rinnovato"
+
+        res.try_refresh_oauth = fake_refresh
+
+        # Mock self_test_oauth per evitare POST reali
+        res.self_test_oauth = MagicMock(return_value=(True, "ok"))
+
+        # Mock _write_state_now
+        res._write_state_now = MagicMock()
+
+        # Esegui il tick
+        res._tick_self_test()
+
+        # Verifica: try_refresh_oauth DEVE essere stato chiamato esattamente una volta
+        assert len(refresh_called) == 1, (
+            "try_refresh_oauth NON è stato invocato quando il token scade entro il margine: "
+            "il blocco di refresh non è agganciato al tick!"
+        )
+
+    def test_tick_non_invoca_refresh_fuori_dal_margine(
+        self, resilience_instance, mock_paths
+    ):
+        """TEST 2: REFRESH NON INVOCATO QUANDO TOKEN SCADE FUORI MARGINE (braccio di controllo).
+
+        Token con expiresAt fra 3600 secondi (1 ora) = fuori il margine di 1800 secondi.
+        Il blocco di refresh NON deve essere invocato.
+
+        Questo test verifica il braccio di controllo: anche se il token è valido
+        e strutturalmente OK, il refresh non deve scattare se non è entro il margine.
+        """
+        res = resilience_instance
+        res._state = Resilience.STATE_OK
+        res._oauth_tok = ""  # cache vuota
+
+        # Token scade fra 3600 secondi (fuori il margine di 1800s)
+        fake_token = "sk-ant-oat-fake-token-12345678901234567890"
+        expires_at_ms = int((time.time() + 3600) * 1000)
+        res._read_oauth = MagicMock(
+            return_value=(
+                fake_token,
+                {"expiresAt": expires_at_ms, "subscriptionType": "PRO"},
+            )
+        )
+
+        # Mock is_oauth_structurally_ok per ritornare True
+        res.is_oauth_structurally_ok = MagicMock(return_value=True)
+
+        # Mock try_refresh_oauth per registrare la chiamata
+        refresh_called = []
+
+        def fake_refresh(*args, **kwargs):
+            refresh_called.append(True)
+            return True, "rinnovato"
+
+        res.try_refresh_oauth = fake_refresh
+
+        # Mock self_test_oauth per evitare POST reali
+        res.self_test_oauth = MagicMock(return_value=(True, "ok"))
+
+        # Mock _write_state_now
+        res._write_state_now = MagicMock()
+
+        # Esegui il tick
+        res._tick_self_test()
+
+        # Verifica: try_refresh_oauth NON deve essere stato chiamato
+        assert len(refresh_called) == 0, (
+            "try_refresh_oauth è stato invocato quando il token scade fuori dal margine: "
+            "il check del margine non funziona correttamente!"
+        )
