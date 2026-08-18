@@ -100,10 +100,10 @@ ROUTING_TABLE = {
     # local è una modalità pura: THINK/VERIFY -> code-max, ACT -> code-fast (Laguna XS 2.1).
     ("local", ROLE_THINK): ("local", LOCAL_ACT),
     ("local", ROLE_ACT): ("local", LOCAL_ACT_FAST),
-    # gpt: modalità PURA locale — THINK e ACT sullo stesso modello, nessuna
-    # escalation e nessun provider remoto. Come `local`, ma su GPT_MODE_THINK.
+    # gpt: THINK locale coder-abliterated, ACT code-fast (come local: THINK pesante,
+    # esecutore veloce). Il THINK NON esegue mai, anche in locale.
     ("gpt", ROLE_THINK): ("local", GPT_MODE_THINK),
-    ("gpt", ROLE_ACT): ("local", GPT_MODE_THINK),
+    ("gpt", ROLE_ACT): ("local", LOCAL_ACT_FAST),
 }
 
 # ── Default provider per mode (used for unknown roles) ────────────────────────
