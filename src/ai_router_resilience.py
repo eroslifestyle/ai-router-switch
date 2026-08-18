@@ -25,6 +25,8 @@ import time
 import signal
 import threading
 import traceback
+import urllib.request
+import urllib.error
 
 import paths
 
@@ -60,6 +62,18 @@ class Resilience:
     # Minimo intervallo tra due stack dump di stall (anti-spam)
     LOOP_STALL_DUMP_COOLDOWN_S = 60
 
+    # OAuth refresh constants
+    OAUTH_TOKEN_URL = os.environ.get(
+        "OAUTH_TOKEN_URL",
+        "https://platform.claude.com/v1/oauth/token"
+    )
+    OAUTH_CLIENT_ID = os.environ.get(
+        "OAUTH_CLIENT_ID",
+        "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+    )
+    REFRESH_MARGIN_S = int(os.environ.get("OAUTH_REFRESH_MARGIN_S", "1800"))  # 30 min
+    REFRESH_RETRY_COOLDOWN_S = int(os.environ.get("OAUTH_REFRESH_RETRY_COOLDOWN_S", "120"))
+
     def __init__(self, port: int, log_fn=None, get_pid=None, **kwargs):
         self.port = port
         self.log = log_fn or (lambda m: None)
@@ -68,6 +82,7 @@ class Resilience:
         self._state = self.STATE_BOOTING
         self._oauth_tok = ""  # cache del token letto
         self._last_oauth_check_ts = 0.0
+        self._last_oauth_refresh_attempt_ts = 0.0  # anti-retry-storm
         self._self_test_thread: threading.Thread | None = None
         self._wd_thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -100,6 +115,159 @@ class Resilience:
         if not exp:
             return None
         return (exp - time.time() * 1000) / 1000 / 3600
+
+    def try_refresh_oauth(self) -> tuple[bool, str]:
+        """Prova a rinnovare il token OAuth usando il refresh token.
+
+        Rinnova il token leggendo .credentials.json, usando il refreshToken
+        per ottenere un nuovo accessToken, e scrivendo il file in modo atomico.
+
+        Ritorna (successo, messaggio).
+        - (True, "rinnovato, scade fra Xh") se rinnovamento riuscito
+        - (True, "gia' rinnovato dal CLI") se fra lettura e scrittura il CLI ha gia' rinnovato
+        - (False, "<motivo>") se fallisce (nessun refresh token, token scaduto, errore rete, ecc)
+
+        IMPORTANTE per sicurezza: NON logga mai il token (access o refresh, interi o parziali).
+        """
+        try:
+            # a) Leggi il file credenziali DA DISCO
+            try:
+                with open(CRED_FILE) as f:
+                    creds = json.load(f)
+            except Exception as e:
+                return False, f"lettura credenziali fallita: {type(e).__name__}"
+
+            oauth = creds.get("claudeAiOauth", {}) or {}
+            refresh_token = oauth.get("refreshToken", "") or ""
+
+            # b) Valida refresh token
+            if not refresh_token:
+                return False, "nessun refresh token"
+
+            refresh_exp_at = oauth.get("refreshTokenExpiresAt", 0)
+            if refresh_exp_at and int(time.time() * 1000) > refresh_exp_at:
+                return False, "refresh token scaduto: serve `claude login`"
+
+            # c) Prepara la richiesta HTTP al token endpoint
+            token_req_body = json.dumps({
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": self.OAUTH_CLIENT_ID,
+            }).encode("utf-8")
+
+            req = urllib.request.Request(
+                self.OAUTH_TOKEN_URL,
+                data=token_req_body,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+
+            # d) Invia la richiesta con timeout 15s
+            start_t = time.time()
+            try:
+                with urllib.request.urlopen(req, timeout=15.0) as resp:
+                    if resp.status < 200 or resp.status >= 300:
+                        return False, f"HTTP {resp.status} dal token endpoint"
+                    resp_body = resp.read().decode("utf-8")
+                    resp_data = json.loads(resp_body)
+            except urllib.error.HTTPError as e:
+                elapsed = time.time() - start_t
+                # Log solo status, NON il body se contiene "token"
+                status = e.code
+                return False, f"HTTP {status} dal token endpoint ({elapsed:.1f}s)"
+            except urllib.error.URLError as e:
+                elapsed = time.time() - start_t
+                return False, f"URL error ({type(e.reason).__name__}), {elapsed:.1f}s"
+            except Exception as e:
+                elapsed = time.time() - start_t
+                return False, f"{type(e).__name__} ({elapsed:.1f}s)"
+
+            # e) Estrai i dati dalla risposta
+            access_token = resp_data.get("access_token", "") or ""
+            new_refresh_token = resp_data.get("refresh_token")  # può non esserci (non ruotato)
+            expires_in_s = resp_data.get("expires_in")
+
+            if not access_token:
+                return False, "risposta senza access_token"
+
+            if expires_in_s is None:
+                return False, "risposta senza expires_in"
+
+            # f) RACE CHECK: rileggi il file prima di scrivere — se intanto il CLI
+            #    ha gia' rinnovato (expiresAt È PIÙ LONTANO di quello che stiamo per scrivere),
+            #    non scrivere (il CLI ha vinto la race)
+            try:
+                with open(CRED_FILE) as f:
+                    creds_now = json.load(f)
+            except Exception:
+                # Se non riesco a rileggere, procedo comunque (meglio scrivere)
+                creds_now = creds
+
+            oauth_now = creds_now.get("claudeAiOauth", {}) or {}
+            exp_at_now = oauth_now.get("expiresAt", 0)
+            # Calcola quale sarà il nostro expiresAt se scriviamo
+            exp_at_ours = int(time.time() * 1000) + int(expires_in_s * 1000)
+            # Se il file attuale ha un expiresAt PIÙ LONTANO del nostro, il CLI ha vinto
+            if exp_at_now and exp_at_now > exp_at_ours:
+                # CLI ha gia' rinnovato a una scadenza più lontana
+                return True, "gia' rinnovato dal CLI"
+
+            # g) Salva backup del file originale
+            try:
+                backup_path = CRED_FILE.with_suffix(".json.bak")
+                backup_path.write_text(CRED_FILE.read_text())
+            except Exception:
+                pass  # backup fallito, procedi comunque
+
+            # h) Prepara il nuovo contenuto credenziali
+            now_ms = int(time.time() * 1000)
+            new_expires_at = now_ms + int(expires_in_s * 1000)
+
+            # Preserva TUTTE le altre chiavi di claudeAiOauth
+            oauth_updated = oauth.copy()
+            oauth_updated["accessToken"] = access_token
+            if new_refresh_token:
+                oauth_updated["refreshToken"] = new_refresh_token
+            oauth_updated["expiresAt"] = new_expires_at
+
+            # Se la risposta fornisce una nuova scadenza del refresh token, aggiorna
+            if "refresh_token_expires_in" in resp_data:
+                oauth_updated["refreshTokenExpiresAt"] = (
+                    now_ms + int(resp_data["refresh_token_expires_in"] * 1000)
+                )
+
+            creds_new = creds.copy()
+            creds_new["claudeAiOauth"] = oauth_updated
+
+            # i) Scrivi in modo atomico (temp -> replace)
+            content_new = json.dumps(creds_new, indent=2)
+            try:
+                # Salva i permessi del file originale
+                st_mode = None
+                try:
+                    st_mode = os.stat(CRED_FILE).st_mode
+                except Exception:
+                    pass
+
+                tmp_path = CRED_FILE.with_suffix(".json.tmp")
+                tmp_path.write_text(content_new)
+
+                # Preserva i permessi
+                if st_mode is not None:
+                    os.chmod(tmp_path, st_mode & 0o777)
+
+                # Atomic replace
+                tmp_path.replace(CRED_FILE)
+            except Exception as e:
+                return False, f"scritto fallito: {type(e).__name__}"
+
+            # j) Successo: calcola scadenza e ritorna
+            expires_in_h = expires_in_s / 3600
+            return True, f"rinnovato, scade fra {expires_in_h:.1f}h"
+
+        except Exception as e:
+            # Cattura qualsiasi eccezione non prevista
+            return False, f"{type(e).__name__}"
 
     def is_oauth_structurally_ok(self) -> bool:
         """OAuth subscription: token presente e non scaduto (strutturale)."""
@@ -277,7 +445,26 @@ class Resilience:
                 self.log(f"resilience: self-test tick EXC {type(e).__name__}: {e}")
 
     def _tick_self_test(self):
+        # PRIMA: prova a rinnovare il token se scade entro REFRESH_MARGIN_S
         tok, meta = self._read_oauth()
+        exp_at = meta.get("expiresAt", 0)
+        if exp_at:
+            now_ms = int(time.time() * 1000)
+            expires_in_ms = exp_at - now_ms
+            expires_in_s = expires_in_ms / 1000
+            # Rinnova se scade entro il margine, e rispetta il retry cooldown
+            if 0 <= expires_in_s < self.REFRESH_MARGIN_S:
+                now = time.time()
+                if now - self._last_oauth_refresh_attempt_ts > self.REFRESH_RETRY_COOLDOWN_S:
+                    self._last_oauth_refresh_attempt_ts = now
+                    ok, msg = self.try_refresh_oauth()
+                    if ok:
+                        self.log(f"resilience: OAuth rinnovato: {msg}")
+                    else:
+                        self.log(f"resilience: OAuth refresh fallito: {msg}")
+                    # Rileggi il token aggiornato per la logica seguente
+                    tok, meta = self._read_oauth()
+
         if tok == self._oauth_tok and self._state == self.STATE_OK:
             # nessuna novità, skip self-test live
             return
