@@ -68,6 +68,9 @@ CONTRATTO_OSSERVATO = {
     "mix-ag-2": {"encoding": "gzip", "id": "msg_"},  # routing identico a mix-ag
     "qwen": {"encoding": "gzip", "id": "msg_"},
     "local": {"encoding": "identity", "id": "resp_"},
+    # gpt: pura locale come `local`, stesso backend → stesso contratto osservato.
+    # Non ancora verificata su traffico reale: il modello non e' servito (2026-08-18).
+    "gpt": {"encoding": "identity", "id": "resp_"},
 }
 
 IDENTIFICATIVI = {

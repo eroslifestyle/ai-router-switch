@@ -119,7 +119,7 @@ HOP_HEADERS = frozenset({
 })
 
 # ── Valid modes ────────────────────────────────────────────────────────────────
-VALID_MODES = ("anthropic", "minimax", "mix-am", "mix-am-2", "mix-ag", "mix-ag-2", "mix-gm", "mix-gm-2", "glm", "qwen", "mix-al", "local")
+VALID_MODES = ("anthropic", "minimax", "mix-am", "mix-am-2", "mix-ag", "mix-ag-2", "mix-gm", "mix-gm-2", "glm", "qwen", "mix-al", "local", "gpt")
 
 # Modalita' che instradano traffico verso Anthropic (THINK o ESECUZIONE).
 # Sorgente: tabella gerarchica in ~/.claude/CLAUDE.md. Le modalita qui elencate
@@ -149,6 +149,7 @@ PORT_MODE = {
     8781: "mix-am-2",   # sandbox: variante mix-am con enforcement deny (delega aggressiva)
     8784: "mix-gm-2",   # sandbox: variante mix-gm con enforcement deny (delega aggressiva)
     8785: "mix-ag-2",   # sandbox: variante mix-ag con enforcement deny (delega aggressiva)
+    8786: "gpt",     # sandbox: prova gpt (pura locale, THINK e ACT sullo stesso modello)
 }
 _pm_override = os.environ.get("AIROUTER_PORT_MODE_JSON", "").strip()
 if _pm_override:

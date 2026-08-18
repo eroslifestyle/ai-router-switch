@@ -17,6 +17,7 @@ _INTERNAL_TO_DISPLAY = {
     "mix-am": "MixAM", "mix-am-2": "MixAM-2", "mix-gm": "MixGM", "mix-gm-2": "MixGM-2", "mix-ag": "MixAG", "mix-ag-2": "MixAG-2",
     "mix-al": "MixAL",  # aggiunta 2026-08-04: l'8a modalita' mancava dalla mappa
     "local": "Local",   # aggiunta 2026-08-04: 9a modalita', pura locale (tutto su code-max)
+    "gpt": "GPT",       # aggiunta 2026-08-18: 13a modalita', pura locale su GPT_MODE_THINK
     "anthropic": "anthropic", "minimax": "minimax", "glm": "glm",
     "qwen": "qwen",   # aggiunta 2026-08-04: la 7a modalita' mancava dalla mappa
 }

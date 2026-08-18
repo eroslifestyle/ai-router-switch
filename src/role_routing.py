@@ -13,11 +13,24 @@ A model_override of None means: do not rewrite the "model" field — forward the
 original model name to the provider as-is (used for Anthropic, which handles
 version negotiation server-side).
 """
+import os
 
 # ── Model role families ────────────────────────────────────────────────────────
 # These are the prefixes that identify a model's role.
 _THINK_MODELS = ("claude-opus", "claude-sonnet", "claude-fable")
 _ACT_MODELS = ("claude-haiku",)
+
+# GPT_MODE_THINK: modello locale della modalità `gpt` (pura: THINK e ACT sullo
+# stesso modello, nessuna delega fuori dalla macchina).
+# ATTENZIONE (verificato 2026-08-18): "coder-abliterated" NON è servito da nessuno
+# dei due backend locali — LiteLLM :4000 espone code-fast, code-max,
+# code-max-ollama; Ollama :11434 espone code-fast, chat-max, cyber-max e simili.
+# Finché quel modello non esiste, la modalità risolve ma l'upstream risponde
+# errore. Per puntarla a un modello reale senza toccare il codice:
+#   AIROUTER_GPT_MODEL=code-max
+# Verifica cosa è servito davvero:
+#   curl -s -H "Authorization: Bearer $KEY" http://127.0.0.1:4000/v1/models
+GPT_MODE_THINK = os.environ.get("AIROUTER_GPT_MODEL", "coder-abliterated")
 
 # ── Provider model overrides ───────────────────────────────────────────────────
 MINIMAX_THINK = "MiniMax-M3"
@@ -87,6 +100,10 @@ ROUTING_TABLE = {
     # local è una modalità pura: THINK/VERIFY -> code-max, ACT -> code-fast (Laguna XS 2.1).
     ("local", ROLE_THINK): ("local", LOCAL_ACT),
     ("local", ROLE_ACT): ("local", LOCAL_ACT_FAST),
+    # gpt: modalità PURA locale — THINK e ACT sullo stesso modello, nessuna
+    # escalation e nessun provider remoto. Come `local`, ma su GPT_MODE_THINK.
+    ("gpt", ROLE_THINK): ("local", GPT_MODE_THINK),
+    ("gpt", ROLE_ACT): ("local", GPT_MODE_THINK),
 }
 
 # ── Default provider per mode (used for unknown roles) ────────────────────────
@@ -104,9 +121,10 @@ _MODE_DEFAULT_PROVIDER = {
     "mix-ag-2": "glm",
     "mix-al": "local",
     "local": "local",
+    "gpt": "local",
 }
 
-VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-am-2", "mix-ag", "mix-ag-2", "mix-gm", "mix-gm-2", "mix-al", "local")
+VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-am-2", "mix-ag", "mix-ag-2", "mix-gm", "mix-gm-2", "mix-al", "local", "gpt")
 
 
 def modes_with_act_provider(provider: str) -> frozenset:

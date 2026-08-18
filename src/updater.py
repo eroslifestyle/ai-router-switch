@@ -11,7 +11,7 @@ from urllib.error import URLError
 
 ROOT: Path = Path(__file__).resolve().parent.parent
 LOG_FILE: Path = ROOT / "logs" / "update.log"
-PORTS: list[int] = [8787, 8771, 8772, 8773, 8774, 8775, 8776, 8777, 8778, 8779, 8781, 8784, 8785]
+PORTS: list[int] = [8787, 8771, 8772, 8773, 8774, 8775, 8776, 8777, 8778, 8779, 8781, 8784, 8785, 8786]
 SERVICE_NAME: str = "ai-router"
 
 
