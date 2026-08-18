@@ -298,8 +298,16 @@ class Resilience:
             return
 
         # Token presente e non scaduto: facciamo self-test live (sessione LOCALE)
-        # Skip se modalità non-anthropic (es. minimax, glm, qwen)
-        if self._should_test_oauth_fn is not None and not self._should_test_oauth_fn():
+        # Skip se modalità non-anthropic (es. minimax, glm, qwen) — MA MAI mentre
+        # siamo in DEGRADED (2026-08-18): lì il self-test è l'unica via d'uscita.
+        # Il guasto: questo `return` usciva senza mai ripristinare lo stato OK, e
+        # poiché la modalità qui è quella GLOBALE mentre il gate a valle guarda
+        # quella DELLA RICHIESTA (che può essere un override per-chat), bastava
+        # una chat pinnata su una delle MODES_USING_ANTHROPIC per prendere 503 a
+        # oltranza: nessun tick la sbloccava e serviva un restart a mano.
+        if (self._should_test_oauth_fn is not None
+                and not self._should_test_oauth_fn()
+                and self._state != self.STATE_DEGRADED):
             self.log("resilience: self-test OAuth skip: modalità non-anthropic")
             return
         ok, msg = self.self_test_oauth(session=None, timeout_s=10.0)
