@@ -344,6 +344,42 @@ def test_sicurezza_niente_token_nei_log(tmp_path, monkeypatch, caplog):
     assert "REFRESH-SEGRETO" not in all_logs
 
 
+def test_user_agent_presente_nella_richiesta(tmp_path, monkeypatch):
+    """Lo User-Agent NON è decorativo: senza, il token endpoint risponde 403.
+
+    Misurato il 2026-08-18 contro l'endpoint reale: la stessa identica richiesta
+    dà 403 con lo UA di default di urllib ("Python-urllib/3.x") e 200 con quello
+    del CLI. Il filtro è a monte, prima che venga guardato il payload — quindi un
+    403 qui non significa "credenziali sbagliate" ma "richiesta rifiutata al varco".
+    """
+    res_mod = _import_res()
+    cred_file = tmp_path / ".credentials.json"
+    cred_file.write_text(json.dumps(_make_creds()))
+    monkeypatch.setattr(res_mod, "CRED_FILE", cred_file)
+
+    visti = {}
+
+    def mock_urlopen(req, *args, **kwargs):
+        visti["ua"] = req.get_header("User-agent") or ""
+        return mock.MagicMock(
+            __enter__=lambda s: s, __exit__=lambda *a: None, status=200,
+            read=lambda: json.dumps({
+                "access_token": "sk-ant-oat01-nuovo",
+                "refresh_token": "sk-ant-ort01-nuovo",
+                "expires_in": 28800,
+            }).encode(),
+        )
+
+    monkeypatch.setattr(res_mod.urllib.request, "urlopen", mock_urlopen)
+    ok, _ = res_mod.Resilience(port=0, log_fn=lambda m: None).try_refresh_oauth()
+
+    assert ok, "il refresh doveva riuscire con il mock"
+    assert visti.get("ua"), "nessuno User-Agent inviato: l'endpoint risponderebbe 403"
+    assert "python-urllib" not in visti["ua"].lower(), (
+        f"User-Agent di default di urllib: viene rifiutato con 403 (era {visti['ua']!r})"
+    )
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])

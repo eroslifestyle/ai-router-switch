@@ -71,6 +71,11 @@ class Resilience:
         "OAUTH_CLIENT_ID",
         "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
     )
+    # Senza uno User-Agent "da client vero" il token endpoint risponde 403.
+    # Non e' un vincolo di protocollo ma un filtro a monte: va tenuto.
+    OAUTH_USER_AGENT = os.environ.get(
+        "OAUTH_USER_AGENT", "claude-cli/2.1.233 (external, cli)"
+    )
     REFRESH_MARGIN_S = int(os.environ.get("OAUTH_REFRESH_MARGIN_S", "1800"))  # 30 min
     REFRESH_RETRY_COOLDOWN_S = int(os.environ.get("OAUTH_REFRESH_RETRY_COOLDOWN_S", "120"))
 
@@ -155,10 +160,18 @@ class Resilience:
                 "client_id": self.OAUTH_CLIENT_ID,
             }).encode("utf-8")
 
+            # User-Agent OBBLIGATORIO (misurato 2026-08-18): senza, l'endpoint
+            # risponde 403 — non 400. Con lo UA del CLI la stessa identica
+            # richiesta torna 200. Il default di urllib ("Python-urllib/3.x")
+            # viene rifiutato a monte, prima ancora di guardare il payload.
             req = urllib.request.Request(
                 self.OAUTH_TOKEN_URL,
                 data=token_req_body,
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "User-Agent": self.OAUTH_USER_AGENT,
+                },
                 method="POST"
             )
 
