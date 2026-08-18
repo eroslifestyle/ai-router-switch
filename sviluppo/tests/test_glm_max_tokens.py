@@ -45,6 +45,23 @@ def test_sopra_il_massimo_viene_abbassato(glm):
     assert _mt(out) == glm.GLM_MAX_TOKENS_LIMIT
 
 
+def test_tetto_per_modello(glm):
+    """glm-5.3 e glm-4.7 reggono 128K di output (doc chat-completion, e verificato
+    a runtime il 2026-08-18: max_tokens=131072 -> HTTP 200 su entrambi). Il tetto
+    unico a 32.768 li tagliava a un quarto. Un modello ignoto resta prudente."""
+    corpo = json.dumps({"max_tokens": 100_000}).encode()
+    assert glm.clamp_glm_max_tokens(corpo, model="glm-5.3") is corpo
+    assert glm.clamp_glm_max_tokens(corpo, model="glm-4.7") is corpo
+    # glm-4.6V ha 32K di output: lo stesso valore va abbassato.
+    assert _mt(glm.clamp_glm_max_tokens(corpo, model="glm-4.6V")) == 32_768
+    # Senza modello (e con uno sconosciuto) vale il tetto storico.
+    assert _mt(glm.clamp_glm_max_tokens(corpo)) == glm.GLM_MAX_TOKENS_LIMIT
+    assert _mt(glm.clamp_glm_max_tokens(corpo, model="glm-ignoto")) == glm.GLM_MAX_TOKENS_LIMIT
+    # Il modello si legge anche dal body, che e' come arriva da set_body_model.
+    dal_body = json.dumps({"max_tokens": 100_000, "model": "glm-5.3"}).encode()
+    assert glm.clamp_glm_max_tokens(dal_body) is dal_body
+
+
 def test_valore_nell_intervallo_non_si_tocca(glm):
     corpo = json.dumps({"max_tokens": 8000}).encode()
     assert glm.clamp_glm_max_tokens(corpo) is corpo

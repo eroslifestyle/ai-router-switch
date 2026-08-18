@@ -31,8 +31,18 @@ PEAK_START, PEAK_END = 14, 18  # 14:00-18:00 UTC+8
 
 
 def is_peak_hour() -> bool:
-    """Ritorna True se siamo in fascia peak Asia/Shanghai."""
-    return PEAK_START <= datetime.now(_tz()).hour < PEAK_END
+    """Ritorna True se siamo in fascia peak Asia/Shanghai.
+
+    Il weekend NON e' mai peak: la doc z.ai (devpack/notice/usage-revision,
+    letta il 2026-08-18) dice "Peak hours: Monday to Friday, 14:00-18:00
+    Singapore Standard Time (UTC+8)" e "usage on weekends will be deducted at
+    off-peak rates all day". Prima il sabato e la domenica fra le 14 e le 18
+    il cap declassava glm-5.3 a glm-4.7 per un sovrapprezzo che non esisteva.
+    """
+    now = datetime.now(_tz())
+    if now.weekday() >= 5:  # 5 = sabato, 6 = domenica
+        return False
+    return PEAK_START <= now.hour < PEAK_END
 
 
 def should_block_glm_model(tier: str) -> bool:

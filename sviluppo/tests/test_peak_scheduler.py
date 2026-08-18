@@ -5,7 +5,7 @@ import peak_scheduler as ps
 # Salva il datetime originale del modulo per poterlo ripristinare
 saved_datetime = ps.datetime
 
-def run_with_hour(hour, func, *args, modulo=None, **kwargs):
+def run_with_hour(hour, func, *args, modulo=None, giorno=0, **kwargs):
     """Esegue `func` con l'orario simulato `hour` (0-23).
     
     Il parametro `modulo` permette di iniettare l'ora in un modulo peak_scheduler
@@ -20,15 +20,19 @@ def run_with_hour(hour, func, *args, modulo=None, **kwargs):
     # un oggetto con attributo hour pari a `hour`.
     class FakeDatetime:
         _hour = hour
+        _giorno = giorno
         @classmethod
         def now(cls, tz=None):
-            # Restituisce un oggetto fittizio con solo l'attributo hour
+            # Oggetto fittizio con l'ora e il giorno della settimana
             class MockTime:
-                def __init__(self, h):
+                def __init__(self, h, g):
                     self.hour = h
+                    self._g = g
+                def weekday(self):
+                    return self._g
                 def __repr__(self):
-                    return f"MockTime(hour={self.hour})"
-            return MockTime(cls._hour)
+                    return f"MockTime(hour={self.hour}, weekday={self._g})"
+            return MockTime(cls._hour, cls._giorno)
     target.datetime = FakeDatetime
     try:
         return func(*args, **kwargs)
@@ -43,6 +47,23 @@ def test_bordi_fascia_peak():
         risultato = run_with_hour(ora, ps.is_peak_hour)
         assert risultato is atteso, \
             f"Ora {ora}: is_peak_hour dovrebbe essere {atteso}, ottenuto {risultato}"
+
+def test_weekend_mai_in_peak():
+    """Sabato e domenica non sono mai peak, nemmeno alle 15.
+
+    Doc z.ai (devpack/notice/usage-revision): "Peak hours: Monday to Friday,
+    14:00-18:00 Singapore Standard Time" e "usage on weekends will be deducted
+    at off-peak rates all day". Prima il cap declassava glm-5.3 a glm-4.7 anche
+    nel fine settimana, quando il sovrapprezzo 3x non esiste.
+    """
+    for giorno in (5, 6):
+        assert run_with_hour(15, ps.is_peak_hour, giorno=giorno) is False, \
+            f"giorno {giorno} alle 15 non deve essere peak"
+    # Controprova: gli stessi minuti in un giorno feriale restano peak.
+    for giorno in range(0, 5):
+        assert run_with_hour(15, ps.is_peak_hour, giorno=giorno) is True, \
+            f"giorno {giorno} alle 15 deve essere peak"
+
 
 def test_blocco_modelli_costosi_in_peak():
     """Verifica should_block_glm_model in fascia peak e fuori."""

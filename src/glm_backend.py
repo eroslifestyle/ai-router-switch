@@ -327,10 +327,35 @@ def resolve_glm_upstream_model(tier: str) -> str:
     return GLM_MODEL_FOR_TIER.get(tier, tier)
 
 
-# z.ai/GLM accetta max_tokens solo nel range [1, 32768]; Claude Code (Sonnet/Opus)
+# z.ai/GLM accettava max_tokens solo nel range [1, 32768]; Claude Code (Sonnet/Opus)
 # invia spesso valori più alti (es. 64000) → 400 [1210] "max_tokens parameter is
 # illegal 限制数值范围[1,32768]". Clamp al choke-point forward_glm.
+# Resta il tetto per i modelli che non sono nella mappa qui sotto.
 GLM_MAX_TOKENS_LIMIT = int(os.environ.get("AIROUTER_GLM_MAX_TOKENS_LIMIT", "32768"))
+
+# Output massimo per modello, dalla doc ufficiale (api-reference/llm/chat-completion,
+# letta il 2026-08-18): "GLM-5, GLM-4.7, GLM-4.6 series supports 128K maximum output,
+# [...] the GLM-4.6v series supports 32K". Verificato a runtime lo stesso giorno:
+# max_tokens=131072 passa su glm-5.3 e su glm-4.7 (HTTP 200), quindi il tetto unico
+# a 32.768 tagliava a un quarto l'output di entrambi.
+GLM_MAX_OUTPUT = {
+    "glm-5.3": 131_072,
+    "glm-5-turbo": 131_072,
+    "glm-4.7": 131_072,
+    "glm-4.6V": 32_768,
+    "glm-5V-Turbo": 32_768,
+}
+
+
+def glm_max_tokens_limit(model: str | None = None) -> int:
+    """Tetto di max_tokens per il modello GLM risolto.
+
+    Un override esplicito via env vince su tutto; un modello sconosciuto ricade
+    sul tetto storico di 32.768, cioè sul comportamento prudente di prima.
+    """
+    if os.environ.get("AIROUTER_GLM_MAX_TOKENS_LIMIT"):
+        return GLM_MAX_TOKENS_LIMIT
+    return GLM_MAX_OUTPUT.get(model or "", GLM_MAX_TOKENS_LIMIT)
 
 # Target byte per shrink testo preventivo (context-exceeded). GLM-5.2 ha 1M token
 # (~4M byte), glm-4.7 ha 200k token (~800k byte). 600k e' prudente per entrambi:
@@ -388,12 +413,13 @@ def glm_shrink_target_for(model: str | None) -> int:
 GLM_MIN_MAX_TOKENS = int(os.environ.get("AIROUTER_GLM_MIN_MAX_TOKENS", "4096"))
 
 
-def clamp_glm_max_tokens(body: bytes, log_fn=None) -> bytes:
-    """Riporta max_tokens dentro [GLM_MIN_MAX_TOKENS, GLM_MAX_TOKENS_LIMIT].
+def clamp_glm_max_tokens(body: bytes, log_fn=None, model: str | None = None) -> bytes:
+    """Riporta max_tokens dentro [GLM_MIN_MAX_TOKENS, glm_max_tokens_limit(model)].
 
-    z.ai rifiuta con 400 [1210] i valori fuori dal range [1, 32768]; sotto il
+    z.ai rifiuta con 400 [1210] i valori sopra il tetto del modello; sotto il
     minimo non rifiuta nulla ma restituisce una risposta senza testo (vedi
     GLM_MIN_MAX_TOKENS). No-op se il campo e' assente o gia' nell'intervallo.
+    Senza `model` vale il tetto prudente di 32.768.
     """
     try:
         d = json.loads(body)
@@ -402,10 +428,11 @@ def clamp_glm_max_tokens(body: bytes, log_fn=None) -> bytes:
     mt = d.get("max_tokens")
     if not isinstance(mt, int):
         return body
-    if mt > GLM_MAX_TOKENS_LIMIT:
-        d["max_tokens"] = GLM_MAX_TOKENS_LIMIT
+    limite = glm_max_tokens_limit(model or d.get("model"))
+    if mt > limite:
+        d["max_tokens"] = limite
         if log_fn:
-            log_fn(f"GLM clamp max_tokens {mt} -> {GLM_MAX_TOKENS_LIMIT}")
+            log_fn(f"GLM clamp max_tokens {mt} -> {limite}")
         return json.dumps(d).encode()
     if mt < GLM_MIN_MAX_TOKENS:
         d["max_tokens"] = GLM_MIN_MAX_TOKENS
@@ -506,9 +533,10 @@ async def forward_glm(request, body: bytes, session, model: str,
     # ISOLAMENTO TOOL (2026-07-19): choke-point unico, vedi tool_isolation.py.
     body = tool_isolation.filter_tools_for_backend(body, "glm")
 
-    # CLAMP max_tokens (2026-07-22): z.ai rifiuta > 32768 con 400 [1210]. Choke-point
-    # unico → copre pure glm + mix-ag + mix-gm indipendentemente dalla costruzione body.
-    body = clamp_glm_max_tokens(body, log_fn=log_fn)
+    # CLAMP max_tokens (2026-07-22): z.ai rifiuta i valori oltre il tetto del modello
+    # con 400 [1210]. Choke-point unico → copre pure glm + mix-ag + mix-gm
+    # indipendentemente dalla costruzione body.
+    body = clamp_glm_max_tokens(body, log_fn=log_fn, model=upstream_model or model)
 
     # SHRINK TESTO PREVENTIVO: se il body supera il target, riduce il contesto
     # prima di chiamare z.ai. GLM non risponde sempre con un 400 leggibile
