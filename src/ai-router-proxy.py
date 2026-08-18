@@ -906,6 +906,12 @@ async def handle(request):
             # immagini ai tool vision_local/ocr_image. mix-al NON riceve l'hint:
             # lì il THINK è Anthropic, che vede le immagini nativamente.
             _local_body = body
+            # gpt: via gli schemi dei tool MCP (~92% del payload, 278 tool su 304).
+            # Vale in QUALSIASI progetto e solo qui: i settings del client non
+            # sanno la modalità, il router sì. Vedi gpt_tool_trim.
+            if mode == "gpt":
+                from gpt_tool_trim import strip_mcp_tools
+                _local_body = strip_mcp_tools(_local_body)
             if mode == "local":
                 # Il modello locale è solo-testo: rimuovi le immagini (llama.cpp le
                 # rifiuta con 500) sostituendole con una nota, poi istruisci il
