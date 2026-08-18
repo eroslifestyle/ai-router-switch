@@ -857,6 +857,11 @@ async def handle(request):
             # peak (14-18 Asia/Shanghai) glm-5.3 e glm-5-turbo costano 3x e
             # vengono declassati a glm-4.7 per evitare costi eccessivi.
             _glm_model_pre = _glm_model
+            # Le immagini vanno al modello che vede: glm-5.3 e glm-4.7 sono
+            # text-only e le ignorano senza dirlo (vedi route_image_to_vision).
+            _glm_model = _glm_mod.route_image_to_vision(_glm_model, body)
+            if _glm_model != _glm_model_pre:
+                log(f"tunnel {mode} GLM vision: {_glm_model_pre} -> {_glm_model} (il body contiene immagini)")
             _glm_model, _peak_capped = _glm_mod.apply_peak_cap(_glm_model)
             if _peak_capped:
                 log(f"tunnel {mode} GLM peak-cap: {_glm_model_pre} -> {_glm_model} (fascia peak 14-18 Asia/Shanghai, costo 3x)")

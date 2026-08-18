@@ -294,6 +294,42 @@ def classify_429_glm(raw: bytes) -> str:
 # e la mappa GLM_MODEL_FOR_TIER RESTANO: le usa apply_peak_cap.
 
 
+# Modello a cui dirottare le richieste che contengono immagini. GLM-5.3 e' text-only
+# (doc guides/llm/glm-5.3: "currently supports text-only inputs") e glm-4.7 pure, ma
+# nessuno dei due lo dichiara: verificato il 2026-08-18, una richiesta con un blocco
+# image torna HTTP 200 e il modello risponde di non vedere l'immagine. Un errore
+# silenzioso e' peggio di un errore: qui la richiesta va al modello che vede.
+GLM_VISION_MODEL = os.environ.get("AIROUTER_GLM_VISION_MODEL", "glm-4.6V")
+
+
+def body_has_image(body: bytes) -> bool:
+    """True se il body Anthropic contiene almeno un blocco ``type: "image"``."""
+    try:
+        d = json.loads(body)
+    except Exception:
+        return False
+    for msg in d.get("messages") or []:
+        contenuto = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(contenuto, list):
+            continue
+        for blocco in contenuto:
+            if isinstance(blocco, dict) and blocco.get("type") == "image":
+                return True
+    return False
+
+
+def route_image_to_vision(model: str, body: bytes) -> str:
+    """Sostituisce il modello di ruolo con quello di visione se il body ha immagini.
+
+    Non tocca i modelli che gia' vedono (VISION/MULTIMODAL) ne' le richieste di
+    solo testo. Chiamare PRIMA di apply_peak_cap: il cap esenta gia' la visione,
+    quindi il dirottamento sopravvive anche in fascia peak.
+    """
+    if GLM_TIER_FOR_MODEL.get(model) in (GLM_TIER_VISION, GLM_TIER_MULTIMODAL):
+        return model
+    return GLM_VISION_MODEL if body_has_image(body) else model
+
+
 def apply_peak_cap(tier_or_model: str):
     """Applica il cap peak: TURBO/TOP → MID e model names equivalenti se in fascia peak.
 
