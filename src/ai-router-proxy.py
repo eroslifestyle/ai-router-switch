@@ -1037,7 +1037,7 @@ async def _run_multiport():
             port=LISTEN_PORT,
             log_fn=lambda m: log(f"[RES] {m}"),
             get_pid=lambda: os.getpid(),
-            should_test_oauth_fn=lambda: get_chat_mode(None) == "anthropic",
+            should_test_oauth_fn=lambda: get_file_mode() in MODES_USING_ANTHROPIC,
         )
         ok = RESILIENCE_INST.boot_validate(run_self_test=False)
         if not ok:

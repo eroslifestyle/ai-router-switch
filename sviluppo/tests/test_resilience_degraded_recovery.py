@@ -338,3 +338,193 @@ class TestDegradedRecoveryRegressionAnalysis:
         # Questo è un docstring di spiegazione dettagliata, non un test eseguibile.
         # Passa sempre per documentare il motivo della regressione e la controprovа.
         assert True
+
+
+class TestPredicateGetFileMode:
+    """Test del predicato del fix: si usa `get_file_mode()` non `get_chat_mode(None)`.
+
+    Il fix in ai-router-proxy.py riga 1040 cambia il predicato lambda:
+      OLD: lambda: get_chat_mode(None) == "anthropic"
+      NEW: lambda: get_file_mode() in MODES_USING_ANTHROPIC
+
+    Questo test documenta e verifica il problema della riga vecchia.
+    """
+
+    def test_get_chat_mode_none_returns_none(self):
+        """Documenta il bug: get_chat_mode(None) ritorna sempre None.
+
+        `get_chat_mode(fp)` legge da un file JSON le override per-chat.
+        Passando `fp=None` non c'è chiave nel dict → get() ritorna None.
+
+        Con il codice vecchio:
+            lambda: get_chat_mode(None) == "anthropic"
+                ↓
+            lambda: None == "anthropic"
+                ↓
+            lambda: False  ← SEMPRE False
+
+        Il self-test live OAuth non veniva mai eseguito, tranne quando
+        la modalità globale era esplicitamente "anthropic" E il gate
+        a valle trovasse una chat con override (improbabile).
+        """
+        _src = pathlib.Path(__file__).resolve().parents[2] / "src"
+        sys.path.insert(0, str(_src))
+        from router_mode import get_chat_mode
+
+        result = get_chat_mode(None)
+        assert result is None, (
+            f"get_chat_mode(None) deve ritornare None (no fingerprint nel dict), "
+            f"invece ritorna {result!r}"
+        )
+
+    def test_get_file_mode_predicate_with_monkeypatch(self, monkeypatch, tmp_path):
+        """Verifica che il nuovo predicato CHIAMA get_file_mode() e legge la modalità dal file.
+
+        Il predicato nel fix è: `get_file_mode() in MODES_USING_ANTHROPIC`
+
+        Questo test:
+        1. Crea file temporanei con diverse modalità
+        2. Fa leggere a get_file_mode() dai file temporanei (via monkeypatch)
+        3. Valuta il predicato REALE e verifica che ritorni True/False a seconda della modalità
+
+        Così il test cattura il bug del predicato vecchio:
+        - OLD: lambda: get_chat_mode(None) == "anthropic"  → sempre False
+        - NEW: lambda: get_file_mode() in MODES_USING_ANTHROPIC  → dipende dalla modalità
+        """
+        _src = pathlib.Path(__file__).resolve().parents[2] / "src"
+        # Purga i moduli carichi per evitare contaminazione fra i test
+        for mod in list(sys.modules.keys()):
+            if "router" in mod or "paths" in mod:
+                del sys.modules[mod]
+        sys.path.insert(0, str(_src))
+
+        from router_constants import MODES_USING_ANTHROPIC
+        import router_mode
+        from router_mode import get_file_mode
+
+        # Test (a): per ciascuna modalità, scrivi nel file e valuta il predicato
+        test_cases = [
+            ("anthropic", True),    # Anthropic THINK+ACT
+            ("mix-am", True),       # Anthropic THINK + MiniMax ACT
+            ("mix-am-2", True),     # Variante delega aggressiva
+            ("mix-ag", True),       # Anthropic THINK + GLM ACT
+            ("mix-ag-2", True),     # Variante
+            ("mix-al", True),       # Anthropic THINK + LLM locale ACT
+            ("minimax", False),     # NON usa Anthropic
+            ("glm", False),         # NON usa Anthropic
+            ("qwen", False),        # NON usa Anthropic
+        ]
+
+        for mode, expected_in_anthropic in test_cases:
+            # Crea file temporaneo e scrivi la modalità
+            mode_file = tmp_path / "ai-router-mode"
+            mode_file.write_text(mode)
+
+            # Monkeypatch router_mode.MODE_FILE per puntare al file temporaneo
+            monkeypatch.setattr(router_mode, "MODE_FILE", mode_file)
+
+            # Valuta il predicato REALE
+            result = get_file_mode() in MODES_USING_ANTHROPIC
+
+            assert result == expected_in_anthropic, (
+                f"Modalità {mode}: predicato deve essere {expected_in_anthropic}, "
+                f"instead got {result}. "
+                f"MODES_USING_ANTHROPIC={MODES_USING_ANTHROPIC}"
+            )
+
+    def test_get_file_mode_fallback_returns_anthropic(self, monkeypatch, tmp_path):
+        """Verifica il fallback: se MODE_FILE inesistente, get_file_mode() ritorna 'anthropic'.
+
+        Questo è il comportamento fail-open nel codice (riga 28 di router_mode.py):
+            try:
+                m = MODE_FILE.read_text().strip().lower()
+                ...
+            except Exception:
+                pass
+            return "anthropic"
+
+        Il fallback significa che il predicato ritorna True quando il file è inesistente.
+        Questo test blocca il caso: se qualcuno rimuovesse il fallback, il test fallirebbe.
+        """
+        _src = pathlib.Path(__file__).resolve().parents[2] / "src"
+        # Purga i moduli carichi
+        for mod in list(sys.modules.keys()):
+            if "router" in mod or "paths" in mod:
+                del sys.modules[mod]
+        sys.path.insert(0, str(_src))
+
+        from router_constants import MODES_USING_ANTHROPIC
+        import router_mode
+        from router_mode import get_file_mode
+
+        # Crea un path inesistente
+        nonexistent = tmp_path / "nonexistent" / "ai-router-mode"
+
+        # Monkeypatch MODE_FILE
+        monkeypatch.setattr(router_mode, "MODE_FILE", nonexistent)
+
+        # get_file_mode() deve ritornare il fallback "anthropic"
+        result = get_file_mode()
+        assert result == "anthropic", (
+            f"Fallback con file inesistente deve essere 'anthropic', "
+            f"invece got {result!r}"
+        )
+
+        # Il predicato deve essere True (anthropic è in MODES_USING_ANTHROPIC)
+        predicate_result = result in MODES_USING_ANTHROPIC
+        assert predicate_result is True, (
+            f"Fallback 'anthropic' deve fare il predicato True, "
+            f"instead got {predicate_result}"
+        )
+
+    def test_proxy_source_contains_correct_predicate(self):
+        """Aggancia la riga di produzione nel sorgente del proxy.
+
+        I test precedenti verificano il predicato logico ricostruito dentro il test.
+        Se qualcuno rimette `get_chat_mode(None) == "anthropic"` nel proxy,
+        quei test passano identici: testano la logica estratta, non il codice vivo.
+
+        Questo test legge il sorgente `src/ai-router-proxy.py` e cerca la riga
+        che contiene `should_test_oauth_fn=`. Asserisce che quella riga contiene:
+          - `get_file_mode()`
+          - `MODES_USING_ANTHROPIC`
+        E NON contiene:
+          - `get_chat_mode(` (la funzione vecchia del bug)
+
+        Così il test aggancia la riga di produzione. Se il bug ritorna, il test
+        cade subito, senza aspettare che la regressione si manifesti a runtime.
+        """
+        _project_root = pathlib.Path(__file__).resolve().parents[2]
+        proxy_file = _project_root / "src" / "ai-router-proxy.py"
+
+        # Leggi il file sorgente
+        source = proxy_file.read_text()
+
+        # Trova la riga con should_test_oauth_fn
+        lines = source.split("\n")
+        found = False
+        for i, line in enumerate(lines, start=1):
+            if "should_test_oauth_fn=" in line:
+                found = True
+                # Asserzioni sulla riga di produzione
+                assert "get_file_mode()" in line, (
+                    f"Riga {i} di {proxy_file}: "
+                    f"should_test_oauth_fn deve contenere 'get_file_mode()', "
+                    f"invece contiene: {line.strip()}"
+                )
+                assert "MODES_USING_ANTHROPIC" in line, (
+                    f"Riga {i} di {proxy_file}: "
+                    f"should_test_oauth_fn deve contenere 'MODES_USING_ANTHROPIC', "
+                    f"invece contiene: {line.strip()}"
+                )
+                assert "get_chat_mode(" not in line, (
+                    f"Riga {i} di {proxy_file}: "
+                    f"should_test_oauth_fn NON deve contenere 'get_chat_mode(' (bug), "
+                    f"invece contiene: {line.strip()}"
+                )
+                break
+
+        assert found, (
+            f"Riga 'should_test_oauth_fn=' non trovata in {proxy_file}. "
+            f"Il fix potrebbe essere stato revertato."
+        )
