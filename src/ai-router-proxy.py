@@ -9,7 +9,7 @@ Modalita' (file ~/.claude/ai-router-mode):
   - mix-am      : Anthropic THINK + MiniMax ACT
   - mix-ag      : Anthropic THINK + GLM ACT
   - mix-gm      : GLM THINK + MiniMax ACT
-  - glm         : GLM tiered (5.2->4.7->4)
+  - glm         : GLM per ruolo (THINK glm-5.3, ACT glm-4.7)
 
 Claude Code punta qui: ANTHROPIC_BASE_URL=http://127.0.0.1:8787
 Gestisce streaming SSE. Backend diretto (nessun proxy intermedio).
@@ -864,7 +864,13 @@ async def handle(request):
                                       "message": f"{mode}: modulo GLM assente"}}, status=502)
         try:
             import glm_backend as _glm_mod
-            _glm_model = _model_override or _glm_mod.resolve_glm_upstream_model(_glm_mod.GLM_TIER_MID)
+            # override=None da resolve_route significa "non riscrivere il modello",
+            # non "usa il default di modalita'": se il client ha chiesto un modello
+            # GLM vero (e' quello che dice di fare la guida z.ai per Claude Code,
+            # ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.3) va rispettato. Prima finiva
+            # sempre sul MID: chiedere glm-5.3 dava glm-4.7, in silenzio.
+            _glm_model = (_model_override or _glm_mod.canonical_glm_model(_req_model)
+                          or _glm_mod.resolve_glm_upstream_model(_glm_mod.GLM_TIER_MID))
             # Dal 2026-07-25 il tiering dinamico non esiste piu: il modello GLM
             # effettivo arriva da role_routing ed e' noto solo qui. In fascia
             # peak (14-18 Asia/Shanghai) glm-5.3 e glm-5-turbo costano 3x e

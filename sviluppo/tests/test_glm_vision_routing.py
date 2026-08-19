@@ -56,6 +56,24 @@ def test_il_dirottamento_sopravvive_al_peak_cap():
     assert (finale, capped) == (glm.GLM_VISION_MODEL, False)
 
 
+
+
+def test_canonical_glm_model():
+    """Distingue "il client ha chiesto un modello GLM" da "ha chiesto claude-*".
+
+    Serve al proxy: override=None da resolve_route vuol dire "non riscrivere",
+    e prima veniva letto come "usa il MID", cosi' chi seguiva la guida z.ai
+    (ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.3) otteneva glm-4.7 senza saperlo.
+    """
+    assert glm.canonical_glm_model("glm-5.3") == "glm-5.3"
+    assert glm.canonical_glm_model("glm-4.7") == "glm-4.7"
+    # z.ai risponde in minuscolo dove noi inviamo la V maiuscola
+    assert glm.canonical_glm_model("glm-4.6v") == "glm-4.6V"
+    assert glm.canonical_glm_model("  GLM-5.3 ") == "glm-5.3"
+    for altro in ("claude-opus-5", "MiniMax-M2.7", "glm-9000", "", None):
+        assert glm.canonical_glm_model(altro) is None
+
+
 if __name__ == "__main__":  # pragma: no cover
     for nome, fn in sorted(globals().items()):
         if nome.startswith("test_"):

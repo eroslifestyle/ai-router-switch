@@ -356,6 +356,24 @@ def apply_peak_cap(tier_or_model: str):
     return tier_or_model, False
 
 
+def canonical_glm_model(name: str | None) -> str | None:
+    """Il nome canonico di un modello GLM noto, o None se non lo e'.
+
+    Confronto senza distinzione di maiuscole perche' z.ai risponde ``glm-4.6v``
+    dove noi inviamo ``glm-4.6V``, e chi configura il client a mano scrive un po'
+    come gli pare. Serve a distinguere "il client ha chiesto un modello GLM vero"
+    da "il client ha chiesto claude-opus-5": nel primo caso il modello richiesto
+    va rispettato, non sostituito con il default di modalita'.
+    """
+    if not name:
+        return None
+    minuscolo = name.strip().lower()
+    for noto in GLM_TIER_FOR_MODEL:
+        if noto.lower() == minuscolo:
+            return noto
+    return None
+
+
 def resolve_glm_upstream_model(tier: str) -> str:
     """Mappa una tier key (TOP/MID/TURBO/VISION/MULTIMODAL) al modello GLM
     reale da inviare a z.ai. Se `tier` è già un nome modello reale (non una
@@ -393,7 +411,7 @@ def glm_max_tokens_limit(model: str | None = None) -> int:
         return GLM_MAX_TOKENS_LIMIT
     return GLM_MAX_OUTPUT.get(model or "", GLM_MAX_TOKENS_LIMIT)
 
-# Target byte per shrink testo preventivo (context-exceeded). GLM-5.2 ha 1M token
+# Target byte per shrink testo preventivo (context-exceeded). GLM-5.3 ha 1M token
 # (~4M byte), glm-4.7 ha 200k token (~800k byte). 600k e' prudente per entrambi:
 # sotto il limite del modello piu' piccolo dopo il which model resolution.
 GLM_SHRINK_TARGET_BYTES = int(os.environ.get(
@@ -588,11 +606,16 @@ async def forward_glm(request, body: bytes, session, model: str,
 
     url = GLM_UPSTREAM + request.path_qs
 
+    # Il modello REALE verso z.ai. `model` e' quello richiesto dal client, che in
+    # mode glm/mix-gm/mix-ag e' un nome Anthropic: usarlo nei log fa scrivere
+    # "model=claude-sonnet-5" sotto la categoria glm, e mandare a caccia del
+    # difetto sbagliato. Definito qui e non nel try perche' gli except lo leggono.
+    lim_model = upstream_model or model
+
     for attempt in range(2):
         resp = None
         try:
             est_tokens = _estimate_tokens(body)
-            lim_model = upstream_model or model
             budget = (GLM_STREAM_ACQUIRE_CAP_SEC if passthrough
                       else GLM_RETRY_CAP_SEC)
             entry = await GLM_LIMITER.acquire(lim_model, est_tokens,
@@ -646,7 +669,7 @@ async def forward_glm(request, body: bytes, session, model: str,
                 log_fn(f"GLM 429 attempt {attempt + 1}: backoff {step}s kind={_kind}")
                 debug_catalog.record_event(severity="block", category="glm",
                                             kind=f"glm_429_{_kind}", code=429,
-                                            snippet=f"attempt={attempt + 1} backoff={step}s kind={_kind} model={model}")
+                                            snippet=f"attempt={attempt + 1} backoff={step}s kind={_kind} model={lim_model}")
                 if _kind == "quota_5h":
                     glm_alert(f"Quota GLM esaurita (model={lim_model}): {_raw429[:200].decode('utf-8', errors='replace')}")
                     if passthrough:
@@ -672,7 +695,7 @@ async def forward_glm(request, body: bytes, session, model: str,
             if resp.status >= 500 and attempt == 0:
                 debug_catalog.record_event(severity="error", category="glm",
                                             kind="glm_5xx_retry", code=resp.status,
-                                            snippet=f"attempt={attempt + 1} model={model}")
+                                            snippet=f"attempt={attempt + 1} model={lim_model}")
                 try:
                     await resp.read()
                 finally:
@@ -684,7 +707,21 @@ async def forward_glm(request, body: bytes, session, model: str,
             # Connessione volutamente APERTA: la release avviene nel finally
             # di StreamingRelay.relay() dopo aver consumato lo stream.
             if passthrough:
-                if model.startswith("glm-5"):
+                # `model` e' il modello RICHIESTO dal client (claude-sonnet-5 in
+                # mode glm/mix-gm/mix-ag): la condizione era quindi sempre falsa e
+                # questo controllo non ha mai girato in produzione — si vede nel
+                # catalogo, dove gli eventi glm portano "model=claude-sonnet-5" e
+                # glm_empty_response non compare mai. Il modello vero e'
+                # upstream_model.
+                # Il controllo resta pero' limitato alle risposte NON-SSE: leggere
+                # uno stream per intero per poterlo ispezionare lo trasformerebbe
+                # in una risposta bufferizzata, che e' la regressione di TTFB gia'
+                # vista il 2026-07-22 su mix-gm/mix-ag (45s contro ~1s). Per lo
+                # streaming serve il peek del primo evento, progettato il
+                # 2026-08-09 e non ancora implementato.
+                _modello_reale = upstream_model or model
+                _e_sse = "text/event-stream" in (resp.headers.get("content-type") or "")
+                if _modello_reale.startswith("glm-5") and not _e_sse:
                     raw = await resp.read()
                     resp.release()
                     _dec = raw
@@ -694,11 +731,11 @@ async def forward_glm(request, body: bytes, session, model: str,
                         except Exception as e:
                             log_fn(f"GLM empty-check gzip fail: {e}")
                     if _glm_is_empty(_dec):
-                        log_fn(f"GLM empty-200 attempt {attempt + 1} model={model}")
+                        log_fn(f"GLM empty-200 attempt {attempt + 1} model={lim_model}")
                         debug_catalog.record_event(
                             severity="error", category="glm",
                             kind="glm_empty_response", code=200,
-                            snippet=f"attempt={attempt + 1} model={model} bytes={len(raw)}")
+                            snippet=f"attempt={attempt + 1} model={lim_model} bytes={len(raw)}")
                         if attempt == 0:
                             await asyncio.sleep(0.5 + random.uniform(0, 1))
                             continue
@@ -736,7 +773,7 @@ async def forward_glm(request, body: bytes, session, model: str,
             log_fn(f"GLM rate-limit fail-fast: {e}")
             debug_catalog.record_event(severity="block", category="glm",
                                         kind="glm_ratelimit_exhausted", code=429,
-                                        snippet=f"model={model} {e}")
+                                        snippet=f"model={lim_model} {e}")
             if passthrough:
                 return synthetic_rate_limit("glm limiter budget exhausted",
                                             retry_after="10")
@@ -745,7 +782,7 @@ async def forward_glm(request, body: bytes, session, model: str,
         except asyncio.TimeoutError:
             log_fn(f"GLM timeout attempt {attempt + 1}")
             debug_catalog.record_event(severity="error", category="glm",
-                                        kind="glm_timeout", snippet=f"attempt={attempt + 1} model={model}")
+                                        kind="glm_timeout", snippet=f"attempt={attempt + 1} model={lim_model}")
             if resp is not None:
                 try:
                     resp.release()
@@ -777,7 +814,7 @@ async def forward_glm(request, body: bytes, session, model: str,
                     pass
 
     debug_catalog.record_event(severity="error", category="glm",
-                                kind="glm_exhausted", code=502, snippet=f"model={model}")
+                                kind="glm_exhausted", code=502, snippet=f"model={lim_model}")
     return _err(502, "glm_exhausted", "GLM exhausted after 2 attempts")
 
 
