@@ -362,6 +362,19 @@ async def handle(request):
     else:
         ctx_model = _ctx_model_map.get(mode, "MiniMax-M2.7")
 
+    # Loop-breaker: una chat che riemette lo stesso turno non si sblocca inoltrandolo
+    # di nuovo. Sta prima del ctx perche' il rewrite di un turno gia' visto e' lavoro
+    # buttato. Vedi loop_breaker.py.
+    try:
+        import loop_breaker
+        _repeats = loop_breaker.check(fp, body)
+        if _repeats >= loop_breaker.LOOP_BREAKER_N:
+            log(f"loop-breaker: {_repeats} turni identici fp={fp} mode={mode} — interrotto")
+            loop_breaker.reset(fp)
+            return _err_response(loop_breaker.message(mode, _repeats), status=400)
+    except Exception as _e:
+        log(f"loop-breaker EXC {_e} fp={fp}")
+
     ctx_check = {"action": "ok", "pct": 0.0}
     try:
         ctx_check = CTX.pre_check(fp, mode, len(body), model=ctx_model, body=body)

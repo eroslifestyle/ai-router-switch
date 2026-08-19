@@ -13,6 +13,97 @@ log = logging.getLogger(__name__)
 KEEP_RECENT_IMAGES = 2       # messaggi finali lasciati intatti (immagini comprese)
 TOOL_RESULT_MAX_CHARS = 4000  # oltre questa soglia il tool_result viene troncato
 
+# Il dedup lato client di Claude Code sostituisce una Read ripetuta con questo
+# segnaposto, che rimanda a un tool_result PRECEDENTE. Se lo shrink ha buttato via
+# quel messaggio, il rimando punta al nulla: il modello non vede mai il contenuto,
+# non ricorda di averci gia' provato e riemette la stessa Read all'infinito.
+# Loop misurato il 2026-08-19, sessione 74070e0d in mode gpt: 11+ turni identici da
+# ~3 minuti l'uno. La storia completa pero' il router ce l'ha, quindi il contenuto
+# si ripesca da li' e il segnaposto torna utile.
+DEDUP_PLACEHOLDER_MARK = "file unchanged since your last Read"
+
+
+def _tool_result_text(content) -> str:
+    """Testo di un tool_result, che il formato sia stringa o lista di blocchi."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            sub.get("text", "") for sub in content
+            if isinstance(sub, dict) and sub.get("type") == "text"
+        )
+    return ""
+
+
+def _restore_deduped_reads(full_msgs: list, tail_msgs: list) -> list:
+    """Rimpiazza i segnaposto del dedup con il tool_result vero, ripescato dalla storia piena.
+
+    Nel tail resta solo il rimando ("refer to that earlier tool_result"), mentre il
+    contenuto sta in un messaggio che lo shrink ha tagliato. Qui si ricongiungono:
+    tool_use_id -> path del file -> ultimo contenuto realmente letto.
+    """
+    key_by_id = {}
+    for msg in full_msgs:
+        for block in msg.get("content") or []:
+            if not isinstance(block, dict) or block.get("type") != "tool_use":
+                continue
+            inp = block.get("input") or {}
+            key = inp.get("file_path") or inp.get("path") or inp.get("notebook_path")
+            if key and block.get("id"):
+                key_by_id[block["id"]] = key
+
+    content_by_key = {}
+    for msg in full_msgs:
+        for block in msg.get("content") or []:
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            key = key_by_id.get(block.get("tool_use_id"))
+            text = _tool_result_text(block.get("content"))
+            if key and text and DEDUP_PLACEHOLDER_MARK not in text:
+                content_by_key[key] = text
+
+    if not content_by_key:
+        return tail_msgs
+
+    restored = []
+    for msg in tail_msgs:
+        content = msg.get("content")
+        if not isinstance(content, list):
+            restored.append(msg)
+            continue
+
+        new_content, touched = [], False
+        for block in content:
+            real = None
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                text = _tool_result_text(block.get("content"))
+                if DEDUP_PLACEHOLDER_MARK in text:
+                    real = content_by_key.get(key_by_id.get(block.get("tool_use_id")))
+            if real is None:
+                new_content.append(block)
+                continue
+            new_block = dict(block)
+            new_block["content"] = (
+                real[:TOOL_RESULT_MAX_CHARS] + "\n…[troncato]"
+                if len(real) > TOOL_RESULT_MAX_CHARS else real
+            )
+            new_content.append(new_block)
+            touched = True
+
+        if not touched:
+            restored.append(msg)
+            continue
+        new_msg = dict(msg)
+        new_msg["content"] = new_content
+        restored.append(new_msg)
+
+    return restored
+
+
+def _tail(msgs: list, keep: int) -> list:
+    """Coda riparata e con i rimandi del dedup risolti."""
+    return _restore_deduped_reads(msgs, _repair_message_sequence(msgs[-keep:]))
+
 
 def rewrite_for_context(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
     # Fail-safe: un errore nel rewrite non deve MAI bloccare il proxy.
@@ -43,7 +134,7 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
         return (body, False)
 
     # ATTEMPT 1: tail + summary nel system per preservare contesto recente
-    tail_msgs = _repair_message_sequence(msgs[-SHRINK_KEEP_TAIL:])
+    tail_msgs = _tail(msgs, SHRINK_KEEP_TAIL)
     # build_shrink_summary vuole il budget in CARATTERI, safe_limit e' in TOKEN:
     # passarlo senza convertire produceva un riassunto ~4x piu' piccolo del dovuto
     # e sprecava tre quarti della finestra (misurato 2026-08-02: un body da 1135KB
@@ -91,7 +182,7 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
     # ATTEMPT 2: degradazione progressiva del riassunto, mai la sua rimozione
     for budget in [budget_chars // 2, budget_chars // 4, budget_chars // 8, budget_chars // 16]:
         summary_b = build_shrink_summary(msgs, budget)
-        tail_b = _repair_message_sequence(msgs[-SHRINK_KEEP_TAIL:])
+        tail_b = _tail(msgs, SHRINK_KEEP_TAIL)
 
         cand = dict(data)
         cand["messages"] = tail_b
@@ -105,7 +196,7 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
             return (cand_bytes, True)
 
     # Ultimo tentativo: coda ridotta a 2 messaggi ma conservando il riassunto compresso
-    tail2 = _repair_message_sequence(msgs[-2:] if len(msgs) >= 2 else msgs)
+    tail2 = _tail(msgs, 2) if len(msgs) >= 2 else _repair_message_sequence(msgs)
     summary2 = build_shrink_summary(msgs, budget_chars // 16)
 
     new2 = dict(data)
