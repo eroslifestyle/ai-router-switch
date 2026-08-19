@@ -46,9 +46,13 @@ QWEN_ACT = "qwen3-coder-plus"
 # llama.cpp dietro LiteLLM). Il provider 'local' NON ha un modello THINK:
 # in mix-al il THINK resta su Anthropic.
 LOCAL_ACT = "code-max"
-# code-fast: Laguna XS 2.1 (33B-A3B, 256K ctx, 63 tok/s via Ollama). Dal
-# 2026-08-17 è l'esecutore ACT della modalità local.
-LOCAL_ACT_FAST = "code-fast"
+# LOCAL_ACT_FAST era code-fast (Laguna XS 2.1, 33B-A3B via Ollama), esecutore ACT
+# di local e mix-al dal 2026-08-17. Rimosso il 2026-08-19 per decisione utente: in
+# locale si usa solo code-max. Due modelli locali insieme si contendono la stessa
+# memoria — su questo APU la GPU pesca dalla RAM di sistema — ed e' la coabitazione
+# che ha causato i lockup da saturazione GTT. L'alias resta puntato a code-max
+# perche' e' citato altrove; non introdurre un secondo modello locale senza motivo.
+LOCAL_ACT_FAST = LOCAL_ACT
 
 # ── Role constants ─────────────────────────────────────────────────────────────
 ROLE_THINK = "think"
@@ -97,7 +101,8 @@ ROUTING_TABLE = {
     ("mix-gm-2", ROLE_ACT): ("minimax", MINIMAX_ACT),
     ("mix-al", ROLE_THINK): ("anthropic", None),
     ("mix-al", ROLE_ACT): ("local", LOCAL_ACT_FAST),
-    # local è una modalità pura: THINK/VERIFY -> code-max, ACT -> code-fast (Laguna XS 2.1).
+    # local è una modalità pura: THINK/VERIFY e ACT vanno entrambi a code-max
+    # (2026-08-19: code-fast rimosso, un solo modello locale).
     ("local", ROLE_THINK): ("local", LOCAL_ACT),
     ("local", ROLE_ACT): ("local", LOCAL_ACT_FAST),
     # gpt: MODELLO UNICO, quello gia' residente in memoria (decisione utente
@@ -149,7 +154,7 @@ def modes_with_act_provider(provider: str) -> frozenset:
 # It's the NATIVE EXECUTOR of the provider, never the THINK (the THINK is
 # chosen manually by the user, it should never be decided by code).
 _NATIVE_EXECUTOR = {
-    # ponytail: local ACT = code-fast (Laguna XS 2.1)
+    # ponytail: local ACT = code-max, unico modello locale dal 2026-08-19
 
     "anthropic": "claude-haiku-4-5-20251001",
     "minimax": MINIMAX_ACT,
@@ -223,7 +228,7 @@ def model_provider(model_name: str | None) -> str | None:
     # Modelli locali (LiteLLM/llama.cpp su questa macchina): confronto ESATTO o
     # startswith, mai `in`, per non catturare per sbaglio altri nomi. Serve
     # all'isolamento fra modalita': un modello locale non va mai a un provider remoto.
-    if model_lower in ("code-max", "code-max-ollama", "code-fast") or model_lower.startswith("qcnext"):
+    if model_lower in ("code-max", "code-max-ollama") or model_lower.startswith("qcnext"):
         return "local"
 
     return None

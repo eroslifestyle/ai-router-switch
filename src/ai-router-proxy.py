@@ -934,7 +934,7 @@ async def handle(request):
             # Vale in QUALSIASI progetto e per OGNI modello locale, non piu' solo
             # gpt (esteso 2026-08-19): questo ramo e' il provider `local`, cioe' la
             # gamba ACT di local/mix-al/gpt. Sono proprio i modelli con la finestra
-            # piu' stretta — code-fast ne ha 65.536 — e i soli schemi ne occupavano
+            # piu' stretta — code-max ne ha 131.072 — e i soli schemi ne occupavano
             # ~67.500: saturi prima della prima parola di conversazione. I settings
             # del client non sanno la modalita', il router si'. Vedi gpt_tool_trim.
             from gpt_tool_trim import strip_mcp_tools

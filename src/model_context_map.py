@@ -89,10 +89,10 @@ MODEL_CONTEXT_MAP = {
     # lasciava passare corpi fino a 3x la capacita' vera e Ollama li troncava in
     # SILENZIO, tagliando dall'inizio — via il system prompt, via la richiesta.
     # E' la "saturazione immediata" delle modalita' local/mix-al, il cui esecutore
-    # ACT e' proprio code-fast. Valori dal parametro num_ctx del Modelfile, non
-    # dalla finestra dell'architettura: e' num_ctx che decide cosa il backend
-    # accetta davvero (code-fast regge 262k di architettura ma ne serve 65k).
-    "code-fast": 65_536,
+    # ACT era code-fast, rimosso il 2026-08-19. Valori dal parametro num_ctx del
+    # Modelfile, non dalla finestra dell'architettura: e' num_ctx che decide cosa
+    # il backend accetta davvero (code-fast reggeva 262k di architettura ma ne
+    # aveva 65k configurati).
     "coding-fast": 32_768,
     "fast-max": 32_768,
     "cyber-max": 32_768,

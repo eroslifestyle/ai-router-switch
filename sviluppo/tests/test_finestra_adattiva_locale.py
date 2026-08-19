@@ -2,7 +2,7 @@
 
 Tre difetti misurati il 2026-08-19, uno per gruppo di test:
 1. i modelli locali non erano in MODEL_CONTEXT_MAP e cadevano sul default 200.000,
-   mentre code-fast ne regge 65.536: il gate non scattava e Ollama troncava in
+   mentre coding-fast ne regge 32.768: il gate non scattava e Ollama troncava in
    silenzio (saturazione immediata in mode local/mix-al);
 2. lo shrink teneva SHRINK_KEEP_TAIL=6 messaggi a prescindere dallo spazio libero,
    consegnando 179 KB dove ne erano ammessi ~390 su code-max.
@@ -38,7 +38,7 @@ def _corpo_lungo(model: str, coppie: int = 300) -> bytes:
 def test_i_modelli_locali_non_cadono_piu_sul_default():
     # Valori dal num_ctx dei Modelfile Ollama e dal -c delle unit llama.cpp.
     attesi = {
-        "code-max": 131_072, "code-fast": 65_536, "coding-fast": 32_768,
+        "code-max": 131_072, "coding-fast": 32_768,
         "fast-max": 32_768, "cyber-max": 32_768, "coding-light": 16_384,
         "coder-abliterated": 131_072, "chat-max": 131_072,
     }
@@ -47,10 +47,10 @@ def test_i_modelli_locali_non_cadono_piu_sul_default():
         assert get_context_limit(model) != DEFAULT_NON_MAPPATO or limite == DEFAULT_NON_MAPPATO
 
 
-def test_code_fast_non_promette_piu_di_quanto_regge():
-    """Il caso che causava il troncamento silenzioso: ACT di local e mix-al."""
-    assert get_context_limit("code-fast") < DEFAULT_NON_MAPPATO
-    assert get_safe_input_limit("code-fast", MAX_TOKENS) < get_context_limit("code-fast")
+def test_un_modello_stretto_non_promette_piu_di_quanto_regge():
+    """Il caso che causava il troncamento silenzioso su ogni modello Ollama."""
+    assert get_context_limit("coding-fast") < DEFAULT_NON_MAPPATO
+    assert get_safe_input_limit("coding-fast", MAX_TOKENS) < get_context_limit("coding-fast")
 
 
 # ── 2. la finestra si riempie invece di sprecarsi ───────────────────────────
@@ -76,10 +76,20 @@ def test_la_finestra_e_sfruttata_quasi_tutta():
 
 
 def test_una_finestra_piu_stretta_tiene_meno_messaggi():
-    """Stesso corpo, due modelli: la coda deve scalare con la finestra, non essere fissa."""
-    body = _corpo_lungo("code-max")
+    """Stesso corpo, due modelli: la coda deve scalare con la finestra, non essere fissa.
+
+    max_tokens basso di proposito: con 32.000 riservati all'output, su una finestra
+    da 32.768 non resterebbe spazio per l'input e il confronto non direbbe nulla.
+    """
+    out_max = 4_000
+    body = json.dumps({
+        "model": "code-max", "max_tokens": out_max,
+        "system": "prompt di sistema " * 500,
+        "messages": json.loads(_corpo_lungo("code-max"))["messages"],
+    }).encode()
+
     grandi = len(json.loads(rewrite_for_context(body, "code-max", "sid:g")[0])["messages"])
-    piccoli = len(json.loads(rewrite_for_context(body, "code-fast", "sid:p")[0])["messages"])
+    piccoli = len(json.loads(rewrite_for_context(body, "coding-fast", "sid:p")[0])["messages"])
     assert grandi > piccoli > SHRINK_KEEP_TAIL, (grandi, piccoli)
 
 
