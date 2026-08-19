@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from typing import Tuple
 
 from trim_smart import build_shrink_summary, SHRINK_KEEP_TAIL
@@ -21,6 +22,13 @@ TOOL_RESULT_MAX_CHARS = 4000  # oltre questa soglia il tool_result viene troncat
 # ~3 minuti l'uno. La storia completa pero' il router ce l'ha, quindi il contenuto
 # si ripesca da li' e il segnaposto torna utile.
 DEDUP_PLACEHOLDER_MARK = "file unchanged since your last Read"
+
+# Quota del limite sicuro riservata al riassunto. Era implicitamente 3/4, perche'
+# la coda era fissa a SHRINK_KEEP_TAIL messaggi e tutto il resto finiva al
+# riassunto: su code-max (131k) lo shrink consegnava 179 KB dove ne erano ammessi
+# ~390, cioe' buttava due terzi della finestra a ogni turno. Con la coda adattiva
+# il rapporto si inverte: al riassunto una quota fissa, ai messaggi veri il resto.
+SUMMARY_BUDGET_SHARE = float(os.environ.get("AIROUTER_SHRINK_SUMMARY_SHARE", "0.25"))
 
 
 def _tool_result_text(content) -> str:
@@ -105,6 +113,24 @@ def _tail(msgs: list, keep: int) -> list:
     return _restore_deduped_reads(msgs, _repair_message_sequence(msgs[-keep:]))
 
 
+def _fit_keep(msgs: list, model: str, safe_limit: int, make_candidate) -> int:
+    """Quanti messaggi finali entrano davvero nel limite. 0 se non ne entra nessuno.
+
+    Ricerca binaria invece di un numero fisso: la finestra utile non e' una
+    costante, dipende da quanto pesano il system, i tool e i messaggi di QUESTA
+    conversazione. Tenerne sei a prescindere sprecava la finestra sui modelli
+    grandi e non bastava comunque su quelli piccoli.
+    """
+    lo, hi, best = 1, len(msgs), 0
+    while lo <= hi:
+        k = (lo + hi) // 2
+        if estimate_tokens_body(make_candidate(_tail(msgs, k)), model) <= safe_limit:
+            best, lo = k, k + 1
+        else:
+            hi = k - 1
+    return best
+
+
 def rewrite_for_context(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
     # Fail-safe: un errore nel rewrite non deve MAI bloccare il proxy.
     try:
@@ -133,14 +159,13 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
     if token_est <= safe_limit:
         return (body, False)
 
-    # ATTEMPT 1: tail + summary nel system per preservare contesto recente
-    tail_msgs = _tail(msgs, SHRINK_KEEP_TAIL)
+    # ATTEMPT 1: finestra scorrevole (piu' contesto recente possibile) + summary
     # build_shrink_summary vuole il budget in CARATTERI, safe_limit e' in TOKEN:
     # passarlo senza convertire produceva un riassunto ~4x piu' piccolo del dovuto
     # e sprecava tre quarti della finestra (misurato 2026-08-02: un body da 1135KB
     # arrivava a 52k token invece dei ~196k consentiti a MiniMax).
     budget_chars = int(safe_limit * bytes_per_token(model))
-    budget = budget_chars * 3 // 4
+    budget = int(budget_chars * SUMMARY_BUDGET_SHARE)
     summary = build_shrink_summary(msgs, budget)
 
     # Helper per costruire il system preservando liste e cache_control
@@ -163,15 +188,24 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
 
     system_content = _build_system(data.get("system"), summary)
 
-    new = dict(data)
-    new["messages"] = tail_msgs
-    if system_content:
-        new["system"] = system_content
-    new.pop("thinking", None)
+    def _candidate(tail: list) -> bytes:
+        cand = dict(data)
+        cand["messages"] = tail
+        if system_content:
+            cand["system"] = system_content
+        cand.pop("thinking", None)
+        return json.dumps(cand).encode()
 
-    new_bytes = json.dumps(new).encode()
-    if estimate_tokens_body(new_bytes, model) <= safe_limit:
-        return (new_bytes, True)
+    keep = _fit_keep(msgs, model, safe_limit, _candidate)
+    if keep:
+        if keep > SHRINK_KEEP_TAIL:
+            log.info("shrink: finestra scorrevole a %d messaggi (minimo fisso %d) fp=%s",
+                     keep, SHRINK_KEEP_TAIL, fp)
+        return (_candidate(_tail(msgs, keep)), True)
+
+    # Nemmeno un messaggio ci sta: si scende ai tentativi degradanti. Il candidato
+    # a coda fissa serve ancora alla scelta del piu' piccolo, in fondo.
+    new_bytes = _candidate(_tail(msgs, SHRINK_KEEP_TAIL))
 
     # ATTEMPT 1b: degradazione progressiva - rimuove immagini vecchie e tronca tool_result
     new_1b = _degrade_images_and_tools(data, msgs, KEEP_RECENT_IMAGES, TOOL_RESULT_MAX_CHARS)

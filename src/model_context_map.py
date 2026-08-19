@@ -84,6 +84,23 @@ MODEL_CONTEXT_MAP = {
     # voce ereditava il default 200.000 e il gate lasciava passare corpi che il
     # backend non regge.
     "code-max": 131_072,
+    # Gli altri modelli locali (misurati 2026-08-19 su `ollama show` e sulle unit
+    # llama.cpp). Senza queste voci cadevano tutti sul default 200.000: il gate
+    # lasciava passare corpi fino a 3x la capacita' vera e Ollama li troncava in
+    # SILENZIO, tagliando dall'inizio — via il system prompt, via la richiesta.
+    # E' la "saturazione immediata" delle modalita' local/mix-al, il cui esecutore
+    # ACT e' proprio code-fast. Valori dal parametro num_ctx del Modelfile, non
+    # dalla finestra dell'architettura: e' num_ctx che decide cosa il backend
+    # accetta davvero (code-fast regge 262k di architettura ma ne serve 65k).
+    "code-fast": 65_536,
+    "coding-fast": 32_768,
+    "fast-max": 32_768,
+    "cyber-max": 32_768,
+    "coding-light": 16_384,
+    # llama.cpp, dal -c della unit llama-coder-abl.service. chat-max e' un alias
+    # LiteLLM verso lo stesso backend (:8085), quindi stessa finestra.
+    "coder-abliterated": 131_072,
+    "chat-max": 131_072,
 }
 
 BUFFER_PERCENT = 20  # 20% libero per output
