@@ -10,11 +10,16 @@ from multidict import CIMultiDict
 
 import debug_catalog
 import paths
+import tool_isolation
 import secrets_provider
 from synthetic_response import synthetic_error
 
 LOCAL_MODEL_CODE = 'code-max'
-LOCAL_MODEL_FAST = 'code-fast'
+# Era 'code-fast', tolto il 2026-08-19 (decisione utente: un solo modello locale).
+# Puntato a code-max e non rimosso perche' e' nell'allow-list di
+# resolve_local_model: chi chiedesse ancora il vecchio nome finisce su code-max
+# invece di essere scartato in silenzio.
+LOCAL_MODEL_FAST = LOCAL_MODEL_CODE
 # THINK locale della modalità gpt: coder-abliterated su llama.cpp :8085 (via LiteLLM).
 # Senza questa voce nell'allow-list di resolve_local_model, il THINK di gpt veniva
 # scartato su code-max (:8083) — resolve_route lo instrada bene, ma qui ripiegava.
@@ -364,6 +369,12 @@ async def forward_local(
     # "local" nominava un modello Anthropic. Chi poi cercava quale modello locale
     # dava body vuoti non trovava il dato. Stesso difetto chiuso su GLM il 2026-08-19.
     mod_reale = upstream_model or model
+
+    # ISOLAMENTO TOOL: stesso choke-point di glm/qwen/minimax/anthropic, che qui
+    # mancava. Il modello locale non puo' eseguire i server-tool di Anthropic ne'
+    # i tool brandizzati degli altri provider: lasciarglieli nel body significa
+    # offrirgli strumenti che non esistono da questa parte della catena.
+    body = tool_isolation.filter_tools_for_backend(body, "local")
 
     base = get_local_base()
     url = base + request.path_qs

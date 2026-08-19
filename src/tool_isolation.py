@@ -80,11 +80,21 @@ def is_qwen_branded_tool(t: dict) -> bool:
     return name.startswith(_QWEN_TOOL_PREFIXES) or "dashscope" in name
 
 
+def is_local_branded_tool(t: dict) -> bool:
+    """Nessun tool e' brandizzato del backend locale: il modello sulla macchina
+    non ha tool nativi propri. Serve solo a dare a "local" una voce in
+    _BRAND_CHECK, senza la quale filter_tools_for_backend(body, "local") era un
+    no-op silenzioso e il modello locale riceveva i server-tool di Anthropic e i
+    tool brandizzati degli altri provider, che non puo' eseguire."""
+    return False
+
+
 _BRAND_CHECK = {
     "anthropic": is_anthropic_server_tool,
     "minimax": is_minimax_branded_tool,
     "glm": is_glm_branded_tool,
     "qwen": is_qwen_branded_tool,
+    "local": is_local_branded_tool,
 }
 
 

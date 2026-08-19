@@ -35,16 +35,16 @@ import peak_scheduler as ps
 
 # heuristic_tier e classify_tier rimosse il 2026-08-04: il tiering per dimensione del body
 # non aveva piu chiamanti. Il modello GLM lo decide il ruolo (role_routing), non il body.
-# apply_peak_cap accetta sia TIER KEY (TOP/TURBO/MID/VISION) sia NOME MODELLO reale (glm-5.2, glm-4.7, ecc.).
+# apply_peak_cap accetta sia TIER KEY (TOP/TURBO/MID/VISION) sia NOME MODELLO reale (glm-5.3, glm-4.7, ecc.).
 # Dal 2026-07-25 il tiering dinamico non esiste piu: il proxy riceve il modello da role_routing
-# (glm-5.2 per THINK, glm-4.7 per ACT), e apply_peak_cap lo converte in tier prima di consultare peak_scheduler.
+# (glm-5.3 per THINK, glm-4.7 per ACT), e apply_peak_cap lo converte in tier prima di consultare peak_scheduler.
 # Il monkeypatch va fatto su peak_scheduler, non su glm_backend (import lazy).
 ps.should_block_glm_model = lambda tier, now=None: tier in (gb.GLM_TIER_TOP, gb.GLM_TIER_TURBO)
 assert gb.apply_peak_cap(gb.GLM_TIER_TOP) == (gb.GLM_TIER_MID, True), "TOP in peak -> MID"
 assert gb.apply_peak_cap(gb.GLM_TIER_TURBO) == (gb.GLM_TIER_MID, True), "TURBO in peak -> MID"
 assert gb.apply_peak_cap(gb.GLM_TIER_MID) == (gb.GLM_TIER_MID, False), "MID resta MID"
 assert gb.apply_peak_cap(gb.GLM_TIER_VISION) == (gb.GLM_TIER_VISION, False), "VISION esente"
-assert gb.apply_peak_cap("glm-5.2") == ("glm-4.7", True), "glm-5.2 in peak -> glm-4.7"
+assert gb.apply_peak_cap("glm-5.3") == ("glm-4.7", True), "glm-5.3 in peak -> glm-4.7"
 assert gb.apply_peak_cap("glm-5-turbo") == ("glm-4.7", True), "glm-5-turbo in peak -> glm-4.7"
 assert gb.apply_peak_cap("glm-4.7") == ("glm-4.7", False), "glm-4.7 gia economico, nessun declassamento"
 assert gb.apply_peak_cap("glm-4.6V") == ("glm-4.6V", False), "VISION esente anche per nome modello"

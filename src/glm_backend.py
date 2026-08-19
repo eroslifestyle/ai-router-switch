@@ -713,14 +713,34 @@ async def forward_glm(request, body: bytes, session, model: str,
                 # catalogo, dove gli eventi glm portano "model=claude-sonnet-5" e
                 # glm_empty_response non compare mai. Il modello vero e'
                 # upstream_model.
-                # Il controllo resta pero' limitato alle risposte NON-SSE: leggere
-                # uno stream per intero per poterlo ispezionare lo trasformerebbe
-                # in una risposta bufferizzata, che e' la regressione di TTFB gia'
-                # vista il 2026-07-22 su mix-gm/mix-ag (45s contro ~1s). Per lo
-                # streaming serve il peek del primo evento, progettato il
-                # 2026-08-09 e non ancora implementato.
+                # Sulle risposte NON-SSE si legge tutto (e' gia' un corpo unico).
+                # Sullo streaming NO: leggerlo per intero lo bufferizzerebbe, che
+                # e' la regressione di TTFB del 2026-07-22 su mix-gm/mix-ag (45s
+                # contro ~1s) — li' si sbircia solo l'inizio, vedi stream_peek.
                 _modello_reale = upstream_model or model
                 _e_sse = "text/event-stream" in (resp.headers.get("content-type") or "")
+                _comprimibile = bool(resp.headers.get("content-encoding"))
+                if _modello_reale.startswith("glm-5") and _e_sse and not _comprimibile:
+                    from stream_peek import peek_sse_until_content, PeekedStream
+                    _chunks, _ha_contenuto, _finito = await peek_sse_until_content(resp)
+                    if _finito and not _ha_contenuto:
+                        # Stream concluso senza mai aprire un blocco: risposta vuota.
+                        # Al client non e' andato nulla, quindi si puo' ancora ritentare.
+                        log_fn(f"GLM empty-SSE attempt {attempt + 1} model={lim_model} "
+                               f"bytes={sum(len(c) for c in _chunks)}")
+                        debug_catalog.record_event(
+                            severity="error", category="glm",
+                            kind="glm_empty_response_sse", code=200,
+                            snippet=f"attempt={attempt + 1} model={lim_model} "
+                                    f"bytes={sum(len(c) for c in _chunks)}")
+                        resp.release()
+                        if attempt == 0:
+                            await asyncio.sleep(0.5 + random.uniform(0, 1))
+                            continue
+                        return _err(502, "glm_empty_response",
+                                    "GLM returned an empty stream after 2 attempts",
+                                    headers={"x-should-retry": "true"})
+                    return PeekedStream(resp, _chunks)
                 if _modello_reale.startswith("glm-5") and not _e_sse:
                     raw = await resp.read()
                     resp.release()
