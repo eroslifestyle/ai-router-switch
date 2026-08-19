@@ -30,6 +30,15 @@ DEDUP_PLACEHOLDER_MARK = "file unchanged since your last Read"
 # il rapporto si inverte: al riassunto una quota fissa, ai messaggi veri il resto.
 SUMMARY_BUDGET_SHARE = float(os.environ.get("AIROUTER_SHRINK_SUMMARY_SHARE", "0.25"))
 
+# Scalini della griglia su cui si cerca la lunghezza della coda: ~log2 di questo
+# numero e' quante volte si serializza il corpo candidato. Tarato il 2026-08-19 su
+# un corpo da 1,3 MB / 800 messaggi (il caso peggiore osservato), con richiamo
+# attivo: griglia 16 -> 534 ms e 90,2% di finestra usata; 64 -> 755 ms e 97,8%.
+# Si pagano 221 ms per il 7,6% di contesto in piu': in locale il prefill di quella
+# finestra costa ~200 s, quindi il contesto vale incomparabilmente di piu' del
+# quarto di secondo. Su corpi normali la ricerca costa una frazione di questi valori.
+FIT_GRID_STEPS = int(os.environ.get("AIROUTER_FIT_GRID_STEPS", "64"))
+
 
 def _tool_result_text(content) -> str:
     """Testo di un tool_result, che il formato sia stringa o lista di blocchi."""
@@ -120,14 +129,41 @@ def _fit_keep(msgs: list, model: str, safe_limit: int, make_candidate) -> int:
     costante, dipende da quanto pesano il system, i tool e i messaggi di QUESTA
     conversazione. Tenerne sei a prescindere sprecava la finestra sui modelli
     grandi e non bastava comunque su quelli piccoli.
+
+    La ricerca e' su una GRIGLIA di ~FIT_GRID_STEPS valori, non su ogni intero.
+    Due motivi. Ogni sonda costa una serializzazione piu' un parse dell'intero
+    corpo candidato (`estimate_tokens_body` ci cammina dentro per pesare le
+    immagini): su un corpo da 1,3 MB sono ~70 ms l'una, e cercare l'ottimo esatto
+    ne chiedeva una decina. E un `keep` quantizzato cambia meno da un turno
+    all'altro, il che aiuta il prefisso a restare stabile. Tenere 230 messaggi
+    invece di 238 non cambia nulla; spendere mezzo secondo per scoprirlo si'.
     """
-    lo, hi, best = 1, len(msgs), 0
+    n = len(msgs)
+    if not n:
+        return 0
+
+    step = max(1, n // FIT_GRID_STEPS)
+    griglia = list(range(step, n + 1, step))
+    if griglia and griglia[-1] != n:
+        griglia.append(n)
+    if not griglia:
+        griglia = [n]
+
+    def _entra(k: int) -> bool:
+        return estimate_tokens_body(make_candidate(_tail(msgs, k)), model) <= safe_limit
+
+    lo, hi, best = 0, len(griglia) - 1, 0
     while lo <= hi:
-        k = (lo + hi) // 2
-        if estimate_tokens_body(make_candidate(_tail(msgs, k)), model) <= safe_limit:
-            best, lo = k, k + 1
+        mid = (lo + hi) // 2
+        if _entra(griglia[mid]):
+            best, lo = griglia[mid], mid + 1
         else:
-            hi = k - 1
+            hi = mid - 1
+
+    # Nemmeno il primo scalino entra: si prova comunque il minimo, cosi' una
+    # conversazione di pochi messaggi enormi non finisce a zero per colpa del passo.
+    if not best and _entra(1):
+        best = 1
     return best
 
 
@@ -188,16 +224,47 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
 
     system_content = _build_system(data.get("system"), summary)
 
-    def _candidate(tail: list) -> bytes:
-        cand = dict(data)
-        cand["messages"] = tail
-        if system_content:
-            cand["system"] = system_content
-        cand.pop("thinking", None)
-        return json.dumps(cand).encode()
+    def _make_candidate(system_val):
+        def _candidate(tail: list) -> bytes:
+            cand = dict(data)
+            cand["messages"] = tail
+            if system_val:
+                cand["system"] = system_val
+            cand.pop("thinking", None)
+            return json.dumps(cand).encode()
+        return _candidate
 
+    _candidate = _make_candidate(system_content)
     keep = _fit_keep(msgs, model, safe_limit, _candidate)
+
     if keep:
+        # Secondo passaggio: i messaggi appena usciti dalla finestra vengono messi
+        # da parte (per sopravvivere a un /compact) e quelli PERTINENTI alla
+        # richiesta attuale rientrano come estratti nel system. "Recente" e "utile"
+        # non coincidono: la decisione presa duecento messaggi fa e' spesso quella
+        # che serve adesso. Due passaggi e non uno perche' il blocco richiamato
+        # occupa spazio, quindi la finestra va rimisurata con lui dentro.
+        dropped = msgs[:-keep] if keep < len(msgs) else []
+        recall_block = ""
+        if dropped:
+            try:
+                import context_recall
+                context_recall.archive(fp, dropped)
+                recall_block = context_recall.build_recall_block(
+                    fp, msgs, dropped, int(budget * context_recall.RECALL_BUDGET_SHARE))
+            except Exception as e:
+                log.warning("ctx-recall fallito fp=%s: %s", fp, e)
+
+        if recall_block:
+            system_recall = _build_system(system_content, recall_block)
+            candidate_recall = _make_candidate(system_recall)
+            keep_recall = _fit_keep(msgs, model, safe_limit, candidate_recall)
+            if keep_recall:
+                log.info("shrink: finestra a %d messaggi + %d caratteri richiamati fp=%s",
+                         keep_recall, len(recall_block), fp)
+                return (candidate_recall(_tail(msgs, keep_recall)), True)
+            # Il richiamo non ci sta: meglio la finestra piena senza estratti.
+
         if keep > SHRINK_KEEP_TAIL:
             log.info("shrink: finestra scorrevole a %d messaggi (minimo fisso %d) fp=%s",
                      keep, SHRINK_KEEP_TAIL, fp)
