@@ -22,13 +22,23 @@ MAX_TOKENS = 32_000
 DEFAULT_NON_MAPPATO = 200_000
 
 
-def _corpo_lungo(model: str, coppie: int = 300) -> bytes:
+def _corpo_lungo(model: str, coppie: int = 0, max_tokens: int = MAX_TOKENS) -> bytes:
+    """Corpo che supera di sicuro la finestra di `model`.
+
+    Il numero di coppie si ricava dal limite del modello invece di essere fisso:
+    con un valore scritto a mano il test invecchia in silenzio alla prima finestra
+    piu' larga (successo il 2026-08-19, quando code-max e' passato a 262.144 e le
+    300 coppie di allora ci stavano comode dentro).
+    """
+    if not coppie:
+        # ~170 token a coppia; il doppio del limite garantisce che lo shrink scatti.
+        coppie = max(300, (get_context_limit(model) * 2) // 170)
     msgs = []
     for i in range(coppie):
         msgs.append({"role": "user", "content": f"passo {i}: " + "richiesta di lavoro " * 60})
         msgs.append({"role": "assistant", "content": f"esito {i}: " + "analisi e conclusioni " * 60})
     return json.dumps({
-        "model": model, "max_tokens": MAX_TOKENS,
+        "model": model, "max_tokens": max_tokens,
         "system": "prompt di sistema " * 500, "messages": msgs,
     }).encode()
 
@@ -38,7 +48,7 @@ def _corpo_lungo(model: str, coppie: int = 300) -> bytes:
 def test_i_modelli_locali_non_cadono_piu_sul_default():
     # Valori dal num_ctx dei Modelfile Ollama e dal -c delle unit llama.cpp.
     attesi = {
-        "code-max": 131_072, "coding-fast": 32_768,
+        "code-max": 262_144, "coding-fast": 32_768,
         "fast-max": 32_768, "cyber-max": 32_768, "coding-light": 16_384,
         "coder-abliterated": 131_072, "chat-max": 131_072,
     }
@@ -81,12 +91,10 @@ def test_una_finestra_piu_stretta_tiene_meno_messaggi():
     max_tokens basso di proposito: con 32.000 riservati all'output, su una finestra
     da 32.768 non resterebbe spazio per l'input e il confronto non direbbe nulla.
     """
-    out_max = 4_000
-    body = json.dumps({
-        "model": "code-max", "max_tokens": out_max,
-        "system": "prompt di sistema " * 500,
-        "messages": json.loads(_corpo_lungo("code-max"))["messages"],
-    }).encode()
+    # Corpo dimensionato sul modello STRETTO: tarato sul largo diventerebbe cosi'
+    # grande che al piccolo non resterebbe spazio nemmeno per la coda minima, e il
+    # confronto misurerebbe il caso degenere invece della finestra scorrevole.
+    body = _corpo_lungo("coding-fast", max_tokens=4_000)
 
     grandi = len(json.loads(rewrite_for_context(body, "code-max", "sid:g")[0])["messages"])
     piccoli = len(json.loads(rewrite_for_context(body, "coding-fast", "sid:p")[0])["messages"])
