@@ -449,7 +449,7 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
         log_fn(f"QWEN corpo {_mb:.1f} MB > limite {QWEN_MAX_BODY_BYTES // (1024*1024)} MB -> 413 anticipato")
         debug_catalog.record_event(severity="block", category="qwen",
                                    kind="qwen_body_too_large", code=413,
-                                   snippet=f"{len(body)}b > {QWEN_MAX_BODY_BYTES}b model={model}")
+                                   snippet=f"{len(body)}b > {QWEN_MAX_BODY_BYTES}b model={upstream_model or model}")
         return _err(413, "request_too_large",
                     f"qwen: corpo {_mb:.1f} MB oltre il limite del gateway "
                     f"({QWEN_MAX_BODY_BYTES // (1024*1024)} MB)")
