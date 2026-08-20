@@ -114,6 +114,50 @@ def test_legge_anche_le_generazioni_ruotate():
     finally:
         import shutil; shutil.rmtree(tmpdir, ignore_errors=True)
 
+def test_il_comando_tool_separa_costo_reale_da_ingenuo():
+    import io, contextlib
+    import sviluppo.tools.airouter_info as ai
+    tmpdir = Path(tempfile.mkdtemp(prefix="sidecar_test_"))
+    tmp = tmpdir / "router-usage.jsonl"
+    # 6 richieste: 4 con cache_read>0 (cachate), 2 con cache_read=0 (fresche)
+    # tools_bytes=8000 -> tok=2000 per richiesta
+    for i in range(6):
+        cachata = 1 if i < 4 else 0
+        e = {
+            "ts": time.time() - i * 3600,
+            "mode": "mix-am", "final": "minimax",
+            "input_tokens": 5000, "output_tokens": 200,
+            "cache_read": 3000 if cachata else 0,
+            "cache_creation": 1000,
+            "tools_bytes": 8000,
+            "tools_mcp_bytes": 4000,
+            "tools_mcp_servers": {"github": 4000},
+        }
+        with open(tmp, "a") as f:
+            f.write(json.dumps(e) + "\n")
+
+    orig = ai.SIDECAR
+    ai.SIDECAR = tmp
+    try:
+        class A1: giorni = 1; ore = None; mode = None
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            ai.cmd_tool(A1())
+        out = buf.getvalue()
+
+        # Costo ingenuo: 6 richieste × 2000 tok = 12000
+        assert "12k" in out, f"ingenuo deve essere ~12k: {out}"
+        # Costo reale: 2 richieste × 2000 tok = 4000
+        assert "4k" in out, f"reale deve essere ~4k: {out}"
+        # Il risparmiato deve essere > 0 (le cachate hanno ridotto il costo)
+        assert "risparmiato" in out.lower(), f"deve mostrare risparmiato: {out}"
+        # Breakdown server deve esserci
+        assert "github" in out.lower(), f"deve mostrare il server MCP: {out}"
+    finally:
+        ai.SIDECAR = orig
+        import shutil; shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def test_avvisa_se_la_finestra_supera_i_dati_disponibili():
     import io, contextlib
     import sviluppo.tools.airouter_info as ai

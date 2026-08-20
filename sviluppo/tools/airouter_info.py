@@ -274,6 +274,96 @@ def cmd_costo(args):
     print("  Con la cache sana le definizioni tool si pagano una volta per conversazione.")
 
 
+def cmd_tool(args):
+    """Quanto pesano le definizioni dei tool e quali server MCP costano."""
+    righe, scartate, files_info = _leggi_sidecar(args)
+    _avvisa_se_finestra_supera_dati(args, files_info)
+    if scartate:
+        print(f"  ⚠ {scartate} righe non parsabili (sidecar corrotto) — esclude dal totale")
+
+    # --- A) aggregazione per provider ---
+    agg = defaultdict(lambda: {
+        "n": 0, "n_tool": 0,
+        "tb_vals": [], "mcp_vals": [], "quota_vals": [],
+        "ingenuo": 0, "reale": 0,
+    })
+    for d in righe:
+        p = _provider(d.get("final"))
+        if not p or p == "router-internal":
+            continue
+        s = agg[p]
+        s["n"] += 1
+        if not d.get("tools_bytes"):
+            continue
+        s["n_tool"] += 1
+        tb = d["tools_bytes"]
+        mcp = d.get("tools_mcp_bytes") or 0
+        tok = tb / 4
+        mcp_tok = mcp / 4
+        s["tb_vals"].append(tok)
+        s["mcp_vals"].append(mcp_tok)
+        ctx = ((d.get("input_tokens") or 0) + (d.get("cache_read") or 0)
+               + (d.get("cache_creation") or 0))
+        if ctx:
+            s["quota_vals"].append(tok / ctx)
+
+        # costo ingenuo: peso per TUTTE le richieste
+        s["ingenuo"] += tok
+        # costo reale: peso solo se la cache non ha letto nulla (prefisso fresco)
+        if not d.get("cache_read"):
+            s["reale"] += tok
+
+    # --- B) breakdown per server MCP ---
+    server_tot = defaultdict(lambda: {"tok": 0, "n": 0})
+    server_nome = {}  # rotonda_nome -> nome_originale per output
+    for d in righe:
+        mcp_servers = d.get("tools_mcp_servers") or {}
+        for nome, info in mcp_servers.items():
+            tok = (info / 4) if isinstance(info, int) else (info.get("bytes", 0) or 0) / 4
+            rotonda = nome[:32]
+            server_tot[rotonda]["tok"] += tok
+            server_tot[rotonda]["n"] += 1
+            server_nome[rotonda] = nome
+
+    # --- output ---
+    totali_n = sum(s["n"] for s in agg.values())
+    totali_n_tool = sum(s["n_tool"] for s in agg.values())
+
+    print(f"peso tool — {_finestra(args)} (stima: byte/4, mediana)")
+    print(f"  righe totali: {totali_n:,}  con telemetria tool: {totali_n_tool:,}")
+
+    out = []
+    for p, s in sorted(agg.items(), key=lambda kv: -kv[1]["n"]):
+        med = s["tb_vals"] and sorted(s["tb_vals"])[len(s["tb_vals"]) // 2]
+        med_mcp = s["mcp_vals"] and sorted(s["mcp_vals"])[len(s["mcp_vals"]) // 2]
+        med_q = s["quota_vals"] and sorted(s["quota_vals"])[len(s["quota_vals"]) // 2]
+        def _fmt_k(v):
+            if v >= 1e6: return f"{v/1e6:.1f}M"
+            if v >= 1e3: return f"{v/1e3:.0f}k"
+            return f"{v:.0f}"
+        out.append([
+            p, f"{s['n_tool']:,}", f"{med:,.0f}" if med is not None else "-",
+            f"{med_mcp:,.0f}" if med_mcp is not None else "-",
+            f"{med_q:.0%}" if med_q is not None else "-",
+            _fmt_k(s["ingenuo"]), _fmt_k(s["reale"]),
+            f"{1 - s['reale']/max(s['ingenuo'], 1):.0%}"])
+    _tab(["provider", "con tool", "tok/req", "di cui MCP", "quota ctx",
+          "ingenuo", "reale", "risparmiato"], out)
+    print("\n  ingenuo = peso × tutte le richieste.")
+    print("  reale   = peso × solo quelle con cache_read=0 (prefisso fresco).")
+    print("  risparmiato = quanto la cache ha gia' recuperato del costo tool.")
+
+    if server_tot:
+        print("\nserver MCP (byte/4 per richiesta in cui compaiono):")
+        out_srv = []
+        for rotonda, info in sorted(server_tot.items(), key=lambda kv: -kv[1]["tok"]):
+            nome = server_nome[rotonda]
+            nome_out = (nome[:28] + "...") if len(nome) > 31 else nome
+            out_srv.append([nome_out, f"{info['tok']/max(info['n'], 1):,.0f}",
+                            f"{info['n']:,}"])
+        _tab(["server", "tok/req", "richieste"], out_srv)
+
+
 def cmd_sprechi(args):
     """Contesto ri-pagato che sarebbe stato riusabile dalla cache."""
     righe, scartate, files_info = _leggi_sidecar(args)
@@ -464,11 +554,12 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--fonti", action="store_true", help="elenca le fonti dei dati ed esce")
     sub = ap.add_subparsers(dest="cmd")
-    for nome, fn in (("cache", cmd_cache), ("costo", cmd_costo), ("sprechi", cmd_sprechi),
-                     ("scritture", cmd_scritture), ("salute", cmd_salute), ("orfani", cmd_orfani)):
+    for nome, fn in (("cache", cmd_cache), ("costo", cmd_costo), ("tool", cmd_tool),
+                     ("sprechi", cmd_sprechi), ("scritture", cmd_scritture),
+                     ("salute", cmd_salute), ("orfani", cmd_orfani)):
         p = sub.add_parser(nome, help=(fn.__doc__ or "").strip().splitlines()[0])
         p.set_defaults(fn=fn)
-        if nome in ("cache", "costo", "sprechi"):
+        if nome in ("cache", "costo", "sprechi", "tool"):
             p.add_argument("--giorni", type=int, default=None, help="finestra in giorni")
             p.add_argument("--ore", type=int, default=None, help="finestra in ore (vince su --giorni)")
             p.add_argument("--mode", default=None, help="filtra per modalita' del router")
