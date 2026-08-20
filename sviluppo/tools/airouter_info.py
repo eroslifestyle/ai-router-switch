@@ -233,7 +233,12 @@ def cmd_cache(args):
     print(f"efficienza cache — {_finestra(args)}")
     _tab(["provider", "richieste", "con cache", "read/req", "creation/req", "creation/read"], out)
     print("\n  creation/read alto = il prefisso cambia a ogni turno: qualcosa a monte cresce.")
-
+    # Segnala i provider che non riportano mai cache_creation: la colonna "con cache"
+    # conta solo le letture, quindi sottostima. Verificato con probe reale GLM il
+    # 2026-08-20: glm-4.7 non espone il campo nemmeno quando crea la cache.
+    for p, s in sorted(agg.items(), key=lambda kv: -kv[1]["n"]):
+        if s["cc"] == 0 and s["hit"] > 0:
+            print(f"  ⚠ {p}: cache_creation mai riportata dal provider — 'con cache' conta solo le letture, e' una SOTTOSTIMA")
 
 def cmd_costo(args):
     """Da cosa e' fatto l'input che paghiamo: definizioni tool o conversazione."""

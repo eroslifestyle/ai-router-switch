@@ -369,8 +369,21 @@ class StreamingRelay:
                                     _usage["input_tokens"] = int(_u.get("input_tokens", 0) or 0)
                                     _usage["cache_read_input_tokens"] = int(_u.get("cache_read_input_tokens", 0) or 0)
                                     _usage["cache_creation_input_tokens"] = int(_u.get("cache_creation_input_tokens", 0) or 0)
+                                    # z.ai (GLM) non espone MAI cache_creation_input_tokens nella
+                                    # risposta: anche quando la cache viene creata il campo e'
+                                    # assente. Nella richiesta 1 della probe del 2026-08-20 con
+                                    # glm-4.7 la cache ERA stata creata (input=2111, read=0)
+                                    # ma la risposta non conteneva il campo, quindi il relay
+                                    # loggava MISS TOTALE. Il flag distingue "assente" da "zero".
+                                    if "cache_creation_input_tokens" in _u:
+                                        _usage["cache_creation_reported"] = True
                                 elif _ev.get("type") == "message_delta":
                                     _u = _ev.get("usage") or {}
+                                    # Il campo va cercato in ENTRAMBI gli eventi: il dialetto cambia
+                                    # per provider. Anthropic lo manda nel message_start, z.ai nel
+                                    # message_delta. Cercarlo solo in uno sposta il falso positivo.
+                                    if "cache_creation_input_tokens" in _u:
+                                        _usage["cache_creation_reported"] = True
                                     _usage["output_tokens"] = int(_u.get("output_tokens", 0) or 0)
                                     # Anthropic mette input/cache nel message_start; z.ai (GLM) li
                                     # manda VUOTI li' e valorizzati qui nel delta. Leggendo solo il
@@ -432,6 +445,11 @@ class StreamingRelay:
                             _usage["output_tokens"] = int(_u.get("output_tokens", 0) or 0)
                             _usage["cache_read_input_tokens"] = int(_u.get("cache_read_input_tokens", 0) or 0)
                             _usage["cache_creation_input_tokens"] = int(_u.get("cache_creation_input_tokens", 0) or 0)
+                            # z.ai (GLM) non espone MAI cache_creation_input_tokens nella
+                            # risposta: anche quando la cache viene creata il campo e'
+                            # assente. Il flag distingue "assente" da "zero".
+                            if "cache_creation_input_tokens" in _u:
+                                _usage["cache_creation_reported"] = True
                             _sr = _j.get("stop_reason")
                             if _sr:
                                 _usage["stop_reason"] = _sr
@@ -545,7 +563,13 @@ class StreamingRelay:
                         # .get(..., 0): MiniMax restituisce usage senza campi cache
                         _ch = int(_usage.get("cache_read_input_tokens", 0)) + int(_usage.get("cache_creation_input_tokens", 0))
                         if _cc > 0 and _ch == 0:
-                            self.log_fn(f"cache: MISS TOTALE [{_final}] bp={_cc} input={_usage.get('input_tokens', 0)} (nessun cache_read/creation nella risposta)")
+                            if _usage.get("cache_creation_reported"):
+                                # Provider ha esposto il campo ma era zero: miss vero.
+                                self.log_fn(f"cache: MISS TOTALE [{_final}] bp={_cc} input={_usage.get('input_tokens', 0)} (nessun cache_read/creation nella risposta)")
+                            else:
+                                # Provider non espone il campo (z.ai/GLM): la cache potrebbe
+                                # essere stata creata ma non lo sappiamo. Non e' un miss certo.
+                                self.log_fn(f"cache: CREAZIONE NON RIPORTATA [{_final}] bp={_cc} input={_usage.get('input_tokens', 0)} (il provider non espone cache_creation: creazione e miss sono indistinguibili)")
                         elif _cc == 0:
                             self.log_fn(f"cache: nessun breakpoint [{_final}] input={_usage.get('input_tokens', 0)}")
                         else:
