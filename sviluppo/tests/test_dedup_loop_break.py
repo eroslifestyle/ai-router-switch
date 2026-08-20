@@ -59,16 +59,38 @@ def test_senza_contenuto_da_ripescare_la_coda_resta_intatta():
 
 
 def test_il_router_chiude_il_giro_dopo_n_turni_identici():
+    """Loop VERO: corpi CRESCENTI (ogni giro aggiunge assistant + tool_result),
+    firma dell'ultimo assistant IDENTICA.
+
+    Il test originale passava lo stesso corpo statico perche' la distinzione
+    retry/loop non esisteva ancora. Con il fix 2026-08-20, il corpo deve CRESCERE
+    per essere un loop; lo stesso corpo e' un retry (non raggiunge la soglia).
+    """
     fp = "sid:test-loop"
     loop_breaker.reset(fp)
-    corpo = json.dumps({"messages": [
+
+    # Storia di base: ogni giro aggiunge un assistant identico + tool_result
+    msgs = [
         {"role": "user", "content": "vai"},
         {"role": "assistant", "content": [
             {"type": "text", "text": "Capisco. Procedo con l'analisi."},
-            {"type": "tool_use", "id": "t", "name": "Read", "input": {"file_path": "/a"}}]},
-    ]}).encode()
+            {"type": "tool_use", "id": "t0", "name": "Read", "input": {"file_path": "/a"}}]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t0", "content": "contenuto"}]},
+    ]
 
-    ripetizioni = [loop_breaker.check(fp, corpo) for _ in range(loop_breaker.LOOP_BREAKER_N)]
+    ripetizioni = []
+    for i in range(loop_breaker.LOOP_BREAKER_N):
+        # Corpo CRESCE: stesso assistant (firma identica) + nuovo tool_result
+        msgs += [
+            {"role": "assistant", "content": [
+                {"type": "text", "text": "Capisco. Procedo con l'analisi."},
+                {"type": "tool_use", "id": f"t{i+1}", "name": "Read", "input": {"file_path": "/a"}}]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": f"t{i+1}", "content": "contenuto"}]},
+        ]
+        corpo = json.dumps({"messages": msgs}).encode()
+        ripetizioni.append(loop_breaker.check(fp, corpo))
 
     assert ripetizioni == list(range(1, loop_breaker.LOOP_BREAKER_N + 1))
     assert ripetizioni[-1] >= loop_breaker.LOOP_BREAKER_N, "alla soglia il proxy interrompe"
@@ -85,9 +107,82 @@ def test_un_turno_diverso_azzera_il_conteggio():
     loop_breaker.reset(fp)
 
 
+def test_un_retry_dello_stesso_corpo_non_e_un_loop():
+    """529 upstream + retry del client produce lo STESSO corpo byte per byte.
+
+    Misurato 2026-08-20: sid:1e8be2ca ha ricevuto 6 retry su tre request-id
+    distinti (179db15d10c2, 04946f, 94decd); il breaker li contava come loop
+    e ha chiuso la sessione al quarto tentativo.
+    """
+    fp = "sid:test-retry-529"
+    loop_breaker.reset(fp)
+    corpo = json.dumps({"messages": [
+        {"role": "user", "content": "fammi una modifica"},
+        {"role": "assistant", "content": [
+            {"type": "text", "text": "Procedo."},
+            {"type": "tool_use", "id": "t0", "name": "Edit", "input": {"file_path": "/x", "old_string": "a", "new_string": "b"}}]},
+    ]}).encode()
+
+    # Piu' retry di LOOP_BREAKER_N: se il fix non ci fosse, reached == LOOP_BREAKER_N
+    reached = 0
+    for _ in range(loop_breaker.LOOP_BREAKER_N + 3):
+        count = loop_breaker.check(fp, corpo)
+        if count == loop_breaker.LOOP_BREAKER_N:
+            reached = count
+            break
+
+    assert reached == 0, (
+        f"il retry e' stato contato come loop: {reached} (deve restare 0)"
+    )
+    loop_breaker.reset(fp)
+
+
+def test_il_loop_vero_scatta_ancora_con_firma_identica():
+    """Loop VERO: a ogni giro il corpo CAMBIA (id del tool_use diverso) ma la firma
+    dell'ultimo assistant RESTA IDENTICA perche' _signature() usa name+input, non id.
+
+    Il discriminante: corpo identico = retry (no incremento), corpo diverso ma firma
+    uguale = loop (incrementa). Il caso "corpo che cresce davvero" e' gia' coperto da
+    test_il_router_chiude_il_giro_dopo_n_turni_identici, che usa msgs += per accumulare.
+    """
+    fp = "sid:test-loop-firma-identica"
+    loop_breaker.reset(fp)
+
+    base = [
+        {"role": "user", "content": "vai"},
+        {"role": "assistant", "content": [
+            {"type": "text", "text": "Capisco."},
+            {"type": "tool_use", "id": "t0", "name": "Read", "input": {"file_path": "/a"}}]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t0", "content": "contenuto"}]},
+    ]
+
+    # LOOP_BREAKER_N giri: stesso assistant (firma identica) + corpo diverso (id diverso)
+    last_count = 0
+    for i in range(loop_breaker.LOOP_BREAKER_N + 2):
+        msgs = list(base)  # ricostruisce da zero a ogni giro
+        # L'id cambia a ogni giro ma la firma resta uguale (id non entra in _signature)
+        msgs += [
+            {"role": "assistant", "content": [
+                {"type": "text", "text": "Capisco."},
+                {"type": "tool_use", "id": f"t{i}", "name": "Read", "input": {"file_path": "/a"}}]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": f"t{i}", "content": "contenuto"}]},
+        ]
+        corpo = json.dumps({"messages": msgs}).encode()
+        last_count = loop_breaker.check(fp, corpo)
+
+    assert last_count >= loop_breaker.LOOP_BREAKER_N, (
+        f"il loop vero non ha raggiunto la soglia: {last_count} (atteso >= {loop_breaker.LOOP_BREAKER_N})"
+    )
+    loop_breaker.reset(fp)
+
+
 if __name__ == "__main__":
     test_lo_shrink_ricongiunge_il_rimando_al_contenuto()
     test_senza_contenuto_da_ripescare_la_coda_resta_intatta()
     test_il_router_chiude_il_giro_dopo_n_turni_identici()
     test_un_turno_diverso_azzera_il_conteggio()
+    test_un_retry_dello_stesso_corpo_non_e_un_loop()
+    test_il_loop_vero_scatta_ancora_con_firma_identica()
     print("OK")
