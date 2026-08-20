@@ -501,8 +501,15 @@ def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
         # al giorno senza alcun cap. Due generazioni, perche' e' la fonte delle
         # analisi storiche e non va persa alla prima rotazione.
         rotate_if_needed(USAGE_SIDECAR, USAGE_MAX_BYTES, keep=USAGE_KEEP)
-        with open(USAGE_SIDECAR, "a") as f:
-            f.write(json.dumps(entry) + "\n")
+        # ponytail: write atomica con O_APPEND. Vale per filesystem locali e righe
+        # sotto il limite del kernel (~4-8 KB su Linux). Se il sidecar finisse su
+        # NFS o le righe crescessero molto, servirebbe fcntl.flock.
+        riga = (json.dumps(entry) + "\n").encode("utf-8")
+        fd = os.open(USAGE_SIDECAR, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            os.write(fd, riga)
+        finally:
+            os.close(fd)
     except Exception:
         pass
 

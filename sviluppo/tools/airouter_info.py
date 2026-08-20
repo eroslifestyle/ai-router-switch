@@ -68,9 +68,62 @@ def _finestra(args) -> str:
     return f"ultimi {args.giorni} giorni" if args.giorni else "tutto lo storico"
 
 
-def _leggi_sidecar(args):
-    # --ore vince su --giorni: serve a isolare una finestra stretta (es. il traffico
-    # dopo un restart), dove 24h di granularita' mescolano il prima e il dopo.
+
+
+def _generazioni_ruotate():
+    """Yield (path, num) di tutte le generazioni ruotate del sidecar, dalla piu'
+    vecchia alla piu' recente (cosi' le entry risultano ordinate nel tempo).
+
+    Schema rotazione: router-usage.jsonl.1 (piu' recente), .2, ...
+    La numerazione crescente = generazioni piu' vecchie."""
+    for n in range(99, 0, -1):
+        p = SIDECAR.parent / (SIDECAR.name + "." + str(n))
+        if p.exists():
+            yield p, n
+
+
+def _prima_entry_ts(path: Path) -> float | None:
+    """Timestamp della prima riga valida di un file jsonl, o None se illeggibile."""
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    return json.loads(line).get("ts")
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return None
+
+
+def _ultima_entry_ts(path: Path) -> float | None:
+    """Timestamp dell'ultima riga valida di un file jsonl, o None se illeggibile."""
+    ts = None
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ts = json.loads(line).get("ts")
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return ts
+
+
+def _leggi_sidecar(args, files_info=None):
+    """Legge il sidecar e le sue generazioni ruotate.
+
+    ponytail: leggiamo tutti i file richiesti dalla finestra senza preoccuparci
+    della loro dimensione; se un .1 da 67 MB fosse un problema siamo su un PC,
+    non su un container con 256 MB. Il guadagno in correttezza supera il costo.
+    """
     taglio = 0.0
     giorni, mode = args.giorni, args.mode
     if getattr(args, "ore", None):
@@ -78,20 +131,71 @@ def _leggi_sidecar(args):
     elif giorni:
         taglio = (dt.datetime.now() - dt.timedelta(days=giorni)).timestamp()
     righe = []
+    scartate = 0
+    if files_info is None:
+        files_info = {}
     if not SIDECAR.exists():
-        return righe
-    with SIDECAR.open(encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            try:
-                d = json.loads(line)
-            except Exception:
-                continue
-            if (d.get("ts") or 0) < taglio:
-                continue
-            if mode and d.get("mode") != mode:
-                continue
-            righe.append(d)
-    return righe
+        return righe, scartate, files_info
+
+    # ponytail: leggiamo .1/.2 SOLO se la finestra si estende piu' indietro della
+    # prima entry del file corrente. Se i dati richiesti stanno gia' nel corrente,
+    # non apriamo nemmeno il ruotato. Questo risparmia I/O su un .1 da 67 MB.
+    file_da_leggere = [(SIDECAR, "corrente")]
+    if giorni or getattr(args, "ore", None):
+        prima_ts_corrente = _prima_entry_ts(SIDECAR)
+
+    for gen, _ in _generazioni_ruotate():
+        # Apri il ruotato se l'ULTIMA sua entry e' dentro la finestra
+        # (il file contiene dati rilevanti anche se inizia prima del taglio)
+        if _ultima_entry_ts(gen) >= taglio:
+            file_da_leggere.append((gen, gen.name))
+        elif prima_ts_corrente is None:
+            file_da_leggere.append((gen, gen.name))
+
+    for path_f, label in file_da_leggere:
+        files_info[label] = {"path": str(path_f), "righe": 0, "ts_min": None, "ts_max": None}
+        with path_f.open(encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                files_info[label]["righe"] += 1
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    scartate += 1
+                    continue
+                ts = d.get("ts") or 0
+                if files_info[label]["ts_min"] is None:
+                    files_info[label]["ts_min"] = ts
+                files_info[label]["ts_max"] = ts
+                if ts < taglio:
+                    continue
+                if mode and d.get("mode") != mode:
+                    continue
+                righe.append(d)
+
+    # ponytail: l'avviso viene emesso dal chiamante che ha la finestra richiesta.
+    return righe, scartate, files_info
+
+
+def _avvisa_se_finestra_supera_dati(args, files_info):
+    """Se la finestra richiesta va oltre i dati disponibili, emette un avviso."""
+    if not files_info:
+        return
+    ts_minimo = min(f["ts_min"] for f in files_info.values() if f["ts_min"])
+    if ts_minimo is None:
+        return
+    ora = dt.datetime.now().timestamp()
+    giorni_disponibili = (ora - ts_minimo) / 86400
+    giorni_richiesti = args.giorni or 999999
+    ore_richieste = getattr(args, 'ore', None)
+    richiesta_str = f"{ore_richieste} ore" if ore_richieste else f"{giorni_richiesti} giorni"
+    data_minima = dt.datetime.fromtimestamp(ts_minimo).strftime("%Y-%m-%d %H:%M")
+    print(f"  dati disponibili: da {data_minima} ({giorni_disponibili:.1f} giorni fa)")
+    if ore_richieste:
+        ore_disponibili = giorni_disponibili * 24
+        if ore_richieste > ore_disponibili:
+            print(f"  ⚠ richieste {richiesta_str}, dati disponibili solo per {ore_disponibili:.0f} ore")
+    elif giorni_richiesti > giorni_disponibili:
+        print(f"  ⚠ richiesti {richiesta_str}, dati disponibili solo per {giorni_disponibili:.0f} giorni")
 
 
 def _tab(intestazioni, righe):
@@ -104,7 +208,11 @@ def _tab(intestazioni, righe):
 
 def cmd_cache(args):
     """Quanto del contesto viene riletto dalla cache invece che ricreato."""
-    righe = _leggi_sidecar(args)
+    righe, scartate, files_info = _leggi_sidecar(args)
+    _avvisa_se_finestra_supera_dati(args, files_info)
+    # scartate e' gia' sommato su tutti i file
+    if scartate:
+        print(f"  ⚠ {scartate} righe non parsabili (sidecar corrotto) — esclude dal totale")
     agg = defaultdict(lambda: {"n": 0, "cr": 0, "cc": 0, "in": 0, "hit": 0})
     for d in righe:
         p = _provider(d.get("final"))
@@ -129,7 +237,11 @@ def cmd_cache(args):
 
 def cmd_costo(args):
     """Da cosa e' fatto l'input che paghiamo: definizioni tool o conversazione."""
-    righe = _leggi_sidecar(args)
+    righe, scartate, files_info = _leggi_sidecar(args)
+    _avvisa_se_finestra_supera_dati(args, files_info)
+    # scartate e' gia' sommato su tutti i file
+    if scartate:
+        print(f"  ⚠ {scartate} righe non parsabili (sidecar corrotto) — esclude dal totale")
     agg = defaultdict(lambda: {"n": 0, "in": 0, "fresco": 0, "tb": 0, "mcp": 0, "n_tb": 0})
     for d in righe:
         p = _provider(d.get("final"))
@@ -164,7 +276,11 @@ def cmd_costo(args):
 
 def cmd_sprechi(args):
     """Contesto ri-pagato che sarebbe stato riusabile dalla cache."""
-    righe = _leggi_sidecar(args)
+    righe, scartate, files_info = _leggi_sidecar(args)
+    _avvisa_se_finestra_supera_dati(args, files_info)
+    # scartate e' gia' sommato su tutti i file
+    if scartate:
+        print(f"  ⚠ {scartate} righe non parsabili (sidecar corrotto) — esclude dal totale")
     righe.sort(key=lambda d: d.get("ts") or 0)
     SOGLIA, FINESTRA = 5000, 300
     ultimo, agg = {}, defaultdict(lambda: {"n": 0, "sprec": 0, "tok": 0, "tot": 0})
@@ -231,6 +347,34 @@ def cmd_scritture(args):
 
 def cmd_salute(args):
     """Stato del servizio, modalita' attiva, porte in ascolto."""
+    # Integrita' sidecar: riutilizza _leggi_sidecar per avere l'intervallo coperto.
+    class _A:
+        giorni = None; ore = None; mode = None
+    _, scartate, files_info = _leggi_sidecar(_A())
+
+    if files_info:
+        # Aggrega statistiche su tutti i file
+        tot_righe = sum(f["righe"] for f in files_info.values())
+        tot_parsabili = tot_righe - scartate
+        stato_sc = f"{tot_parsabili}/{tot_righe} parsabili"
+        if scartate:
+            stato_sc += f"  ⚠ {scartate} corrotte"
+        print(f"  sidecar  {stato_sc}")
+
+        # Mostra quali file sono stati letti e l'intervallo temporale
+        for label, info in sorted(files_info.items(), key=lambda x: x[1]["ts_min"] or 0):
+            ts_min = info["ts_min"]
+            ts_max = info["ts_max"]
+            if ts_min:
+                data_min = dt.datetime.fromtimestamp(ts_min).strftime("%Y-%m-%d %H:%M")
+                data_max = dt.datetime.fromtimestamp(ts_max).strftime("%Y-%m-%d %H:%M")
+                intervallo = f"{data_min} → {data_max}"
+            else:
+                intervallo = "vuoto"
+            print(f"    {label:<25} {info['righe']:>8} righe   {intervallo}")
+    else:
+        print(f"  sidecar  ASSENTE")
+
     def sh(cmd):
         try:
             return subprocess.run(cmd, shell=True, capture_output=True, text=True,

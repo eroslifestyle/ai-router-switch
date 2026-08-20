@@ -1,3 +1,10 @@
+import sys as _cs
+from pathlib import Path as _cs_Path
+_sp = (_cs_Path(__file__).resolve().parents[1].parent / 'src').as_posix()
+if _sp not in _cs.path:
+    _cs.path.insert(0, _sp)
+del _cs, _cs_Path, _sp
+
 """Fixture condivise per i test end-to-end che pilotano il proxy in-process.
 
 Perché esiste: `test_gate_e2e.py` e `test_mixgm_stream_ttfb.py` nascono come
