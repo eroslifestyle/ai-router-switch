@@ -503,10 +503,19 @@ class StreamingRelay:
                 # FIX bug stats: passa il FINAL reale (risolto da remap) + fallback al
                 # model nel body della request se orig_model (chat_fp-mismatch) è vuoto.
                 _orig, _final = self._modelli_orig_e_finale(final_override, orig_model)
+                # FIX 2026-08-20: la diagnostica era limitata a "claude-direct" (solo
+                # Anthropic). Il 96% delle sessioni GLM non aveva righe cache: non
+                # perché non cachino, ma perché nessuno le misurava (stesso pattern del
+                # bug b4ed405 "GLM non cacha mai" = misuratore cieco).
+                # Il gate resta su status==200 (su errore non ha senso); il provider
+                # è ora in tutte le righe. self.body è quello INVATO all'upstream —
+                # il router lo riscrive (shrink, promozione system, trim tool stranieri)
+                # PRIMA di passarlo al relay (proxy.py righe ~418, ~568), quindi il
+                # conteggio è fatto sul body effettivo, non su quello originale del client.
                 try:
-                    if _final == "claude-direct" and upstream.status == 200:
+                    if upstream.status == 200:
                         _cc = 0
-                        _cc_s = _cc_m = _cc_t = 0  # breakpoint per sezione: system/messages/tools
+                        _cc_s = _cc_m = _cc_t = 0
                         try:
                             _bj = json.loads(self.body.decode("utf-8", errors="replace")) if isinstance(self.body, bytes) else (json.loads(self.body) if isinstance(self.body, str) else {})
                             if isinstance(_bj, dict):
@@ -533,13 +542,14 @@ class StreamingRelay:
                                             _cc_t += 1
                         except Exception:
                             pass
+                        # .get(..., 0): MiniMax restituisce usage senza campi cache
                         _ch = int(_usage.get("cache_read_input_tokens", 0)) + int(_usage.get("cache_creation_input_tokens", 0))
                         if _cc > 0 and _ch == 0:
-                            self.log_fn(f"cache: MISS TOTALE breakpoints={_cc} input={_usage['input_tokens']} (nessun cache_read/creation nella risposta)")
+                            self.log_fn(f"cache: MISS TOTALE [{_final}] bp={_cc} input={_usage.get('input_tokens', 0)} (nessun cache_read/creation nella risposta)")
                         elif _cc == 0:
-                            self.log_fn(f"cache: nessun breakpoint cache_control nel body inviato input={_usage['input_tokens']}")
+                            self.log_fn(f"cache: nessun breakpoint [{_final}] input={_usage.get('input_tokens', 0)}")
                         else:
-                            self.log_fn(f"cache: OK bp=s{_cc_s}/m{_cc_m}/t{_cc_t} read={_usage['cache_read_input_tokens']} creation={_usage['cache_creation_input_tokens']} input={_usage['input_tokens']}")
+                            self.log_fn(f"cache: OK [{_final}] bp=s{_cc_s}/m{_cc_m}/t{_cc_t} read={_usage.get('cache_read_input_tokens', 0)} creation={_usage.get('cache_creation_input_tokens', 0)} input={_usage.get('input_tokens', 0)}")
                 except Exception:
                     pass
                 self.log_router_usage_fn(
