@@ -31,8 +31,18 @@ EnvironmentFile=-%h/.secrets/minimax.env
 EnvironmentFile=-%h/.secrets/glm.env
 
 # Pre-start: libera le porte da eventuali processi orfani di un restart fallito.
-# Il trattino iniziale e i "|| true" rendono il passo innocuo dove fuser non c'è.
-ExecStartPre=-/bin/sh -c "for p in @PORTS@; do fuser -k -n tcp $p 2>/dev/null || true; done; sleep 1"
+# Il trattino iniziale e il "|| true" rendono il passo innocuo dove fuser non c'è.
+#
+# NIENTE variabili di shell in questa riga. systemd espande $p PRIMA di passare
+# il comando a /bin/sh e, non essendo nell'ambiente del servizio, lo sostituisce
+# con la stringa vuota: il vecchio `for p in @PORTS@; do fuser -k -n tcp $p; done`
+# eseguiva `fuser -k -n tcp` senza porte ("No process specification given"), non
+# uccideva NULLA e il passo sembrava riuscito. Risultato: un proxy orfano teneva
+# la 8787, il nuovo moriva con "errno 98 ... FATAL: uscita per bind fallito sulla
+# porta principale", e con Restart=always si arrivava a StartLimitBurst — unit in
+# stato failed, router mai avviato. fuser accetta piu' porte in un colpo solo,
+# quindi il ciclo non serve.
+ExecStartPre=-/bin/sh -c "fuser -k -n tcp @PORTS@ 2>/dev/null || true; sleep 1"
 
 ExecStart=@WRAPPER@
 
