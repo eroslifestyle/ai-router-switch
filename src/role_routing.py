@@ -93,6 +93,17 @@ ROUTING_TABLE = {
     # esiste) -> _CODE_EXECUTOR e' stringa vuota: la delega passa solo dai subagent.
     ("mix-ag-2", ROLE_THINK): ("anthropic", None),
     ("mix-ag-2", ROLE_ACT): ("glm", GLM_ACT),
+    # ultra (14a modalita'): THINK/VERIFY su Anthropic per il contesto ampio (1M),
+    # ACT su GLM-4.7 per esplorazione/analisi/leggere. Il codice NON passa dal router:
+    # m3-code/m3x/m3-fanout saltano il proxy. E' il gap che mix-ag-2 non copre (là
+    # il codice ricade su GLM, che non ha CLI di coding). GLM ha ~200k di contesto e
+    # ci sbatterebbe contro per task immensi; il main gira a ~202k medi (misurato).
+    # MiniMax codice via CLI perche' e' 9x piu' economico in input e il 67% del suo
+    # costo NON e' cachato (contro l'83% recuperato da GLM). GLM oggi e' quasi
+    # inutilizzato (970 richieste/7gg vs 11.449 MiniMax): la quota Anthropic si
+    # esaurisce proprio sui task immensi, e qui GLM si prende l'ACT.
+    ("ultra", ROLE_THINK): ("anthropic", None),
+    ("ultra", ROLE_ACT): ("glm", GLM_ACT),
     ("mix-gm", ROLE_THINK): ("glm", GLM_THINK),
     ("mix-gm", ROLE_ACT): ("minimax", MINIMAX_ACT),
     # mix-gm-2: routing identico a mix-gm (THINK->GLM, ACT->MiniMax). Differenza
@@ -128,12 +139,13 @@ _MODE_DEFAULT_PROVIDER = {
     "mix-gm": "minimax",
     "mix-gm-2": "minimax",
     "mix-ag-2": "glm",
+    "ultra": "glm",
     "mix-al": "local",
     "local": "local",
     "gpt": "local",
 }
 
-VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-am-2", "mix-ag", "mix-ag-2", "mix-gm", "mix-gm-2", "mix-al", "local", "gpt")
+VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-am-2", "mix-ag", "mix-ag-2", "mix-gm", "mix-gm-2", "mix-al", "local", "gpt", "ultra")
 
 
 def modes_with_act_provider(provider: str) -> frozenset:

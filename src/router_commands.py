@@ -18,6 +18,7 @@ _INTERNAL_TO_DISPLAY = {
     "mix-al": "MixAL",  # aggiunta 2026-08-04: l'8a modalita' mancava dalla mappa
     "local": "Local",   # aggiunta 2026-08-04: 9a modalita', pura locale (tutto su code-max)
     "gpt": "GPT",       # aggiunta 2026-08-18: 13a modalita', pura locale su GPT_MODE_THINK
+    "ultra": "Ultra",   # aggiunta 2026-08-22: 14a modalita', Anthropic THINK + GLM ACT + MiniMax codice via CLI
     "anthropic": "anthropic", "minimax": "minimax", "glm": "glm",
     "qwen": "qwen",   # aggiunta 2026-08-04: la 7a modalita' mancava dalla mappa
 }
