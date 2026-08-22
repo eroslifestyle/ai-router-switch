@@ -8,7 +8,6 @@ systemd svuotava la variabile di shell prima di passare il comando a sh.
 import importlib.util
 import os
 import re
-import subprocess
 import sys
 import types
 from pathlib import Path
