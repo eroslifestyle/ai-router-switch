@@ -61,11 +61,11 @@ def test_valid_modes_coerenti_tra_moduli():
     assert set(RR_MODES) == set(RC_MODES)
 
 
-def test_ultra_porta_8782():
-    """8782 non collide con altre porte e punta a ultra."""
+def test_ultra_porta_8788():
+    """8788 non collide con altre porte e punta a ultra."""
     assegnate = list(PORT_MODE.values())
     assert assegnate.count("ultra") == 1
-    assert PORT_MODE[8782] == "ultra"
+    assert PORT_MODE[8788] == "ultra"
 
 
 def test_ultra_routing_think_anthropic():

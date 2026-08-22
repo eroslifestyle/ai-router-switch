@@ -151,7 +151,7 @@ PORT_MODE = {
     8784: "mix-gm-2",   # sandbox: variante mix-gm con enforcement deny (delega aggressiva)
     8785: "mix-ag-2",   # sandbox: variante mix-ag con enforcement deny (delega aggressiva)
     8786: "gpt",     # sandbox: prova gpt (pura locale, THINK e ACT sullo stesso modello)
-    8782: "ultra",   # 14a modalita': Anthropic THINK + GLM ACT + MiniMax codice via CLI
+    8788: "ultra",   # 14a modalita': Anthropic THINK + GLM ACT + MiniMax codice via CLI
 }
 _pm_override = os.environ.get("AIROUTER_PORT_MODE_JSON", "").strip()
 if _pm_override:

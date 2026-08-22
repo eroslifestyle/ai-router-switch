@@ -71,8 +71,8 @@ CONTRATTO_OSSERVATO = {
     # gpt: pura locale come `local`, stesso backend → stesso contratto osservato.
     # Non ancora verificata su traffico reale: il modello non e' servito (2026-08-18).
     "gpt": {"encoding": "identity", "id": "resp_"},
-    # ultra: gzip + msg_ — dedotto da mix-ag (stesso backend GLM ACT), non ancora
-    # osservato su traffico reale (2026-08-22).
+    # ultra: gzip + msg_ — OSSERVATO su traffico reale il 2026-08-22, non dedotto:
+    # probe ACT sulla porta della modalita' -> model=glm-4.7, id=msg_2026...
     "ultra": {"encoding": "gzip", "id": "msg_"},
 }
 
