@@ -1134,6 +1134,9 @@ async def _run_multiport():
             signal.signal(sig, lambda *_: loop.call_soon_threadsafe(stop.set))
 
     runners = []
+    ports_acquired = []   # (port, mode) per il riepilogo
+    ports_failed = []     # (port, mode, errno) per il riepilogo
+
     for port in LISTEN_PORTS:
         if stop.is_set():
             log("shutdown requested during bind, exiting early")
@@ -1150,12 +1153,62 @@ async def _run_multiport():
             await site.start()
             log(f"LISTEN {LISTEN_HOST}:{port} mode={forced or 'dynamic'}")
             runners.append(runner)
+            ports_acquired.append((port, forced or "dynamic"))
+        except OSError as e:
+            errno_val = e.errno
+            is_main = port == LISTEN_PORT
+            mode_name = forced or "dynamic"
+            if errno_val == 98:   # EADDRINUSE
+                reason = "errno 98, occupata da un altro processo"
+            elif errno_val == 13:  # EACCES
+                reason = "errno 13, permessi negati"
+            elif errno_val == 99:  # EADDRNOTAVAIL (avanzato)
+                reason = f"errno {errno_val}, indirizzo non disponibile"
+            else:
+                reason = f"errno {errno_val}"
+
+            msg = (
+                f"porta {port} ({mode_name}) NON acquisita: {reason}"
+                + (" — ULTIMA PORTA, router inutile" if is_main else
+                   " — quella modalita' NON rispondera' su porta dedicata")
+            )
+            log(msg)
+            if is_main:
+                # Fatale: il router non puo' funzionare senza la porta principale.
+                await runner.cleanup()
+                log("FATAL: uscita per bind fallito sulla porta principale")
+                await session.close()
+                raise SystemExit(1)
+            # Sandbox: log rumoroso e si prosegue.
+            ports_failed.append((port, mode_name, errno_val))
+            await runner.cleanup()
         except Exception as e:
-            log(f"ERR listen {port}: {e}")
+            is_main = port == LISTEN_PORT
+            mode_name = forced or "dynamic"
+            log(f"porta {port} ({mode_name}) NON acquisita: {type(e).__name__}: {e}"
+                + (" — ULTIMA PORTA, router inutile" if is_main else
+                   " — quella modalita' NON rispondera' su porta dedicata"))
+            if is_main:
+                await runner.cleanup()
+                log("FATAL: uscita per bind fallito sulla porta principale")
+                await session.close()
+                raise SystemExit(1)
+            ports_failed.append((port, mode_name, None))
+            await runner.cleanup()
+
     if not runners:
         log("no ports bound (already in use?) -- exiting")
         await session.close()
         return
+
+    # Riepilogo finale: quante acquisite / attese, modalita' senza porta.
+    total = len(LISTEN_PORTS)
+    acquired_n = len(ports_acquired)
+    if ports_failed:
+        failed_names = ", ".join(f"{m}({p})" for p, m, _ in ports_failed)
+        log(f"porte: {acquired_n}/{total} acquisite — SENZA PORTA: {failed_names}")
+    elif acquired_n < total:
+        log(f"porte: {acquired_n}/{total} acquisite")
     try:
         await stop.wait()
         log("shutdown signal received, draining...")

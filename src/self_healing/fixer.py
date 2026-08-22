@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from urllib.request import urlopen
@@ -21,7 +22,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 STATE_DIR = paths.config_home() / "self-fix"
 USAGE_SIDECAR = paths.log_file("router-usage.jsonl")
 LOG_FILE = paths.log_file("self-fix.log")
-PORTS = (8787, 8771, 8772, 8773, 8775, 8776, 8777, 8778)
+
+# Derivate da router_constants: una nuova modalita' e' coperta il giorno stesso.
+_repo_src = REPO_ROOT / "src"
+sys.path.insert(0, str(_repo_src))
+from router_constants import LISTEN_PORT, PORT_MODE
+
+PORTS = (LISTEN_PORT,) + tuple(PORT_MODE.keys())
 WORKTREE_BASE = REPO_ROOT / ".claude" / "worktrees"
 
 FORBIDDEN = (
