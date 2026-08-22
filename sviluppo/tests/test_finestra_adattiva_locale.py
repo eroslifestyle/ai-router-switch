@@ -109,6 +109,44 @@ def test_un_corpo_gia_dentro_il_limite_non_viene_toccato():
     assert not riscritto and out == body
 
 
+
+
+# ── 3. sticky drop_count: il punto di taglio resta stabile tra turni ─────────
+
+def test_drop_count_stabile_tra_turni():
+    """Il drop_count non cambia se il body con l'aggiunta di pochi messaggi
+    rientra ancora nel budget: il prefisso msgs[drop_count:] resta identico."""
+    model = "MiniMax-M2.7"
+    # Pulisci la cache sticky per isolation
+    from context_rewrite import _STICKY_DROP_COUNT
+    _STICKY_DROP_COUNT.clear()
+
+    base_body = _corpo_lungo(model, coppie=100, max_tokens=MAX_TOKENS)
+    fp = "sid:test-sticky-drop"
+
+    out1, _ = rewrite_for_context(base_body, model, fp)
+    msgs1 = json.loads(out1)["messages"]
+    keep1 = len(msgs1)
+
+    # Aggiungi 2 messaggi piccoli in coda
+    dati2 = json.loads(base_body)
+    dati2["messages"].append({"role": "user", "content": "un messaggio"})
+    dati2["messages"].append({"role": "assistant", "content": "ok"})
+    extended_body = json.dumps(dati2).encode()
+
+    out2, _ = rewrite_for_context(extended_body, model, fp)
+    msgs2 = json.loads(out2)["messages"]
+    keep2 = len(msgs2)
+
+    # drop_count implicito deve essere lo stesso: len(originali) - keep
+    n_base = len(json.loads(base_body)["messages"])
+    drop1 = n_base - keep1
+    drop2 = (n_base + 2) - keep2
+    assert drop1 == drop2, f"drop_count cambiato: {drop1} -> {drop2}"
+
+    # I messaggi comuni devono essere identici (prefisso stabile)
+    assert msgs1 == msgs2[:keep1], "il prefisso dei messaggi non e' stabile"
+
 if __name__ == "__main__":
     for nome, fn in sorted(globals().items()):
         if nome.startswith("test_"):

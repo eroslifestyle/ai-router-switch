@@ -124,3 +124,71 @@ def test_preserva_cache_control_con_elemento_spurio_in_coda():
     kept = [_tool('Bash'), 'spurio']
     preserva_cache_control(originali, kept)
     assert kept[0].get('cache_control') == {'type': 'ephemeral'}
+
+
+# ---------------------------------------------------------------------------
+# Test strip_heavy_mcp_for_glm (2026-08-22): rimuove connettori Gmail/Calendar/Drive/Canva
+# ---------------------------------------------------------------------------
+
+def test_strip_heavy_mcp_rimuove_gmail():
+    """Tool Gmail con maiuscole miste viene rimosso."""
+    from tool_isolation import strip_heavy_mcp_for_glm
+    tools = [
+        {'name': 'mcp__claude_ai_Gmail__search_threads', 'description': 'x', 'input_schema': {'type': 'object'}},
+        {'name': 'Bash', 'description': 'shell', 'input_schema': {'type': 'object'}},
+    ]
+    body = json.dumps({'model': 'glm-4.7', 'tools': tools, 'messages': []}).encode()
+    out = strip_heavy_mcp_for_glm(body)
+    result = json.loads(out).get('tools', [])
+    names = [t['name'] for t in result]
+    assert 'mcp__claude_ai_Gmail__search_threads' not in names, f"Tool should be removed, got {names}"
+    assert 'Bash' in names, f"Bash should remain, got {names}"
+    assert len(result) == 1
+
+
+def test_strip_heavy_mcp_nessuna_modifica_senza_tool_pesanti():
+    """Body senza tool pesanti passa byte-per-byte identico."""
+    from tool_isolation import strip_heavy_mcp_for_glm
+    tools = [
+        {'name': 'Bash', 'description': 'shell', 'input_schema': {'type': 'object'}},
+        {'name': 'Read', 'description': 'file', 'input_schema': {'type': 'object'}},
+    ]
+    body = json.dumps({'model': 'glm-4.7', 'tools': tools, 'messages': []}).encode()
+    out = strip_heavy_mcp_for_glm(body)
+    assert out == body, f"Body should be unchanged, got different bytes"
+
+
+def test_strip_heavy_mcp_environ_disabled():
+    """Con AIROUTER_GLM_MCP_FILTER=0 il filtro e' no-op."""
+    import os
+    from tool_isolation import strip_heavy_mcp_for_glm
+    tools = [
+        {'name': 'mcp__claude_ai_gmail__send_email', 'description': 'x', 'input_schema': {'type': 'object'}},
+        {'name': 'Bash', 'description': 'shell', 'input_schema': {'type': 'object'}},
+    ]
+    body = json.dumps({'model': 'glm-4.7', 'tools': tools, 'messages': []}).encode()
+    orig_env = os.environ.get('AIROUTER_GLM_MCP_FILTER')
+    os.environ['AIROUTER_GLM_MCP_FILTER'] = '0'
+    try:
+        out = strip_heavy_mcp_for_glm(body)
+        assert out == body, "With filter disabled, body should be unchanged"
+    finally:
+        if orig_env is None:
+            os.environ.pop('AIROUTER_GLM_MCP_FILTER', None)
+        else:
+            os.environ['AIROUTER_GLM_MCP_FILTER'] = orig_env
+
+
+def test_strip_heavy_mcp_preserva_cache_control():
+    """Il breakpoint cache_control si sposta sull'ultimo tool rimasto."""
+    from tool_isolation import strip_heavy_mcp_for_glm
+    tools = [
+        {'name': 'Read', 'description': 'f', 'input_schema': {'type': 'object'}},
+        {'name': 'mcp__claude_ai_google_drive__list_files', 'description': 'x',
+         'input_schema': {'type': 'object'}, 'cache_control': {'type': 'ephemeral'}},
+    ]
+    body = json.dumps({'model': 'glm-4.7', 'tools': tools, 'messages': []}).encode()
+    out = strip_heavy_mcp_for_glm(body)
+    result = json.loads(out).get('tools', [])
+    assert len(result) == 1, f"Expected 1 tool, got {len(result)}"
+    assert result[0].get('cache_control') == {'type': 'ephemeral'},         f"cache_control should transfer to remaining tool, got {result[0]}"

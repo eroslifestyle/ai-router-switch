@@ -586,6 +586,7 @@ async def forward_glm(request, body: bytes, session, model: str,
         return _err(502, "glm_unavailable", "GLM key missing")
     # ISOLAMENTO TOOL (2026-07-19): choke-point unico, vedi tool_isolation.py.
     body = tool_isolation.filter_tools_for_backend(body, "glm")
+    body = tool_isolation.strip_heavy_mcp_for_glm(body)
 
     # CLAMP max_tokens (2026-07-22): z.ai rifiuta i valori oltre il tetto del modello
     # con 400 [1210]. Choke-point unico → copre pure glm + mix-ag + mix-gm

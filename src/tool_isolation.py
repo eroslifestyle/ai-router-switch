@@ -14,6 +14,7 @@ pipeline — presente o futura — eredita l'isolamento senza doverlo richiamare
 esplicitamente a ogni nuovo mix.
 """
 import json
+import os
 import re
 
 import debug_catalog
@@ -79,6 +80,29 @@ def is_qwen_branded_tool(t: dict) -> bool:
     name = (t.get("name") or "").lower()
     return name.startswith(_QWEN_TOOL_PREFIXES) or "dashscope" in name
 
+
+# Prefissi/nomi dei connettori claude.ai orientati a produttivita' personale
+# (Gmail/Calendar/Drive/Canva): pesano da soli decine di migliaia di token di
+# schema per richiesta (misurato 2026-08-22: 40K/req di soli tool MCP su GLM,
+# 48% del contesto processato) e non servono al ruolo ACT/coding che GLM copre
+# nel router. A differenza dei tool brandizzati di un provider AI, questi non
+# sono MAI necessari a GLM per eseguire codice; il filtro e' quindi opt-out
+# (env AIROUTER_GLM_MCP_FILTER=0) e non tocca gli altri backend.
+_HEAVY_PRODUCTIVITY_MCP_PREFIXES = (
+    "mcp__claude_ai_gmail__",
+    "mcp__claude_ai_google_calendar__",
+    "mcp__claude_ai_google_drive__",
+    "mcp__claude_ai_canva__",
+)
+
+
+def is_heavy_productivity_mcp_tool(t: dict) -> bool:
+    """Tool MCP dei connettori Gmail/Calendar/Drive/Canva: pesanti e non
+    pertinenti al ruolo ACT/coding di GLM (vedi _HEAVY_PRODUCTIVITY_MCP_PREFIXES)."""
+    if not isinstance(t, dict):
+        return False
+    name = (t.get("name") or "").lower()
+    return name.startswith(_HEAVY_PRODUCTIVITY_MCP_PREFIXES)
 
 def is_local_branded_tool(t: dict) -> bool:
     """Nessun tool e' brandizzato del backend locale: il modello sulla macchina
@@ -241,6 +265,40 @@ def filter_tools_for_backend(body: bytes, backend: str) -> bytes:
     sanitize_defer_loading(data)
     return json.dumps(data).encode()
 
+
+
+def strip_heavy_mcp_for_glm(body: bytes) -> bytes:
+    """Rimuove dai `tools` i connettori pesanti di produttivita' personale
+    quando il backend e' GLM. Choke-point separato da filter_tools_for_backend
+    (che isola solo per BRAND di provider AI, non per peso/pertinenza): questi
+    tool non sono brandizzati di nessun provider AI, quindi filter_tools_for_backend
+    non li tocca mai. Override: AIROUTER_GLM_MCP_FILTER=0 disattiva il filtro."""
+    if os.environ.get("AIROUTER_GLM_MCP_FILTER", "1") == "0":
+        return body
+    try:
+        data = json.loads(body)
+    except Exception:
+        return body
+    tools = data.get("tools")
+    if not isinstance(tools, list) or not tools:
+        return body
+    kept = [t for t in tools if not is_heavy_productivity_mcp_tool(t)]
+    if len(kept) == len(tools):
+        return body
+    stripped_names = [t.get("name", "?") for t in tools if t not in kept]
+    debug_catalog.record_event(
+        severity="info", category="glm", kind="heavy_mcp_strip",
+        snippet=f"stripped={stripped_names[:10]} kept={len(kept)}/{len(tools)}",
+    )
+    if kept:
+        preserva_cache_control(tools, kept)
+        data["tools"] = kept
+    else:
+        data.pop("tools", None)
+        data.pop("tool_choice", None)
+    sanitize_tool_choice(data)
+    sanitize_defer_loading(data)
+    return json.dumps(data).encode()
 
 _TOOL_USE_NAME_AFTER = re.compile(r'"type"\s*:\s*"tool_use"\s*,\s*(?:[^{}]*?,\s*)??"name"\s*:\s*"([^"]+)"')
 _TOOL_USE_NAME_BEFORE = re.compile(r'"name"\s*:\s*"([^"]+)"\s*,\s*(?:[^{}]*?,\s*)??"type"\s*:\s*"tool_use"')

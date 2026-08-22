@@ -39,6 +39,20 @@ SUMMARY_BUDGET_SHARE = float(os.environ.get("AIROUTER_SHRINK_SUMMARY_SHARE", "0.
 # quarto di secondo. Su corpi normali la ricerca costa una frazione di questi valori.
 FIT_GRID_STEPS = int(os.environ.get("AIROUTER_FIT_GRID_STEPS", "64"))
 
+# Cache in-process del punto di taglio scelto per ciascuna chat (fp -> quanti
+# messaggi droppare dall'inizio). Senza questo, ogni turno sopra soglia
+# ricalcolava keep da zero sull'intera storia: anche con la griglia quantizzata
+# (FIT_GRID_STEPS) il valore ottimale slitta ad ogni turno perche' n cresce,
+# spostando "gli ultimi keep messaggi" e rompendo il prefisso byte-per-byte che
+# il prompt caching richiede. Tenendo fisso il PUNTO DI TAGLIO (drop_count)
+# invece del CONTEGGIO (keep), il prefisso msgs[drop_count:] resta identico tra
+# un turno e l'altro finche' il nuovo turno non lo fa uscire dal budget — la
+# cache tiene, si paga solo l'append. Root cause diagnosticata 2026-08-22:
+# creation/read 0,614 su MiniMax (67% del contesto "nuovo" per richiesta)
+# contro 0,040 di Anthropic.
+_STICKY_DROP_COUNT: dict = {}
+_STICKY_DROP_COUNT_MAX = 2000
+
 
 def _tool_result_text(content) -> str:
     """Testo di un tool_result, che il formato sia stringa o lista di blocchi."""
@@ -235,9 +249,28 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
         return _candidate
 
     _candidate = _make_candidate(system_content)
-    keep = _fit_keep(msgs, model, safe_limit, _candidate)
+
+    # Punto di taglio "sticky": riusa il drop_count dell'ultimo turno invece di
+    # ricalcolare keep da zero, cosi' il prefisso msgs[drop_count:] resta
+    # identico tra un turno e l'altro e il prompt caching lato provider tiene.
+    # Vedi commento su _STICKY_DROP_COUNT sopra.
+    last_drop = _STICKY_DROP_COUNT.get(fp, 0)
+    keep = 0
+    sticky_hit = False
+    if 0 < last_drop < len(msgs):
+        sticky_keep = len(msgs) - last_drop
+        if estimate_tokens_body(_candidate(_tail(msgs, sticky_keep)), model) <= safe_limit:
+            keep = sticky_keep
+            sticky_hit = True
+    if not keep:
+        keep = _fit_keep(msgs, model, safe_limit, _candidate)
 
     if keep:
+        if len(_STICKY_DROP_COUNT) > _STICKY_DROP_COUNT_MAX:
+            _STICKY_DROP_COUNT.clear()
+        _STICKY_DROP_COUNT[fp] = len(msgs) - keep
+        log.info("shrink: keep %s a %d messaggi (drop_count=%d) fp=%s",
+                  "stabile" if sticky_hit else "ricalcolato", keep, len(msgs) - keep, fp)
         # Secondo passaggio: i messaggi appena usciti dalla finestra vengono messi
         # da parte (per sopravvivere a un /compact) e quelli PERTINENTI alla
         # richiesta attuale rientrano come estratti nel system. "Recente" e "utile"
