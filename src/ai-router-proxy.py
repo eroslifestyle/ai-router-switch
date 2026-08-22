@@ -362,6 +362,35 @@ async def handle(request):
     else:
         ctx_model = _ctx_model_map.get(mode, "MiniMax-M2.7")
 
+    # CTX-REROUTE (2026-08-22): se il body supera la finestra dell'ACT nelle
+    # modalità miste, reindirizza sulla coppia THINK della stessa modalità.
+    # Stesso pattern di route_image_to_vision: vincolo tecnico hard, non scelta
+    # di merito. Non modifica mode/get_mode/lo stato persistito della chat.
+    _max_output_for_reroute = None
+    try:
+        _parsed_body = json.loads(body)
+        _max_output_for_reroute = _parsed_body.get("max_tokens")
+    except Exception:
+        pass
+    try:
+        from role_routing import reroute_if_oversized as _reroute_if_oversized
+        _reroute_result = _reroute_if_oversized(
+            mode, _early_provider or "", _early_override, len(body),
+            max_output=_max_output_for_reroute,
+        )
+        if _reroute_result:
+            _new_provider, _new_override = _reroute_result
+            _est_tokens = len(body) // 4  # CHARS_PER_TOKEN_ESTIMATE
+            log(f"[ctx-reroute] {mode}: est={_est_tokens} token, "
+                f"ACT={_early_override or _early_model} -> "
+                f"THINK={_new_override} ({_new_provider}), "
+                f"body={len(body)} byte")
+            _early_provider = _new_provider
+            _early_override = _new_override
+            ctx_model = _new_override
+    except Exception as _e:
+        log(f"[ctx-reroute] EXC {_e}")
+
     # Loop-breaker: una chat che riemette lo stesso turno non si sblocca inoltrandolo
     # di nuovo. Sta prima del ctx perche' il rewrite di un turno gia' visto e' lavoro
     # buttato. Vedi loop_breaker.py.

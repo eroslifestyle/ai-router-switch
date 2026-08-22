@@ -148,6 +148,60 @@ _MODE_DEFAULT_PROVIDER = {
 VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-am-2", "mix-ag", "mix-ag-2", "mix-gm", "mix-gm-2", "mix-al", "local", "gpt", "ultra")
 
 
+# Modalità miste che hanno un THINK con finestra più grande dell'ACT.
+# ultra ESCLUSA: è a 3 provider, il reroute va valutato a parte.
+_MIXED_MODES_WITH_BIGGER_THINK = frozenset({
+    "mix-am", "mix-am-2",   # THINK=Anthropic(1M), ACT=MiniMax(204k)
+    "mix-ag", "mix-ag-2",   # THINK=Anthropic(1M), ACT=GLM(200k)
+    "mix-gm", "mix-gm-2",   # THINK=GLM(1M), ACT=MiniMax(204k)
+})
+
+# ponytail: stima semplice len(body)/4, nessun tokenizer vero
+CHARS_PER_TOKEN_ESTIMATE = 4
+
+
+def reroute_if_oversized(
+    mode: str,
+    provider: str,
+    act_model: str | None,
+    body_len: int,
+    max_output: int | None = None,
+) -> tuple[str, str] | None:
+    """Reindirizza su THINK se il body supera la finestra dell'ACT.
+
+    Vale SOLO per le modalità miste il cui THINK ha un modello esplicito
+    (non None). Per le modalità con THINK Anthropic (mix-am*, mix-ag*) il
+    model_override e' None per design: il modello lo sceglie l'utente via
+    /model, mai il codice. In pratica oggi il reroute automatico si applica
+    solo a mix-gm/mix-gm-2 (THINK=GLM-5.3). Ultra escluso (3 provider).
+
+    Restituisce None se non serve reroute, altrimenti (provider, model_think).
+    """
+    if mode not in _MIXED_MODES_WITH_BIGGER_THINK:
+        return None
+
+    if not act_model:
+        return None
+
+    # Il THINK model viene da ROUTING_TABLE, non da un dizionario hardcoded.
+    # Se model e' None (Anthropic pass-through), non reroutiamo perche'
+    # non conosciamo il modello effettivo scelto dall'utente.
+    think_entry = ROUTING_TABLE.get((mode, ROLE_THINK), (None, None))
+    think_provider, think_model = think_entry
+    if not think_model:
+        return None  # Anthropic pass-through: niente modello fisso
+
+    from model_context_map import get_safe_input_limit
+
+    act_limit = get_safe_input_limit(act_model, max_output=max_output)
+    est_tokens = body_len // CHARS_PER_TOKEN_ESTIMATE
+
+    if est_tokens > act_limit:
+        return (think_provider, think_model)
+
+    return None
+
+
 def modes_with_act_provider(provider: str) -> frozenset:
     """Modalita' il cui ESECUTORE (ACT) e' ``provider``.
 
