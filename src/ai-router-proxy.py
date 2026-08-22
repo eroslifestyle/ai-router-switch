@@ -362,6 +362,22 @@ async def handle(request):
     else:
         ctx_model = _ctx_model_map.get(mode, "MiniMax-M2.7")
 
+    # CTX-VISION (2026-08-22): se il provider e' glm e il body contiene immagini,
+    # ctx_model deve riflettere la finestra REALE del modello di visione (131k),
+    # non quella di glm-5.3 (1M). Altrimenti il gate decide "non servono rewrite"
+    # e poi route_image_to_vision() dirotta su glm-4.6V con 84k token oltre budget.
+    try:
+        if _early_provider == "glm":
+            import glm_backend as _glm_mod
+            if _glm_mod.body_has_image(body):
+                _corrected = _glm_mod.route_image_to_vision(ctx_model, body)
+                if _corrected != ctx_model:
+                    log(f"[ctx-vision] {mode}: provider=glm body={len(body)}b "
+                        f"ctx_model {ctx_model} -> {_corrected} (vision gate)")
+                    ctx_model = _corrected
+    except Exception as _e:
+        log(f"[ctx-vision] EXC {_e}")
+
     # CTX-REROUTE (2026-08-22): se il body supera la finestra dell'ACT nelle
     # modalità miste, reindirizza sulla coppia THINK della stessa modalità.
     # Stesso pattern di route_image_to_vision: vincolo tecnico hard, non scelta
