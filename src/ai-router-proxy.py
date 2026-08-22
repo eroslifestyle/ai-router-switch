@@ -322,90 +322,32 @@ async def handle(request):
 
     mode = get_mode(request, fp)
 
-    # FIX 2026-07-26: risoluzione anticipata del provider effettivo per evitare
-    # shrink inutile su richieste THINK (es. mix-am con Claude Opus inoltrato
-    # ad Anthropic). Il provider dipende dal modello richiesto, non dalla modalità.
-    _early_provider = None
-    _early_override = None
-    _early_model = ""
-    try:
-        from role_routing import resolve_route as _resolve_route
-        _early_model = (json.loads(body).get("model") or "").strip()
-        if _early_model:
-            _early_provider, _early_override = _resolve_route(mode, _early_model)
-    except Exception:
-        pass
-
     # CTX PRE-CHECK (AQ-REF3): azione proattiva su compact/error
     # Il limite del gate e del rewrite devono essere lo stesso, misurato sul
-    # modello destinatario reale, non su un modello generico per provider
-    # (fix 2026-07-26, esteso F8). Esempio del bug risolto: verso anthropic
-    # con claude-haiku-4-5-20251001 (limite 200k) il gate usava ctx_model
-    # claude-opus-4-8 (limite 1M), lasciando passare corpi da 208k token che
-    # Anthropic rifiuta con 400 "prompt is too long".
-    _ctx_model_map = {
-        "anthropic": "claude-opus-4-8", "minimax": "MiniMax-M2.7",
-        "glm": "glm-5.3", "mix-am": "MiniMax-M2.7",
-        "mix-ag": "claude-opus-4-8", "mix-gm": "MiniMax-M2.7",
-        "qwen": "qwen3.7-max",
-    }
-    _provider_ctx_model_map = {
-        "anthropic": "claude-opus-4-8",
-        "minimax": "MiniMax-M2.7",
-        "glm": "glm-5.3",
-        "qwen": "qwen3.7-max",
-    }
-    if _early_model:
-        ctx_model = _early_override or _early_model
-    elif _early_provider and _early_provider in _provider_ctx_model_map:
-        ctx_model = _provider_ctx_model_map[_early_provider]
-    else:
-        ctx_model = _ctx_model_map.get(mode, "MiniMax-M2.7")
-
-    # CTX-VISION (2026-08-22): se il provider e' glm e il body contiene immagini,
-    # ctx_model deve riflettere la finestra REALE del modello di visione (131k),
-    # non quella di glm-5.3 (1M). Altrimenti il gate decide "non servono rewrite"
-    # e poi route_image_to_vision() dirotta su glm-4.6V con 84k token oltre budget.
+    # modello destinatario reale. resolve_effective_route calcola UNA volta il
+    # provider/modello effettivo (dopo reroute-oversize e correzioni GLM
+    # vision/peak-cap) e lo usa sia per il gate sia per il dispatch: non
+    # possono piu' divergere (fix 2026-08-22).
+    _early_model = ""
+    _max_output_for_ctx = None
     try:
-        if _early_provider == "glm":
-            import glm_backend as _glm_mod
-            if _glm_mod.body_has_image(body):
-                _corrected = _glm_mod.route_image_to_vision(ctx_model, body)
-                if _corrected != ctx_model:
-                    log(f"[ctx-vision] {mode}: provider=glm body={len(body)}b "
-                        f"ctx_model {ctx_model} -> {_corrected} (vision gate)")
-                    ctx_model = _corrected
-    except Exception as _e:
-        log(f"[ctx-vision] EXC {_e}")
-
-    # CTX-REROUTE (2026-08-22): se il body supera la finestra dell'ACT nelle
-    # modalità miste, reindirizza sulla coppia THINK della stessa modalità.
-    # Stesso pattern di route_image_to_vision: vincolo tecnico hard, non scelta
-    # di merito. Non modifica mode/get_mode/lo stato persistito della chat.
-    _max_output_for_reroute = None
-    try:
-        _parsed_body = json.loads(body)
-        _max_output_for_reroute = _parsed_body.get("max_tokens")
+        _body_parsed_early = json.loads(body)
+        _early_model = (_body_parsed_early.get("model") or "").strip()
+        _max_output_for_ctx = _body_parsed_early.get("max_tokens")
     except Exception:
         pass
     try:
-        from role_routing import reroute_if_oversized as _reroute_if_oversized
-        _reroute_result = _reroute_if_oversized(
-            mode, _early_provider or "", _early_override, len(body),
-            max_output=_max_output_for_reroute,
+        from role_routing import resolve_effective_route as _resolve_eff, resolve_route as _resolve_naive
+        _ctx_provider, _ctx_override = _resolve_eff(
+            mode, _early_model, body, max_output=_max_output_for_ctx,
         )
-        if _reroute_result:
-            _new_provider, _new_override = _reroute_result
-            _est_tokens = len(body) // 4  # CHARS_PER_TOKEN_ESTIMATE
-            log(f"[ctx-reroute] {mode}: est={_est_tokens} token, "
-                f"ACT={_early_override or _early_model} -> "
-                f"THINK={_new_override} ({_new_provider}), "
-                f"body={len(body)} byte")
-            _early_provider = _new_provider
-            _early_override = _new_override
-            ctx_model = _new_override
+        ctx_model = _ctx_override or _early_model
+        _naive_model = _resolve_naive(mode, _early_model)[1] or _early_model
+        if ctx_model != _naive_model:
+            log(f"[ctx-route] {mode}: model={_early_model or '?'} ctx_model={ctx_model} (corretto)")
     except Exception as _e:
-        log(f"[ctx-reroute] EXC {_e}")
+        log(f"[ctx-route] EXC {_e} mode={mode} model={_early_model}")
+        ctx_model = _early_model or "MiniMax-M2.7"
 
     # Loop-breaker: una chat che riemette lo stesso turno non si sblocca inoltrandolo
     # di nuovo. Sta prima del ctx perche' il rewrite di un turno gia' visto e' lavoro
@@ -534,7 +476,7 @@ async def handle(request):
             detail = {
                 "mode": mode,
                 "model": ctx_model,
-                "provider": _early_provider,
+                "provider": _ctx_provider,
                 "action": ctx_check["action"],
                 "est_tokens": ctx_check.get("est_tokens", 0),
                 "limit": ctx_check.get("limit", 0),
@@ -590,9 +532,9 @@ async def handle(request):
     # pieno da 1M di contesto senza alcuno shrink preventivo — esattamente il bug del
     # 2026-07-20 che questo blocco doveva chiudere, riaperto per una modalita' nuova.
     _MINIMAX_BACKEND_MODES = modes_with_act_provider("minimax")
-    _shrink_for_minimax = mode in _MINIMAX_BACKEND_MODES and (_early_provider == "minimax" or _early_provider is None)
+    _shrink_for_minimax = mode in _MINIMAX_BACKEND_MODES and (_ctx_provider == "minimax" or _ctx_provider is None)
     if mode in _MINIMAX_BACKEND_MODES and not _shrink_for_minimax:
-        log(f"ctx: bottleneck-shrink SKIP provider={_early_provider} mode={mode} bytes={len(body)} fp={fp}")
+        log(f"ctx: bottleneck-shrink SKIP provider={_ctx_provider} mode={mode} bytes={len(body)} fp={fp}")
     if _shrink_for_minimax:
         try:
             _ctx_bottleneck = {
@@ -792,9 +734,12 @@ async def handle(request):
     except Exception:
         _body_dict, _req_model = None, ""
 
-    from role_routing import resolve_route
+    from role_routing import resolve_effective_route
     try:
-        _provider, _model_override = resolve_route(mode, _req_model)
+        _max_output_for_dispatch = _body_dict.get("max_tokens") if _body_dict else None
+        _provider, _model_override = resolve_effective_route(
+            mode, _req_model, body, max_output=_max_output_for_dispatch,
+        )
     except ValueError as e:
         log(f"routing: {e} -> fallback anthropic")
         _provider, _model_override = "anthropic", None
@@ -909,26 +854,11 @@ async def handle(request):
                                       "message": f"{mode}: modulo GLM assente"}}, status=502)
         try:
             import glm_backend as _glm_mod
-            # override=None da resolve_route significa "non riscrivere il modello",
-            # non "usa il default di modalita'": se il client ha chiesto un modello
-            # GLM vero (e' quello che dice di fare la guida z.ai per Claude Code,
-            # ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.3) va rispettato. Prima finiva
-            # sempre sul MID: chiedere glm-5.3 dava glm-4.7, in silenzio.
+            # _model_override da resolve_effective_route include le correzioni
+            # vision/peak-cap: qui serve solo il fallback se per qualche motivo
+            # arriva None o non-GLM.
             _glm_model = (_model_override or _glm_mod.canonical_glm_model(_req_model)
                           or _glm_mod.resolve_glm_upstream_model(_glm_mod.GLM_TIER_MID))
-            # Dal 2026-07-25 il tiering dinamico non esiste piu: il modello GLM
-            # effettivo arriva da role_routing ed e' noto solo qui. In fascia
-            # peak (14-18 Asia/Shanghai) glm-5.3 e glm-5-turbo costano 3x e
-            # vengono declassati a glm-4.7 per evitare costi eccessivi.
-            _glm_model_pre = _glm_model
-            # Le immagini vanno al modello che vede: glm-5.3 e glm-4.7 sono
-            # text-only e le ignorano senza dirlo (vedi route_image_to_vision).
-            _glm_model = _glm_mod.route_image_to_vision(_glm_model, body)
-            if _glm_model != _glm_model_pre:
-                log(f"tunnel {mode} GLM vision: {_glm_model_pre} -> {_glm_model} (il body contiene immagini)")
-            _glm_model, _peak_capped = _glm_mod.apply_peak_cap(_glm_model)
-            if _peak_capped:
-                log(f"tunnel {mode} GLM peak-cap: {_glm_model_pre} -> {_glm_model} (fascia peak 14-18 Asia/Shanghai, costo 3x)")
             # z.ai onora il campo "model" del BODY: senza set_body_model ignora
             # il modello scelto qui e usa il proprio default (vedi docstring di
             # set_body_model). forward_glm non riscrive il body: lo fa il caller.

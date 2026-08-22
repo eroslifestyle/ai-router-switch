@@ -151,19 +151,24 @@ def test_peak_cap_retrocompatibile_con_tier_key():
         f"apply_peak_cap('VISION') a 15h: atteso ('VISION', False), ottenuto {risultato}"
     # Ora fuori fascia peak (9:00)
 def test_peak_cap_collegato_nel_proxy():
-    """Guardia anti-regressione: il ramo GLM del proxy DEVE chiamare apply_peak_cap.
-    Fino al 2026-08-04 la funzione esisteva, era corretta e testata, ma non la chiamava nessuno:
-    il cap era documentato come attivo e invece era inerte.
-    Questo test fallisce se qualcuno lo scollega di nuovo.
+    """Guardia anti-regressione: apply_peak_cap deve essere chiamato nella catena
+    di routing. Dal 2026-08-22 il cap vive in resolve_effective_route (role_routing.py)
+    che viene chiamato sia dal gate di contesto sia dal dispatch nel proxy: il test
+    verifica che entrambi i file abbiano il collegamento.
+    Questo test fallisce se qualcuno scollega resolve_effective_route dal proxy.
     """
     from pathlib import Path
-    proxy_path = Path(__file__).resolve().parents[2] / "src" / "ai-router-proxy.py"
-    assert proxy_path.exists(), f"proxy non trovato: {proxy_path}"
-    source = proxy_path.read_text(encoding="utf-8")
-    assert "apply_peak_cap(" in source, \
-        "il ramo GLM del proxy non chiama più apply_peak_cap: il cap peak è tornato inerte"
-    assert "_peak_capped" in source, \
-        "il risultato del cap peak non viene usato: _peak_capped assente nel sorgente"
+    root = Path(__file__).resolve().parents[2]
+    proxy_path = root / "src" / "ai-router-proxy.py"
+    routing_path = root / "src" / "role_routing.py"
+    proxy_src = proxy_path.read_text(encoding="utf-8")
+    routing_src = routing_path.read_text(encoding="utf-8")
+    # resolve_effective_route contiene apply_peak_cap
+    assert "apply_peak_cap(" in routing_src, \
+        "apply_peak_cap non e' più in role_routing: il cap peak è tornato inerte"
+    # il proxy chiama resolve_effective_route per il dispatch GLM
+    assert "resolve_effective_route" in proxy_src, \
+        "resolve_effective_route non e' più nel proxy: la catena di routing è interrotta"
 
 def main():
     print('='*60)

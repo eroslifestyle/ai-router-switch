@@ -147,15 +147,6 @@ _MODE_DEFAULT_PROVIDER = {
 
 VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-am-2", "mix-ag", "mix-ag-2", "mix-gm", "mix-gm-2", "mix-al", "local", "gpt", "ultra")
 
-
-# Modalità miste che hanno un THINK con finestra più grande dell'ACT.
-# ultra ESCLUSA: è a 3 provider, il reroute va valutato a parte.
-_MIXED_MODES_WITH_BIGGER_THINK = frozenset({
-    "mix-am", "mix-am-2",   # THINK=Anthropic(1M), ACT=MiniMax(204k)
-    "mix-ag", "mix-ag-2",   # THINK=Anthropic(1M), ACT=GLM(200k)
-    "mix-gm", "mix-gm-2",   # THINK=GLM(1M), ACT=MiniMax(204k)
-})
-
 # ponytail: stima semplice len(body)/4, nessun tokenizer vero
 CHARS_PER_TOKEN_ESTIMATE = 4
 
@@ -169,33 +160,35 @@ def reroute_if_oversized(
 ) -> tuple[str, str] | None:
     """Reindirizza su THINK se il body supera la finestra dell'ACT.
 
-    Vale SOLO per le modalità miste il cui THINK ha un modello esplicito
-    (non None). Per le modalità con THINK Anthropic (mix-am*, mix-ag*) il
-    model_override e' None per design: il modello lo sceglie l'utente via
-    /model, mai il codice. In pratica oggi il reroute automatico si applica
-    solo a mix-gm/mix-gm-2 (THINK=GLM-5.3). Ultra escluso (3 provider).
+    Si applica automaticamente a qualunque modalita' il cui THINK abbia un
+    modello esplicito (non None, cioe' non pass-through Anthropic scelto
+    dall'utente via /model) CON finestra realmente piu' grande dell'ACT.
+    Nessuna whitelist da mantenere: la sicurezza viene dal confronto reale
+    delle finestre via get_safe_input_limit, non da un elenco di modalita'.
+
+    Esclude automaticamente: mix-am*/mix-ag* (THINK None, pass-through
+    utente), qwen (THINK ha finestra <= ACT, nessun beneficio), local/gpt
+    (stesso modello per THINK e ACT), ultra (esclusa esplicitamente: e' a 3
+    provider e il reroute li' va valutato a parte, non tramite questa
+    funzione generica).
 
     Restituisce None se non serve reroute, altrimenti (provider, model_think).
     """
-    if mode not in _MIXED_MODES_WITH_BIGGER_THINK:
+    if mode == "ultra" or not act_model:
         return None
 
-    if not act_model:
-        return None
-
-    # Il THINK model viene da ROUTING_TABLE, non da un dizionario hardcoded.
-    # Se model e' None (Anthropic pass-through), non reroutiamo perche'
-    # non conosciamo il modello effettivo scelto dall'utente.
-    think_entry = ROUTING_TABLE.get((mode, ROLE_THINK), (None, None))
-    think_provider, think_model = think_entry
-    if not think_model:
-        return None  # Anthropic pass-through: niente modello fisso
+    think_provider, think_model = ROUTING_TABLE.get((mode, ROLE_THINK), (None, None))
+    if not think_model or think_model == act_model:
+        return None  # Anthropic pass-through, o nessuna alternativa reale
 
     from model_context_map import get_safe_input_limit
 
     act_limit = get_safe_input_limit(act_model, max_output=max_output)
-    est_tokens = body_len // CHARS_PER_TOKEN_ESTIMATE
+    think_limit = get_safe_input_limit(think_model, max_output=max_output)
+    if think_limit <= act_limit:
+        return None  # il THINK non offre piu' spazio, non serve rerouted
 
+    est_tokens = body_len // CHARS_PER_TOKEN_ESTIMATE
     if est_tokens > act_limit:
         return (think_provider, think_model)
 
@@ -353,3 +346,38 @@ def resolve_route(mode: str, model_name: str | None) -> tuple[str, str | None]:
     raise RuntimeError(
         f"Incomplete routing table: mode={mode!r}, role={role!r}"
     )
+
+
+def resolve_effective_route(
+    mode: str,
+    model: str,
+    body: bytes,
+    max_output: int | None = None,
+) -> tuple[str, str | None]:
+    """Risoluzione UNICA del provider/modello che ricevera' DAVVERO la richiesta.
+
+    Usata sia dal gate di contesto sia dal dispatch reale in ai-router-proxy.py,
+    cosi' non possono mai divergere. Applica in ordine: risoluzione di ruolo,
+    reroute per oversize (stessa famiglia di provider, mai un modello Anthropic
+    scelto dal codice), poi le correzioni GLM a valle (vision routing, peak-cap)
+    che il dispatch reale applica comunque — qui servono per far si' che il
+    gate di contesto ragioni sulla finestra vera PRIMA di decidere se comprimere.
+    """
+    provider, override = resolve_route(mode, model)
+    act_model = override or model
+
+    reroute = reroute_if_oversized(mode, provider, act_model, len(body), max_output=max_output)
+    if reroute:
+        provider, override = reroute
+
+    if provider == "glm":
+        try:
+            import glm_backend
+            _model = override or model
+            _model = glm_backend.route_image_to_vision(_model, body)
+            _model, _ = glm_backend.apply_peak_cap(_model)
+            override = _model
+        except Exception:
+            pass  # import difensivo, stesso stile del resto del file GLM
+
+    return provider, override
