@@ -1175,8 +1175,32 @@ def main():
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     if not MODE_FILE.exists():
         MODE_FILE.write_text("anthropic\n")
+    # ── TRAPPOLA DI MORTE (diagnosi restart loop 2026-08-23) ──────────────
+    # Il processo esce senza segnali visibili ne' "Main process exited" nel
+    # journal, ma con "shutdown complete" senza "shutdown signal received".
+    # Questo hook logga SINCRONAMENTE su file separato OGNI possibile causa
+    # di uscita: eccezione non gestita, exit pulito, segnali fatali.
+    import sys as _sys
+    import traceback as _tb
+    _DEATH_LOG = "/tmp/ai-router-death.log"
+    def _death(msg: str):
+        try:
+            with open(_DEATH_LOG, "a") as f:
+                f.write(f"[{time.strftime('%Y-%m-%dT%H:%M:%S')}] pid={os.getpid()} {msg}\n")
+                if _sys.exc_info()[0] is not None:
+                    _tb.print_exc(file=f)
+        except Exception:
+            pass
+    _sys.excepthook = lambda t, v, tb: _death(f"UNHANDLED {t.__name__}: {v}")
+    import atexit as _atexit
+    _atexit.register(lambda: _death("EXIT pulito (atexit)"))
     log(f"START ai-router-proxy multi-port {LISTEN_PORTS}")
-    asyncio.run(_run_multiport())
+    try:
+        asyncio.run(_run_multiport())
+        _death("asyncio.run completato NORMALE")
+    except BaseException as _e:
+        _death(f"asyncio.run SOLLEVATO {type(_e).__name__}: {_e}")
+        raise
 
 
 if __name__ == "__main__":

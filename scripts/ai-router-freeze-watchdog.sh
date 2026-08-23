@@ -158,9 +158,17 @@ kill_and_dump() {
         log "crash dump saved: $dump"
     fi
 
-    # SIGKILL al processo
-    kill -9 "$pid" 2>/dev/null
+    # FIX 2026-08-23 "Connection lost mid-response": il SIGKILL diretto troncava
+    # gli stream SSE a meta' ogni volta che il watchdog scattava. Ora: prima
+    # SIGTERM (il proxy sano draina in <1s e chiude gli stream con write_eof;
+    # se il loop e' congelato il TERM resta in coda), poi SIGKILL di sicurezza
+    # dopo 10s. Il kill via systemctl segue lo stesso ordine.
+    kill -TERM "$pid" 2>/dev/null
+    sleep 10
+    kill -KILL "$pid" 2>/dev/null
     sleep 1
+    systemctl --user kill -s SIGTERM "$SERVICE" 2>/dev/null || true
+    sleep 2
     systemctl --user kill -s SIGKILL "$SERVICE" 2>/dev/null || true
     sleep 1
     systemctl --user restart "$SERVICE" 2>/dev/null

@@ -347,10 +347,13 @@ class StreamingRelay:
                     elif "br" in _enc:
                         try:
                             import brotli
-                            _raw = brotli.Decompress().process(_raw)
-                        except ImportError:
-                            import brotlicffi as brotli
-                            _raw = brotli.Decompress().process(_raw)
+                            _raw = brotli.Decompressor().decompress(_raw)
+                        except Exception:
+                            try:
+                                import brotlicffi as brotli
+                                _raw = brotli.Decompressor().decompress(_raw)
+                            except Exception:
+                                pass  # Fall back to raw compressed bytes
                 except Exception:
                     # Decompression failed; fall back to raw compressed bytes.
                     pass

@@ -2,9 +2,12 @@
 """Router utilities: rate limiter, log, body analysis, sequence repair.
 Debug centralizzato → src/router_debug.py (importato in fondo per retrocompatibilità)."""
 import asyncio
+import atexit
 import json
 import os
+import queue as _queue_mod
 import random
+import threading
 import time
 from collections import deque
 
@@ -282,12 +285,232 @@ USAGE_MAX_BYTES = int(os.environ.get("AIROUTER_USAGE_MAX_BYTES", str(64 * 1024 *
 USAGE_KEEP = int(os.environ.get("AIROUTER_USAGE_KEEP", "2"))
 
 
+# ── LOG ASINCRONO (fix freeze 2026-08-23) ────────────────────────────────────────
+# Causa dei "Connection lost mid-response": la funzione log() faceva I/O sincrono
+# (open + write) nel MainThread asyncio. Con traffico intenso il file cresceva,
+# rotate_if_needed rallentava, e il loop si bloccava per >10s → watchdog killava
+# il processo. Misurato: 5 restart in 2 minuti (vedi freeze-watchdog.log).
+# Fix: coda + thread separato per la scrittura. Il MainThread mette in coda
+# (operazione O(1) in memoria) e ritorna subito. Il thread svuota la coda su
+# file con batching. Nessuna riga persa: atexit + signal handler fanno drain
+# finale, e su errore il messaggio va comunque a stderr (debug).
+_LOG_QUEUE: _queue_mod.Queue = _queue_mod.Queue(maxsize=10000)
+_LOG_THREAD: threading.Thread | None = None
+_LOG_THREAD_STARTED = False
+_LOG_THREAD_LOCK = threading.Lock()
+# Se True, il logging è caduto in fallback stderr (sincrono ma su stream sicuro)
+_LOG_FALLBACK = False
+
+# Coda dedicata per il sidecar router-usage.jsonl (fix freeze 2026-08-23).
+_USAGE_QUEUE: _queue_mod.Queue = _queue_mod.Queue(maxsize=10000)
+_USAGE_THREAD: threading.Thread | None = None
+_USAGE_THREAD_STARTED = False
+_USAGE_THREAD_LOCK = threading.Lock()
+_USAGE_FALLBACK = False
+
+
+def _usage_writer_loop():
+    """Thread writer per router-usage.jsonl. Pattern identico a _log_writer_loop."""
+    global _USAGE_FALLBACK
+    _fh = None
+    _cur_path = None
+    while True:
+        try:
+            _batch = []
+            try:
+                _batch.append(_USAGE_QUEUE.get(timeout=0.5))
+            except _queue_mod.Empty:
+                if _fh is not None:
+                    try:
+                        _fh.flush()
+                    except Exception:
+                        pass
+                continue
+            for _ in range(200):
+                try:
+                    _batch.append(_USAGE_QUEUE.get_nowait())
+                except _queue_mod.Empty:
+                    break
+            if _cur_path != str(USAGE_SIDECAR):
+                if _fh is not None:
+                    try:
+                        _fh.flush()
+                        _fh.close()
+                    except Exception:
+                        pass
+                    _fh = None
+                try:
+                    rotate_if_needed(USAGE_SIDECAR, USAGE_MAX_BYTES, keep=USAGE_KEEP)
+                    _fh = open(USAGE_SIDECAR, "a", buffering=64 * 1024)
+                    _cur_path = str(USAGE_SIDECAR)
+                except Exception as e:
+                    if not _USAGE_FALLBACK:
+                        print(f"[USAGE FALLBACK] {e}", file=__import__('sys').stderr)
+                        _USAGE_FALLBACK = True
+                    _fh = None
+            if _fh is not None:
+                try:
+                    _fh.writelines(_batch)
+                    _fh.flush()
+                except Exception:
+                    pass
+        except Exception as e:
+            try:
+                print(f"[USAGE THREAD ERR] {type(e).__name__}: {e}", file=__import__('sys').stderr)
+            except Exception:
+                pass
+
+
+def _ensure_usage_thread():
+    """Avvia il thread writer per il sidecar una sola volta (lazy, thread-safe)."""
+    global _USAGE_THREAD, _USAGE_THREAD_STARTED
+    if _USAGE_THREAD_STARTED:
+        return
+    with _USAGE_THREAD_LOCK:
+        if _USAGE_THREAD_STARTED:
+            return
+        _USAGE_THREAD = threading.Thread(target=_usage_writer_loop, name="ai-router-usage-writer", daemon=True)
+        _USAGE_THREAD.start()
+        _USAGE_THREAD_STARTED = True
+        try:
+            atexit.register(_usage_drain_on_exit)
+        except Exception:
+            pass
+
+
+def _usage_drain_on_exit():
+    """Svuota la coda usage sincronamente all'uscita del processo."""
+    try:
+        try:
+            _USAGE_QUEUE.put_nowait(None)
+        except Exception:
+            pass
+        if _USAGE_THREAD is not None:
+            _USAGE_THREAD.join(timeout=2.0)
+        with open(USAGE_SIDECAR, "a") as f:
+            while True:
+                try:
+                    line = _USAGE_QUEUE.get_nowait()
+                except _queue_mod.Empty:
+                    break
+                if line is None:
+                    break
+                f.write(line)
+    except Exception:
+        pass
+
+
+def _log_writer_loop():
+    """Thread separato: svuota la coda scrivendo su file in batch.
+
+    Apre il file una volta e tiene l'handle, riscrivendo solo se la rotazione
+    cambia il percorso. open() nel hot path era il costo principale del freeze.
+    """
+    global _LOG_FALLBACK
+    _fh = None
+    _cur_path = None
+    while True:
+        try:
+            _batch = []
+            # Blocco sul primo messaggio (no busy-wait)
+            try:
+                _batch.append(_LOG_QUEUE.get(timeout=0.5))
+            except _queue_mod.Empty:
+                # Tick periodico per applicare rotazione e svuotare
+                if _fh is not None:
+                    try:
+                        _fh.flush()
+                    except Exception:
+                        pass
+                continue
+            # Drain ulteriori messaggi senza bloccare (batch ~ fino a 200)
+            for _ in range(200):
+                try:
+                    _batch.append(_LOG_QUEUE.get_nowait())
+                except _queue_mod.Empty:
+                    break
+            from router_constants import LOG_FILE
+            # Riapri se rotazione ha cambiato path
+            if _cur_path != str(LOG_FILE):
+                if _fh is not None:
+                    try:
+                        _fh.flush()
+                        _fh.close()
+                    except Exception:
+                        pass
+                    _fh = None
+                try:
+                    rotate_if_needed(LOG_FILE, LOG_MAX_BYTES, keep=LOG_KEEP)
+                    _fh = open(LOG_FILE, "a", buffering=64 * 1024)
+                    _cur_path = str(LOG_FILE)
+                except Exception as e:
+                    # File non scrivibile: fallback stderr (sincrono ma garantito)
+                    if not _LOG_FALLBACK:
+                        print(f"[LOG FALLBACK] {e}", file=__import__('sys').stderr)
+                        _LOG_FALLBACK = True
+                    _fh = None
+            if _fh is not None:
+                try:
+                    _fh.write("\n".join(_batch) + "\n")
+                    _fh.flush()
+                except Exception:
+                    pass
+        except Exception as e:
+            # Qualsiasi errore interno non deve mai killare il thread
+            try:
+                print(f"[LOG THREAD ERR] {type(e).__name__}: {e}", file=__import__('sys').stderr)
+            except Exception:
+                pass
+
+
+def _ensure_log_thread():
+    """Avvia il thread writer una sola volta (lazy, thread-safe)."""
+    global _LOG_THREAD, _LOG_THREAD_STARTED
+    if _LOG_THREAD_STARTED:
+        return
+    with _LOG_THREAD_LOCK:
+        if _LOG_THREAD_STARTED:
+            return
+        _LOG_THREAD = threading.Thread(target=_log_writer_loop, name="ai-router-log-writer", daemon=True)
+        _LOG_THREAD.start()
+        _LOG_THREAD_STARTED = True
+        # Drain finale su uscita processo: ordine deterministico, niente righe perse
+        try:
+            atexit.register(_log_drain_on_exit)
+        except Exception:
+            pass
+
+
+def _log_drain_on_exit():
+    """Svuota la coda sincronamente all'uscita del processo."""
+    try:
+        # Segnala al thread di fermarsi inserendo un sentinel
+        try:
+            _LOG_QUEUE.put_nowait(None)
+        except Exception:
+            pass
+        if _LOG_THREAD is not None:
+            _LOG_THREAD.join(timeout=2.0)
+        # Se ci sono messaggi rimasti, scrivi direttamente
+        from router_constants import LOG_FILE
+        with open(LOG_FILE, "a") as f:
+            while True:
+                try:
+                    line = _LOG_QUEUE.get_nowait()
+                except _queue_mod.Empty:
+                    break
+                if line is None:
+                    break
+                f.write(line + "\n")
+    except Exception:
+        pass
+
+
 def log(msg: str):
     # Il RID (request ID) permette di correlare questa riga di log con il file
     # sidecar router-usage.jsonl e con il BUG-CATALOG. Il formato resta
     # retrocompatibile: il timestamp e' il primo elemento (parser in
     # sviluppo/tools/compact_correlate.py fa match su timestamp a inizio riga).
-    from router_constants import LOG_FILE
     rid = ""
     try:
         # Import dentro il try: se il modulo mancasse, il logging deve
@@ -298,14 +521,20 @@ def log(msg: str):
         pass
     prefix = "[" + rid + "] " if rid else ""
     line = f"[{time.strftime('%Y-%m-%dT%H:%M:%S')}] {prefix}{msg}"
+    # Hot path NON bloccante: metti in coda e ritorna. La scrittura su disco
+    # avviene nel thread separato. Se la coda è piena (proxy in stallo gravissimo)
+    # scarta silenziosamente — il sopravvivenza del loop viene prima della
+    # completezza del log.
     try:
-        # Rotazione (2026-08-08): senza cap il file cresceva senza limite —
-        # misurato a 15,8 MB e 197.762 righe. rotate_if_needed non solleva mai.
-        rotate_if_needed(LOG_FILE, LOG_MAX_BYTES, keep=LOG_KEEP)
-        with open(LOG_FILE, "a") as f:
-            f.write(line + "\n")
+        _ensure_log_thread()
+        _LOG_QUEUE.put_nowait(line)
     except Exception:
-        pass
+        # Fallback: se la coda è piena o il thread non si avvia, scrivi su stderr.
+        # Meglio una riga doppia che freeze totale.
+        try:
+            print(line, file=__import__('sys').stderr)
+        except Exception:
+            pass
 
 
 # log_exc rimossa il 2026-08-07: nessun chiamante. Era `log(msg + traceback)`.
@@ -500,16 +729,18 @@ def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
         # Rotazione (2026-08-08): il sidecar era a 45 MB e cresceva di ~0,9 MB
         # al giorno senza alcun cap. Due generazioni, perche' e' la fonte delle
         # analisi storiche e non va persa alla prima rotazione.
-        rotate_if_needed(USAGE_SIDECAR, USAGE_MAX_BYTES, keep=USAGE_KEEP)
-        # ponytail: write atomica con O_APPEND. Vale per filesystem locali e righe
-        # sotto il limite del kernel (~4-8 KB su Linux). Se il sidecar finisse su
-        # NFS o le righe crescessero molto, servirebbe fcntl.flock.
-        riga = (json.dumps(entry) + "\n").encode("utf-8")
-        fd = os.open(USAGE_SIDECAR, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        riga = json.dumps(entry) + "\n"
+        # Hot path non bloccante: metti in coda e ritorna. Il thread separato
+        # gestisce rotate_if_needed + write. Stesso fallback di log(): se la coda
+        # e' piena (processo in stallo grave) scrivi direttamente su stderr.
         try:
-            os.write(fd, riga)
-        finally:
-            os.close(fd)
+            _ensure_usage_thread()
+            _USAGE_QUEUE.put_nowait(riga)
+        except Exception:
+            try:
+                print(f"[USAGE QUEUE FULL] falling back to stderr", file=__import__('sys').stderr)
+            except Exception:
+                pass
     except Exception:
         pass
 
