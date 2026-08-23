@@ -1,4 +1,3 @@
-# ~130 lines
 """Mode management and chat fingerprint extracted from ai-router-proxy.py (~lines 683-866)."""
 import hashlib
 import json
@@ -52,7 +51,7 @@ def conversation_fingerprint(data: dict) -> str:
 
     Estrae il primo messaggio utente, rimuove i blocchi <system-reminder>...</system-reminder>
     (che contengono contenuti variabili iniettati da Claude Code), normalizza gli spazi
-    e calcola SHA256 dei primi 12 caratteri hex. Se il risultato è <32 char o vuoto,
+    e calcola SHA256 dei primi 12 caratteri hex. Se il risultato è vuoto,
     restituisce 'default' (non identificabile in modo affidabile).
 
     Non solleva eccezioni: input malformato → 'default'.
@@ -92,9 +91,8 @@ def conversation_fingerprint(data: dict) -> str:
         # Normalizza gli spazi (collassa whitespace multiplo).
         normalized = " ".join(first_user.split())
 
-        # Se il testo è troppo corto o vuoto, due chat diverse collidereb­bero.
-        # Restituisci 'default' per indicare una conversazione non identificabile.
-        if len(normalized) < 32:
+        # Se il testo è vuoto, restituisci 'default' per indicare una conversazione non identificabile.
+        if len(normalized) < 1:
             return "default"
 
         return hashlib.sha256(normalized.encode()).hexdigest()[:12]
