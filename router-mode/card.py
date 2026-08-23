@@ -2,6 +2,8 @@
 """Card fluttuante — AI Router Mode Panel (PySide6)."""
 from __future__ import annotations
 import json
+import subprocess
+import time
 import urllib.request
 from pathlib import Path
 
@@ -22,7 +24,8 @@ C = {
     "green_btn": "#238636", "gray_btn": "#21262d",
 }
 
-ROUTER = "http://localhost:8787"
+ROUTER = "http://127.0.0.1:8787"
+SERVICE = "ai-router"
 MODE_FILE = Path.home() / ".claude" / "ai-router-mode"
 ICON_PATH = Path.home() / ".claude" / "scripts" / "router-mode-icon.png"
 DESKTOP_NAME = "router-mode-panel"
@@ -88,15 +91,47 @@ def get_current():
     return "?"
 
 def get_service_status():
-    import subprocess
     try:
         r = subprocess.run(
-            ["systemctl", "--user", "is-active", "ai-router"],
+            ["systemctl", "--user", "is-active", SERVICE],
             capture_output=True, text=True, timeout=3,
         )
         return r.stdout.strip()
     except Exception:
         return "unknown"
+
+
+def run_systemctl(action, timeout=10):
+    """Esegue `systemctl --user <action> ai-router` e dice com'e' andata.
+
+    Restituisce (riuscito, messaggio): il messaggio e' la prima riga dell'errore
+    di systemctl, vuoto quando il comando riesce.
+
+    Prima di start/restart passa da `reset-failed`: dopo StartLimitBurst
+    riavvii falliti la unit resta in stato failed e `systemctl start` non fa
+    NULLA ("start request repeated too quickly"). Senza questo passo il
+    pulsante Start del pannello sembrava non funzionare, in silenzio.
+    Un `reset-failed` su una unit sana fallisce ed e' normale: si prosegue.
+    """
+    passi = ["reset-failed", action] if action in ("start", "restart") else [action]
+    for passo in passi:
+        try:
+            r = subprocess.run(
+                ["systemctl", "--user", passo, SERVICE],
+                capture_output=True, text=True, timeout=timeout,
+            )
+        except FileNotFoundError:
+            return False, "systemctl non trovato"
+        except subprocess.TimeoutExpired:
+            return False, f"systemctl {passo}: nessuna risposta entro {timeout}s"
+        except Exception as e:
+            return False, f"systemctl {passo}: {type(e).__name__}"
+        if passo == "reset-failed":
+            continue
+        if r.returncode != 0:
+            righe = [x for x in ((r.stderr or "") + (r.stdout or "")).splitlines() if x.strip()]
+            return False, righe[0].strip() if righe else f"systemctl {passo}: codice {r.returncode}"
+    return True, ""
 
 class TitleBar(QWidget):
     def __init__(self, parent):
@@ -345,6 +380,15 @@ class Card(QWidget):
         ctrl_row.addWidget(self._stop_btn)
         body_layout.addLayout(ctrl_row)
 
+        # Riga di esito: vuota quando tutto va bene, altrimenti l'errore di
+        # systemctl. Prima gli errori finivano in capture_output e sparivano.
+        self._msg_lbl = QLabel("")
+        self._msg_lbl.setFont(QFont("Sans", 8))
+        self._msg_lbl.setWordWrap(True)
+        self._msg_lbl.setStyleSheet(f"background:transparent;color:{C['err']}")
+        self._msg_lbl.setVisible(False)
+        body_layout.addWidget(self._msg_lbl)
+
         spacer_ctrl = QWidget()
         spacer_ctrl.setFixedHeight(8)
         body_layout.addWidget(spacer_ctrl)
@@ -423,6 +467,10 @@ class Card(QWidget):
         btn.clicked.connect(cb)
         return btn
 
+    def _set_msg(self, testo):
+        self._msg_lbl.setText(testo)
+        self._msg_lbl.setVisible(bool(testo))
+
     def _center(self):
         s = QApplication.primaryScreen()
         if s:
@@ -456,14 +504,18 @@ class Card(QWidget):
         self._update_ui()
 
     def _run_systemctl(self, action, wait_s):
-        import subprocess
-        import time
-        try:
-            subprocess.run(["systemctl", "--user", action, "ai-router"], capture_output=True, timeout=10)
-            time.sleep(wait_s)
-        except Exception:
-            pass
+        ok, messaggio = run_systemctl(action)
+        time.sleep(wait_s)
         self._refresh()
+        if not ok:
+            self._set_msg(messaggio)
+        elif action in ("start", "restart") and self._service_status != "active":
+            # systemctl e' tornato 0 ma il servizio non regge: l'errore vero sta
+            # nel journal. Senza questa riga il pannello mostrava solo OFFLINE.
+            self._set_msg(f"avvio fallito ({self._service_status or 'inattivo'}) — "
+                          f"journalctl --user -u {SERVICE} -n 40")
+        else:
+            self._set_msg("")
 
     def _start_router(self):
         self._run_systemctl("start", 1.5)
