@@ -306,8 +306,11 @@ class DebugLogger:
                 upstream_encoding: str = "", sent_bytes: int = 0,
                 orig: dict | None = None, sent_analysis: dict | None = None,
                 note: str = "", mode: str = None, severity: str = "error",
-                category: str = None, synthetic: bool = False) -> None:
+                category: str = None, synthetic: bool = False,
+                **_unexpected_kwargs) -> None:
         try:
+            if _unexpected_kwargs:
+                self._debug_err(f"capture() ha ricevuto kwarg sconosciuti (ignorati, non crashati): {sorted(_unexpected_kwargs)}")
             if mode is None:
                 from router_mode import get_mode
                 mode = get_mode(request, fp)

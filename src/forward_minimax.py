@@ -225,7 +225,7 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
             _minimax_alert(f'Token Plan esaurito: {snippet[:200]}')
             dl.capture(kind='minimax_429_token_plan', request=request, fp='',
                       upstream_status=429, upstream_raw=raw, mode='minimax',
-                      snippet=snippet[:300], severity='error')
+                      note=snippet[:300], severity='error')
             if not plan_retry_done:
                 plan_retry_done = True
                 await asyncio.sleep(10)
