@@ -25,40 +25,16 @@ from router_utils import (
 )
 from router_mode import _resolve_chat_fingerprint
 from router_auth import get_minimax_key
+from synthetic_response import synthetic_rate_limit
 # _log_original_model is defined in ai-router-proxy.py namespace, imported there
 
 # Global mutable state
 ANTHROPIC_OAUTH_TOKEN = ""  # will be updated by router_auth._reload_oauth_token
 
 
-class _SyntheticResponse:
-    """429/400 sintetico che emula la superficie ClientResponse usata dal router."""
-
-    def __init__(self, status: int, payload: dict):
-        self._body = json.dumps(payload).encode()
-        self.status = status
-        self.headers = {"Content-Type": "application/json", "x-ai-router": "synthetic"}
-
-    async def read(self):
-        return self._body
-
-    async def json(self):
-        return json.loads(self._body)
-
-    async def release(self):
-        return None
-
-    @property
-    def content(self):
-        body = self._body
-        class _OneShot:
-            async def iter_any(self):
-                yield body
-        return _OneShot()
-
-
-def _synthetic_429(msg: str) -> "_SyntheticResponse":
-    return _SyntheticResponse(429, {"type": "error", "error": {"type": "rate_limit_error", "message": msg}})
+# _SyntheticResponse/_synthetic_429 rimossi 2026-08-25: duplicato di
+# synthetic_response.SyntheticResponse privo di .closed, causava AttributeError
+# in streaming_relay.py sui 429 MiniMax reali. Uso diretto di synthetic_rate_limit.
 
 
     # _synthetic_context_exceed rimossa il 2026-08-03: era rimasta orfana dopo che il suo
@@ -166,11 +142,11 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
     while True:
         budget_left = retry_budget_sec - (time.monotonic() - t0)
         if budget_left <= 0:
-            return _synthetic_429(f"MiniMax rate limited: retry budget {retry_budget_sec:.0f}s esaurito.")
+            return synthetic_rate_limit(f"MiniMax rate limited: retry budget {retry_budget_sec:.0f}s esaurito.")
         try:
             entry = await MINIMAX_LIMITER.acquire(model, est, budget_left)
         except RateLimitExhausted as e:
-            return _synthetic_429(f"MiniMax rate limited (pacing): {e}")
+            return synthetic_rate_limit(f"MiniMax rate limited (pacing): {e}")
         async with _MINIMAX_SEM:
             req_kwargs = dict(data=new_body, headers=headers, allow_redirects=False)
             if act_timeout_sec is not None:
@@ -212,9 +188,9 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
         if up.status == 529:
             step = MINIMAX_LIMITER.on_429_rpm()
             _log(f'minimax 529 cluster-overload: backoff {step}s (budget left {budget_left:.0f}s) model={model}')
-            dl.capture(kind='minimax_529_overload', request=request, fp='',
+            dl.capture(kind='minimax_529_overload', request=request, fp=_resolve_chat_fingerprint(request),
                       upstream_status=529, upstream_raw=raw,
-                      note=f'backoff {step}s, budget {budget_left:.0f}s', mode='minimax',
+                      note=f'backoff {step}s, budget {budget_left:.0f}s',
                       severity='block')
             continue
         kind = _classify_429(raw)
@@ -223,19 +199,19 @@ async def forward_minimax(request, body, session, retry_budget_sec: float = None
             MINIMAX_LIMITER.set_plan_exhausted(snippet)
             _log(f'minimax 429 TOKEN-PLAN: {snippet[:200]}')
             _minimax_alert(f'Token Plan esaurito: {snippet[:200]}')
-            dl.capture(kind='minimax_429_token_plan', request=request, fp='',
-                      upstream_status=429, upstream_raw=raw, mode='minimax',
+            dl.capture(kind='minimax_429_token_plan', request=request, fp=_resolve_chat_fingerprint(request),
+                      upstream_status=429, upstream_raw=raw,
                       note=snippet[:300], severity='error')
             if not plan_retry_done:
                 plan_retry_done = True
                 await asyncio.sleep(10)
                 continue
-            return _synthetic_429(f'MiniMax Token Plan esaurito. {snippet[:300]}')
+            return synthetic_rate_limit(f'MiniMax Token Plan esaurito. {snippet[:300]}')
         step = MINIMAX_LIMITER.on_429_rpm()
         _log(f'minimax 429 RPM/TPM: backoff {step}s (budget left {budget_left:.0f}s) model={model}')
-        dl.capture(kind='minimax_429_rpm', request=request, fp='',
+        dl.capture(kind='minimax_429_rpm', request=request, fp=_resolve_chat_fingerprint(request),
                   upstream_status=429, upstream_raw=raw,
-                  note=f'backoff {step}s, budget {budget_left:.0f}s', mode='minimax',
+                  note=f'backoff {step}s, budget {budget_left:.0f}s',
                   severity='block')
 
 
@@ -259,12 +235,12 @@ async def _forward_minimax_generative(request, body: bytes, session,
     while True:
         budget_left = retry_budget_sec - (time.monotonic() - t0)
         if budget_left <= 0:
-            return _synthetic_429("MiniMax generative rate limited: retry budget esaurito.")
+            return synthetic_rate_limit("MiniMax generative rate limited: retry budget esaurito.")
         try:
             est_tokens = max(1, len(body) // 4)
             entry = await MINIMAX_LIMITER.acquire("generative", est_tokens, budget_left)
         except RateLimitExhausted as e:
-            return _synthetic_429(f"MiniMax generative rate limited (pacing): {e}")
+            return synthetic_rate_limit(f"MiniMax generative rate limited (pacing): {e}")
         async with _MINIMAX_SEM:
             # Immagini/video/musica sono non-streaming e per natura lenti: qui il
             # tetto di 120s della sessione e' ancora meno appropriato che altrove.
@@ -303,9 +279,9 @@ async def _forward_minimax_generative(request, body: bytes, session,
         step = MINIMAX_LIMITER.on_429_rpm()
         _kind = 'minimax_generative_529' if up.status == 529 else 'minimax_generative_429'
         log(f'minimax-generative {up.status}: backoff {step}s')
-        dl.capture(kind=_kind, request=request, fp='',
+        dl.capture(kind=_kind, request=request, fp=_resolve_chat_fingerprint(request),
                   upstream_status=up.status,
-                  note=f'generative path, backoff {step}s', mode='minimax',
+                  note=f'generative path, backoff {step}s',
                   severity='block')
         await asyncio.sleep(step)
 
