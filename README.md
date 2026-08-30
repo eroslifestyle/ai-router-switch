@@ -109,3 +109,4 @@ Model weights. API keys. Provider accounts. The router itself does not grant acc
 - English manual: `docs/MANUAL.en.md`
 - Project notes: `docs/PIANO.md`
 - Local stack: `local-stack/README.md`
+- Claude Code hierarchy bootstrap (ready-to-paste prompt): `docs/claude-hierarchy/README.md`
