@@ -53,6 +53,7 @@ MODES = [
     {"id": "mix-gm", "icon": "🟢🟠", "label": "MixGM", "exec": "GLM-5.2 THINK + MiniMax ACT"},
     {"id": "mix-gm-2", "icon": "🟢🟠⚡", "label": "MixGM-2", "exec": "MixGM + delega forzata (deny)"},
     {"id": "mix-ag", "icon": "🔵🟢", "label": "MixAG", "exec": "Anthropic THINK + GLM ACT"},
+    {"id": "opr", "icon": "🌐", "label": "OPR", "exec": "Ox Alpha via OpenRouter"},
     {"id": "mix-ag-2", "icon": "🔵🟢⚡", "label": "MixAG-2", "exec": "MixAG + delega forzata (deny)"},
     {"id": "mix-al", "icon": "🔵🖥", "label": "MixAL", "exec": "Anthropic THINK + LLM locale ACT"},
     {"id": "local", "icon": "🖥️", "label": "Local", "exec": "Tutto su LLM locale (code-max)"},
@@ -357,7 +358,7 @@ class Card(QWidget):
 
         solo_grid = QGridLayout()
         solo_grid.setSpacing(SPACING)
-        solo_ids = ["anthropic", "minimax", "glm", "qwen", "local"]
+        solo_ids = ["anthropic", "minimax", "glm", "qwen", "opr", "local"]
         self._cards = {}
         for i, mid in enumerate(solo_ids):
             m = next(x for x in MODES if x["id"] == mid)

@@ -62,6 +62,7 @@ from router_utils import (
     promote_system_messages,
 )
 from router_debug import debug_auth_middleware, dl
+from router_debug_ext import trace_logger
 from router_mode import (
     get_file_mode, _current_mode, _err_response, get_mode,
     conversation_fingerprint, _resolve_chat_fingerprint,
@@ -922,9 +923,63 @@ async def handle(request):
                 _local_body = _local_mod.inject_system_hint(_local_body)
             _local_body = strip_thinking_blocks(_local_body)
             _local_body = _local_mod.set_body_model(_local_body, _local_model)
+
+            # Sanitizzazione per OpenRouter: rimuovi parametri non supportati
+            # (es. reasoning_effort) prima di passare a LiteLLM
+            if _local_model == "ox-alpha":
+                from openrouter_sanitize import sanitize_for_openrouter
+                _local_body = sanitize_for_openrouter(_local_body)
+
+            # Trace completo per debug provider local
+            start_trace = time.monotonic()
             up = await _local_mod.forward_local(request, _local_body, session,
                                                 _req_model or _local_model, log_fn=log,
                                                 passthrough=True, upstream_model=_local_model)
+            elapsed_ms = (time.monotonic() - start_trace) * 1000
+
+            # Cattura risposta per trace
+            response_body = None
+            response_status = up.status if up else 0
+            response_headers = dict(up.headers) if up else {}
+            try:
+                if up:
+                    response_body = await up.read()
+            except Exception:
+                pass
+
+            # Registra trace
+            from router_debug_ext import trace_logger
+            trace_logger.capture(
+                mode=mode,
+                model=_local_model,
+                request_body=_local_body,
+                response_status=response_status,
+                response_body=response_body,
+                response_headers=response_headers,
+                elapsed_ms=elapsed_ms,
+                request_path=request.path,
+            )
+
+            # Ricostruisci response con body letto
+            if up and response_body is not None:
+                class _FixedResponse:
+                    def __init__(self, orig, body):
+                        self._orig = orig
+                        self._body = body
+                    @property
+                    def content(self):
+                        class _Content:
+                            def __init__(self, b):
+                                self._b = b
+                            async def read(self):
+                                return self._b
+                            async def iter_any(self):
+                                yield self._b
+                        return _Content(response_body)
+                    def __getattr__(self, name):
+                        return getattr(self._orig, name)
+                up = _FixedResponse(up, response_body)
+
             return await relay(up, extra_headers={"x-ai-verified": f"tunnel-{mode}-local({_local_model})"}, final_override=f"local:{_local_model}")
         except Exception as e:
             log(f"tunnel {mode} LOCAL EXC: {e} -> 502")
@@ -1023,7 +1078,7 @@ def _make_app(session, forced_mode):
     app.router.add_get("/debug/errors", dl.errors_endpoint)
     app.router.add_get("/debug/last", dl.last_endpoint)
     app.router.add_get("/debug/stats", dl.stats_endpoint)
-    app.router.add_get("/debug/trace", dl.trace_endpoint)
+    app.router.add_get("/debug/trace", trace_logger.trace_endpoint)
     # /debug/request?rid=<id> (2026-08-08): ricostruisce la storia di UNA
     # richiesta unendo righe di log e telemetria. Coperta dallo stesso
     # middleware di autenticazione delle altre rotte /debug/.

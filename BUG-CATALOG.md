@@ -2,11 +2,11 @@
 
 > Generato automaticamente da `scripts/generate_bug_report.py` a partire da `logs/BUG-CATALOG.jsonl`. Non modificare a mano — rilanciare lo script. Vedi `DEBUG-CATALOG-SPEC.md` per lo schema completo.
 
-**1378 tipi distinti di bug/blocco/errore** · **60978 occorrenze totali** su 14 modalita'.
+**1594 tipi distinti di bug/blocco/errore** · **63670 occorrenze totali** su 16 modalita'.
 
 ## Modalita': `anthropic`
 
-124 tipi distinti, 37889 occorrenze.
+125 tipi distinti, 37904 occorrenze.
 
 ### `rate_limit_429_exhausted` (429)
 
@@ -85,6 +85,15 @@
 - **Ultima volta**: 2026-08-18T19:30:05+0200
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `event: error data: {"type":"error","error":{"details":null,"type":"overloaded_error","message":"Overloaded"},"request_id":"req_011CeAcN5jbmnujZzxShNsAy"  }`
+
+### `ctx_gate` (error)
+
+- **Firma**: `f1fce1a81fe35cf4`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 2
+- **Prima volta**: 2026-07-27T23:20:46+0200
+- **Ultima volta**: 2026-08-28T16:45:32+0200
+- **Modalita' coinvolte**: anthropic
 
 ### `relay_error_400` (400)
 
@@ -666,15 +675,6 @@
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"},"request_id":"req_011CdbjtbG9NDVULGYESz2WP"}`
 
-### `ctx_gate` (error)
-
-- **Firma**: `f1fce1a81fe35cf4`
-- **Severita'**: 🔴 Errori
-- **Occorrenze**: 1
-- **Prima volta**: 2026-07-27T23:20:46+0200
-- **Ultima volta**: 2026-07-27T23:20:46+0200
-- **Modalita' coinvolte**: anthropic
-
 ### `relay_error_400` (400)
 
 - **Firma**: `9cbf1e5e7aec7060`
@@ -1147,6 +1147,16 @@
 
 ### `rate_limit_429`
 
+- **Firma**: `a69748a644f3aa99`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-28T22:46:25+0200
+- **Ultima volta**: 2026-08-28T22:46:25+0200
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `anthropic EXC: retry 1/2 sleep=0.29s (Cannot connect to host api.anthropic.com:443 ssl:default [Name or service not known])`
+
+### `rate_limit_429`
+
 - **Firma**: `1b10f072fcd4c6c9`
 - **Severita'**: 🟡 Blocchi
 - **Occorrenze**: 1
@@ -1189,9 +1199,9 @@
 
 - **Firma**: `77864e7a51a32f02`
 - **Severita'**: info
-- **Occorrenze**: 179
+- **Occorrenze**: 192
 - **Prima volta**: 2026-07-30T03:21:40+0200
-- **Ultima volta**: 2026-08-23T07:58:58+0200
+- **Ultima volta**: 2026-08-28T18:17:06+0200
 - **Modalita' coinvolte**: anthropic
 
 ### `tool_isolation_strip`
@@ -1245,7 +1255,7 @@
 
 ## Modalita': `glm`
 
-53 tipi distinti, 5868 occorrenze.
+58 tipi distinti, 6593 occorrenze.
 
 ### `forward_exception`
 
@@ -1266,6 +1276,16 @@
 - **Ultima volta**: 2026-07-28T07:13:46+0200
 - **Modalita' coinvolte**: glm
 - **Esempio**: `[Errno 104] Connection reset by peer`
+
+### `forward_exception`
+
+- **Firma**: `84d2e99403a775b7`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 28
+- **Prima volta**: 2026-07-30T08:12:22+0200
+- **Ultima volta**: 2026-08-30T08:48:55+0200
+- **Modalita' coinvolte**: glm
+- **Esempio**: `Cannot write to closing transport`
 
 ### `glm_timeout`
 
@@ -1296,16 +1316,6 @@
 - **Ultima volta**: 2026-07-31T08:22:27+0200
 - **Modalita' coinvolte**: glm
 - **Esempio**: `model=claude-opus-5`
-
-### `forward_exception`
-
-- **Firma**: `84d2e99403a775b7`
-- **Severita'**: 🔴 Errori
-- **Occorrenze**: 22
-- **Prima volta**: 2026-07-30T08:12:22+0200
-- **Ultima volta**: 2026-08-19T07:04:37+0200
-- **Modalita' coinvolte**: glm
-- **Esempio**: `Cannot write to closing transport`
 
 ### `glm_exhausted` (502)
 
@@ -1406,6 +1416,46 @@
 - **Ultima volta**: 2026-07-22T10:40:22Z
 - **Modalita' coinvolte**: glm
 - **Esempio**: `model=claude-haiku-4-5-20251001`
+
+### `forward_exception`
+
+- **Firma**: `52a92374d1f22fb1`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-29T10:46:17+0200
+- **Ultima volta**: 2026-08-29T10:46:17+0200
+- **Modalita' coinvolte**: glm
+- **Esempio**: `Timeout on reading data from socket`
+
+### `glm_5xx_retry` (500)
+
+- **Firma**: `595a7b75d903ec9c`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-28T22:25:42+0200
+- **Ultima volta**: 2026-08-28T22:25:42+0200
+- **Modalita' coinvolte**: glm
+- **Esempio**: `attempt=1 model=glm-4.7`
+
+### `glm_timeout`
+
+- **Firma**: `9cf5b93d11eec955`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-25T03:38:09+0200
+- **Ultima volta**: 2026-08-25T03:38:09+0200
+- **Modalita' coinvolte**: glm
+- **Esempio**: `attempt=1 model=glm-4.7`
+
+### `forward_exception`
+
+- **Firma**: `22b9abecf09a9840`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-25T03:36:09+0200
+- **Ultima volta**: 2026-08-25T03:36:09+0200
+- **Modalita' coinvolte**: glm
+- **Esempio**: `Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'>. ConnectionResetError(104, 'Connection reset by peer')`
 
 ### `truncated_response_glm` (200)
 
@@ -1650,11 +1700,21 @@
 
 - **Firma**: `2cf1321f17c5adda`
 - **Severita'**: info
-- **Occorrenze**: 4711
+- **Occorrenze**: 4719
 - **Prima volta**: 2026-07-22T08:07:41Z
-- **Ultima volta**: 2026-08-18T18:57:28+0200
+- **Ultima volta**: 2026-08-30T08:48:55+0200
 - **Modalita' coinvolte**: glm
-- **Esempio**: `stripped=['WebFetch', 'WebSearch'] kept=302/304`
+- **Esempio**: `stripped=['WebFetch', 'WebSearch'] kept=8/10`
+
+### `tool_isolation_strip`
+
+- **Firma**: `e119ad9c18e6e970`
+- **Severita'**: info
+- **Occorrenze**: 634
+- **Prima volta**: 2026-07-22T07:21:28Z
+- **Ultima volta**: 2026-08-30T08:51:36+0200
+- **Modalita' coinvolte**: glm
+- **Esempio**: `stripped=['WebSearch', 'WebFetch'] kept=4/6`
 
 ### `tool_isolation_strip`
 
@@ -1678,13 +1738,13 @@
 
 ### `tool_isolation_strip`
 
-- **Firma**: `e119ad9c18e6e970`
+- **Firma**: `eaee38e94e6615c9`
 - **Severita'**: info
-- **Occorrenze**: 11
-- **Prima volta**: 2026-07-22T07:21:28Z
-- **Ultima volta**: 2026-08-09T21:56:11+0200
+- **Occorrenze**: 84
+- **Prima volta**: 2026-08-24T13:11:48+0200
+- **Ultima volta**: 2026-08-27T00:52:59+0200
 - **Modalita' coinvolte**: glm
-- **Esempio**: `stripped=['WebSearch', 'WebFetch'] kept=4/6`
+- **Esempio**: `stripped=['WebSearch'] kept=4/5`
 
 ### `tool_isolation_strip`
 
@@ -1885,7 +1945,47 @@
 
 ## Modalita': `local`
 
-15 tipi distinti, 146 occorrenze.
+28 tipi distinti, 596 occorrenze.
+
+### `relay_error_500` (500)
+
+- **Firma**: `eb10e09cb91aa83d`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 71
+- **Prima volta**: 2026-08-23T15:32:13+0200
+- **Ultima volta**: 2026-08-23T17:13:46+0200
+- **Modalita' coinvolte**: local
+- **Esempio**: `{"error":{"message":"litellm.InternalServerError: InternalServerError: OpenAIException - Cannot connect to host 172.18.0.1:8083 ssl:<ssl.SSLContext object at 0x720572af2670> [Connect call failed ('172.18.0.1', 8083)]. Received Model Group=code-max\nAvailable Model Group Fallbacks=None","type":null,"`
+
+### `relay_error_502` (502)
+
+- **Firma**: `5cb24cf70880f892`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 38
+- **Prima volta**: 2026-08-23T17:13:22+0200
+- **Ultima volta**: 2026-08-25T16:05:50+0200
+- **Modalita' coinvolte**: local
+- **Esempio**: `{"type": "error", "error": {"type": "local_unavailable", "message": "{\"type\":\"error\",\"error\":{\"type\":\"local_unavailable\",\"message\":\"Local LLM backend unreachable: \"}}"}}`
+
+### `upstream_timeout` (502)
+
+- **Firma**: `923820038e3eb926`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 34
+- **Prima volta**: 2026-08-23T17:17:56+0200
+- **Ultima volta**: 2026-08-25T16:05:50+0200
+- **Modalita' coinvolte**: local
+- **Esempio**: `TimeoutError elapsed=240219ms model=code-max`
+
+### `openrouter_429_upstream_retry` (429)
+
+- **Firma**: `edf434d4c9588151`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 28
+- **Prima volta**: 2026-08-25T07:14:48+0200
+- **Ultima volta**: 2026-08-25T07:36:47+0200
+- **Modalita' coinvolte**: local
+- **Esempio**: `model=ox-alpha retry_after=15s attempt=3`
 
 ### `relay_error_500` (500)
 
@@ -1897,15 +1997,43 @@
 - **Modalita' coinvolte**: local
 - **Esempio**: `{"error":{"message":"litellm.InternalServerError: InternalServerError: OpenAIException - {\"error\":{\"code\":500,\"message\":\"image input is not supported - hint: if this is unexpected, you may need to provide the mmproj\",\"type\":\"server_error\"}}No fallback model group found for original model`
 
+### `forward_exception`
+
+- **Firma**: `e68e94708f150f4b`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 22
+- **Prima volta**: 2026-08-04T22:49:17+0200
+- **Ultima volta**: 2026-08-25T15:54:53+0200
+- **Modalita' coinvolte**: local
+- **Esempio**: `Cannot write to closing transport`
+
 ### `truncated_response_local`
 
 - **Firma**: `2654810284dcaa1d`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 14
+- **Occorrenze**: 22
 - **Prima volta**: 2026-08-16T20:30:16+0200
-- **Ultima volta**: 2026-08-20T14:13:03+0200
+- **Ultima volta**: 2026-08-25T06:42:04+0200
 - **Modalita' coinvolte**: local
-- **Esempio**: `end_turn->max_tokens output_tokens=100 max=50`
+- **Esempio**: `end_turn->max_tokens output_tokens=16 max=10`
+
+### `forward_exception`
+
+- **Firma**: `c0bf5b3dea2f86ad`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 18
+- **Prima volta**: 2026-08-14T08:17:39+0200
+- **Ultima volta**: 2026-08-23T21:01:44+0200
+- **Modalita' coinvolte**: local
+
+### `truncated_response_local` (200)
+
+- **Firma**: `9e4a56b9389d6e37`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 13
+- **Prima volta**: 2026-08-14T08:17:39+0200
+- **Ultima volta**: 2026-08-25T15:18:49+0200
+- **Modalita' coinvolte**: local
 
 ### `relay_error_500` (500)
 
@@ -1917,34 +2045,55 @@
 - **Modalita' coinvolte**: local
 - **Esempio**: `{"error":{"message":"litellm.InternalServerError: InternalServerError: OpenAIException - [Errno 32] Broken pipeNo fallback model group found for original model_group=code-max. Fallbacks=[{'groq-llama70b': ['cerebras-qwen235b', 'chat-max']}, {'groq-qwen32b': ['cerebras-qwen235b', 'chat-max']}, {'groq`
 
-### `forward_exception`
-
-- **Firma**: `c0bf5b3dea2f86ad`
-- **Severita'**: 🔴 Errori
-- **Occorrenze**: 12
-- **Prima volta**: 2026-08-14T08:17:39+0200
-- **Ultima volta**: 2026-08-18T21:25:22+0200
-- **Modalita' coinvolte**: local
-
-### `forward_exception`
-
-- **Firma**: `e68e94708f150f4b`
-- **Severita'**: 🔴 Errori
-- **Occorrenze**: 10
-- **Prima volta**: 2026-08-04T22:49:17+0200
-- **Ultima volta**: 2026-08-19T06:02:48+0200
-- **Modalita' coinvolte**: local
-- **Esempio**: `Cannot write to closing transport`
-
 ### `relay_error_500` (500)
 
 - **Firma**: `0eba1bcf78564fed`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 8
+- **Occorrenze**: 9
 - **Prima volta**: 2026-08-14T08:59:58+0200
-- **Ultima volta**: 2026-08-14T09:11:53+0200
+- **Ultima volta**: 2026-08-23T21:20:12+0200
 - **Modalita' coinvolte**: local
-- **Esempio**: `{"error":{"message":"litellm.InternalServerError: InternalServerError: OpenAIException - [Errno 104] Connection reset by peerNo fallback model group found for original model_group=code-max. Fallbacks=[{'groq-llama70b': ['cerebras-qwen235b', 'chat-max']}, {'groq-qwen32b': ['cerebras-qwen235b', 'chat-`
+- **Esempio**: `{"error":{"message":"litellm.InternalServerError: InternalServerError: OpenAIException - [Errno 104] Connection reset by peer. Received Model Group=code-max\nAvailable Model Group Fallbacks=None","type":null,"param":null,"code":"500"}}`
+
+### `forward_exception`
+
+- **Firma**: `5244756a9b9c65b0`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 5
+- **Prima volta**: 2026-08-25T12:51:11+0200
+- **Ultima volta**: 2026-08-25T15:18:49+0200
+- **Modalita' coinvolte**: local
+- **Esempio**: `Connection closed`
+
+### `relay_error_500` (500)
+
+- **Firma**: `608f250cfb77f7fa`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 5
+- **Prima volta**: 2026-08-14T09:02:45+0200
+- **Ultima volta**: 2026-08-23T21:21:40+0200
+- **Modalita' coinvolte**: local
+- **Esempio**: `{"error":{"message":"litellm.InternalServerError: InternalServerError: OpenAIException - [Errno None] Can not write request body for http://172.18.0.1:8083/v1/responses. Received Model Group=code-max\nAvailable Model Group Fallbacks=None","type":null,"param":null,"code":"500"}}`
+
+### `upstream_conn_error` (502)
+
+- **Firma**: `d6dd2b6daf2bade7`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 4
+- **Prima volta**: 2026-08-23T17:13:22+0200
+- **Ultima volta**: 2026-08-23T17:13:28+0200
+- **Modalita' coinvolte**: local
+- **Esempio**: `ServerDisconnectedError elapsed=1ms model=code-max`
+
+### `relay_error_500` (500)
+
+- **Firma**: `449799eafaf428b7`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 3
+- **Prima volta**: 2026-08-23T21:19:54+0200
+- **Ultima volta**: 2026-08-23T21:20:37+0200
+- **Modalita' coinvolte**: local
+- **Esempio**: `{"error":{"message":"litellm.InternalServerError: InternalServerError: OpenAIException - [Errno 32] Broken pipe. Received Model Group=code-max\nAvailable Model Group Fallbacks=None","type":null,"param":null,"code":"500"}}`
 
 ### `ctx_gate` (error)
 
@@ -1967,6 +2116,46 @@
 
 ### `upstream_timeout` (502)
 
+- **Firma**: `7deb6455057d9b4f`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-25T07:23:03+0200
+- **Ultima volta**: 2026-08-25T07:23:03+0200
+- **Modalita' coinvolte**: local
+- **Esempio**: `TimeoutError elapsed=240759ms model=ox-alpha`
+
+### `empty_response_local` (200)
+
+- **Firma**: `60104b2324608404`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T17:48:01+0200
+- **Ultima volta**: 2026-08-23T17:48:01+0200
+- **Modalita' coinvolte**: local
+- **Esempio**: `event: message_start data: {"type": "message_start", "message": {"id": "msg_103df74e-94dc-4af6-bae5-22dc4fc9a3a0", "type": "message", "role": "assistant", "content": [], "model": "qcnext-mxfp4", "stop_reason": null, "stop_sequence": null, "usage": {"input_tokens": 0, "output_tokens": 0, "cache_creat`
+
+### `empty_response_local` (200)
+
+- **Firma**: `60f404ad9cc0cc1d`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T17:48:01+0200
+- **Ultima volta**: 2026-08-23T17:48:01+0200
+- **Modalita' coinvolte**: local
+- **Esempio**: `event: message_start data: {"type": "message_start", "message": {"id": "msg_3dec8a8c-40b9-46f6-a8fd-0bd46e8bb724", "type": "message", "role": "assistant", "content": [], "model": "qcnext-mxfp4", "stop_reason": null, "stop_sequence": null, "usage": {"input_tokens": 0, "output_tokens": 0, "cache_creat`
+
+### `empty_response_local` (200)
+
+- **Firma**: `d082759b9ec45c47`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T17:11:14+0200
+- **Ultima volta**: 2026-08-23T17:11:14+0200
+- **Modalita' coinvolte**: local
+- **Esempio**: `event: message_start data: {"type": "message_start", "message": {"id": "msg_56890aa5-10aa-46d5-92e2-6d698a2a7c50", "type": "message", "role": "assistant", "content": [], "model": "qcnext-mxfp4", "stop_reason": null, "stop_sequence": null, "usage": {"input_tokens": 0, "output_tokens": 0, "cache_creat`
+
+### `upstream_timeout` (502)
+
 - **Firma**: `146c63c1c54fe95b`
 - **Severita'**: 🔴 Errori
 - **Occorrenze**: 1
@@ -1975,43 +2164,44 @@
 - **Modalita' coinvolte**: local
 - **Esempio**: `TimeoutError elapsed=240509ms model=claude-opus-5`
 
-### `relay_error_500` (500)
+### `quota_429_local` (429)
 
-- **Firma**: `608f250cfb77f7fa`
-- **Severita'**: 🔴 Errori
-- **Occorrenze**: 1
-- **Prima volta**: 2026-08-14T09:02:45+0200
-- **Ultima volta**: 2026-08-14T09:02:45+0200
+- **Firma**: `4166a548fdb25487`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 72
+- **Prima volta**: 2026-08-25T06:08:52+0200
+- **Ultima volta**: 2026-08-25T07:05:54+0200
 - **Modalita' coinvolte**: local
-- **Esempio**: `{"error":{"message":"litellm.InternalServerError: InternalServerError: OpenAIException - [Errno None] Can not write request body for http://172.18.0.1:8083/v1/responsesNo fallback model group found for original model_group=code-max. Fallbacks=[{'groq-llama70b': ['cerebras-qwen235b', 'chat-max']}, {'`
-
-### `truncated_response_local` (200)
-
-- **Firma**: `9e4a56b9389d6e37`
-- **Severita'**: 🔴 Errori
-- **Occorrenze**: 1
-- **Prima volta**: 2026-08-14T08:17:39+0200
-- **Ultima volta**: 2026-08-14T08:17:39+0200
-- **Modalita' coinvolte**: local
-
-### `ctx_gate` (ok)
-
-- **Firma**: `70a910c52d76abb7`
-- **Severita'**: info
-- **Occorrenze**: 32
-- **Prima volta**: 2026-08-04T22:46:18+0200
-- **Ultima volta**: 2026-08-14T09:31:54+0200
-- **Modalita' coinvolte**: local
+- **Esempio**: `model=ox-alpha`
 
 ### `gpt_mcp_tool_strip`
 
 - **Firma**: `b2bad8caefab786d`
 - **Severita'**: info
-- **Occorrenze**: 21
+- **Occorrenze**: 112
 - **Prima volta**: 2026-08-18T16:05:49+0200
-- **Ultima volta**: 2026-08-19T07:07:08+0200
+- **Ultima volta**: 2026-08-23T21:21:35+0200
 - **Modalita' coinvolte**: local
-- **Esempio**: `stripped=1 kept=2/3`
+- **Esempio**: `stripped=11 kept=12/23`
+
+### `ctx_gate` (ok)
+
+- **Firma**: `70a910c52d76abb7`
+- **Severita'**: info
+- **Occorrenze**: 53
+- **Prima volta**: 2026-08-04T22:46:18+0200
+- **Ultima volta**: 2026-08-25T16:01:49+0200
+- **Modalita' coinvolte**: local
+
+### `tool_isolation_strip`
+
+- **Firma**: `5c0f5724afa8ae1b`
+- **Severita'**: info
+- **Occorrenze**: 34
+- **Prima volta**: 2026-08-23T20:57:43+0200
+- **Ultima volta**: 2026-08-25T06:09:11+0200
+- **Modalita' coinvolte**: local
+- **Esempio**: `stripped=['WebSearch'] kept=11/12`
 
 ### `tool_isolation_strip`
 
@@ -2027,15 +2217,15 @@
 
 - **Firma**: `0077f6cb47c73dfd`
 - **Severita'**: info
-- **Occorrenze**: 1
+- **Occorrenze**: 3
 - **Prima volta**: 2026-08-19T07:07:08+0200
-- **Ultima volta**: 2026-08-19T07:07:08+0200
+- **Ultima volta**: 2026-08-25T06:49:34+0200
 - **Modalita' coinvolte**: local
-- **Esempio**: `stripped=['web_search'] kept=1/2`
+- **Esempio**: `stripped=['web_search'] kept=14/15`
 
 ## Modalita': `minimax`
 
-32 tipi distinti, 9278 occorrenze.
+34 tipi distinti, 10005 occorrenze.
 
 ### `forward_exception`
 
@@ -2051,11 +2241,21 @@
 
 - **Firma**: `73852ba8357fe956`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 33
+- **Occorrenze**: 184
 - **Prima volta**: 2026-08-14T11:28:13+0200
-- **Ultima volta**: 2026-08-14T11:58:50+0200
+- **Ultima volta**: 2026-08-25T04:51:34+0200
 - **Modalita' coinvolte**: minimax
 - **Esempio**: `DebugLogger.capture() got an unexpected keyword argument 'snippet'`
+
+### `minimax_429_token_plan` (429)
+
+- **Firma**: `c58450eb783ac215`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 28
+- **Prima volta**: 2026-08-25T04:52:11+0200
+- **Ultima volta**: 2026-08-25T04:59:30+0200
+- **Modalita' coinvolte**: minimax
+- **Esempio**: `{"type":"error","error":{"type":"rate_limit_error","message":"Token Plan usage limit reached: Upgrade your Token Plan or purchase Credits for more usage. (2056)"},"request_id":"06dc3812018316c42d180137eef6e788"}`
 
 ### `truncated_response_minimax` (200)
 
@@ -2105,6 +2305,16 @@
 - **Modalita' coinvolte**: minimax
 - **Esempio**: `<html> <head><title>404 Not Found</title></head> <body> <center><h1>404 Not Found</h1></center> <hr><center>nginx</center> </body> </html>`
 
+### `forward_exception`
+
+- **Firma**: `90c8cb49e2091eca`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:02:22+0200
+- **Ultima volta**: 2026-08-23T09:02:22+0200
+- **Modalita' coinvolte**: minimax
+- **Esempio**: `Connection timeout to host https://api.minimaxi.chat/anthropic/v1/messages?beta=true`
+
 ### `ctx_gate` (error)
 
 - **Firma**: `4f7765d408fbf766`
@@ -2138,11 +2348,11 @@
 
 - **Firma**: `6a84d4c176ef7e21`
 - **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 514
+- **Occorrenze**: 588
 - **Prima volta**: 2026-07-29T19:44:18+0200
-- **Ultima volta**: 2026-08-23T08:20:44+0200
+- **Ultima volta**: 2026-08-23T09:59:47+0200
 - **Modalita' coinvolte**: minimax
-- **Esempio**: `{"type":"error","error":{"type":"rate_limit_error","message":"Token Plan rate limit reached: Upgrade your Token Plan or switch to pay-as-you-go API usage. (2062)"},"request_id":"06d9c43c244389e780baaedc02eb3a99"}`
+- **Esempio**: `{"type":"error","error":{"type":"rate_limit_error","message":"Token Plan rate limit reached: Upgrade your Token Plan or switch to pay-as-you-go API usage. (2062)"},"request_id":"06d9db73e02e70f7cd0f898a685d337a"}`
 
 ### `think_plan_invalid`
 
@@ -2157,11 +2367,11 @@
 
 - **Firma**: `5bb59c045b017c26`
 - **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 3
+- **Occorrenze**: 6
 - **Prima volta**: 2026-08-11T10:56:43+0200
-- **Ultima volta**: 2026-08-20T11:26:43+0200
+- **Ultima volta**: 2026-08-23T08:35:16+0200
 - **Modalita' coinvolte**: minimax
-- **Esempio**: `{"type":"error","error":{"type":"overloaded_error","message":"The server cluster is currently under high load. Please retry after a short wait and thank you for your patience. (2064) (529)"},"request_id":"06d5fb52522d84f368e5e9fb0226983c"}`
+- **Esempio**: `{"type":"error","error":{"type":"overloaded_error","message":"The server cluster is currently under high load. Please retry after a short wait and thank you for your patience. (2064) (529)"},"request_id":"06d9c7a4ebfdfaeaf07f99161574f402"}`
 
 ### `minimax_529_overload` (529)
 
@@ -2245,6 +2455,16 @@
 
 ### `tool_isolation_strip`
 
+- **Firma**: `0de3df722554d9aa`
+- **Severita'**: info
+- **Occorrenze**: 1771
+- **Prima volta**: 2026-07-22T23:32:11Z
+- **Ultima volta**: 2026-08-23T13:05:47+0200
+- **Modalita' coinvolte**: minimax
+- **Esempio**: `stripped=['WebFetch', 'WebSearch'] kept=8/10`
+
+### `tool_isolation_strip`
+
 - **Firma**: `f2020e9e7f5cab0e`
 - **Severita'**: info
 - **Occorrenze**: 1562
@@ -2255,23 +2475,33 @@
 
 ### `tool_isolation_strip`
 
-- **Firma**: `0de3df722554d9aa`
+- **Firma**: `4515af2f3045e96c`
 - **Severita'**: info
-- **Occorrenze**: 1486
-- **Prima volta**: 2026-07-22T23:32:11Z
-- **Ultima volta**: 2026-08-23T08:21:45+0200
+- **Occorrenze**: 199
+- **Prima volta**: 2026-08-22T19:37:17+0200
+- **Ultima volta**: 2026-08-23T16:30:07+0200
 - **Modalita' coinvolte**: minimax
-- **Esempio**: `stripped=['WebFetch', 'WebSearch'] kept=9/11`
+- **Esempio**: `stripped=['WebFetch'] kept=8/9`
 
 ### `tool_isolation_strip`
 
-- **Firma**: `4515af2f3045e96c`
+- **Firma**: `75c828c0da8ae843`
 - **Severita'**: info
-- **Occorrenze**: 107
-- **Prima volta**: 2026-08-22T19:37:17+0200
-- **Ultima volta**: 2026-08-23T08:31:33+0200
+- **Occorrenze**: 75
+- **Prima volta**: 2026-08-20T07:08:03+0200
+- **Ultima volta**: 2026-08-23T21:39:22+0200
 - **Modalita' coinvolte**: minimax
-- **Esempio**: `stripped=['WebFetch'] kept=9/10`
+- **Esempio**: `stripped=['WebSearch'] kept=4/5`
+
+### `tool_isolation_strip`
+
+- **Firma**: `bce312d3f2af300c`
+- **Severita'**: info
+- **Occorrenze**: 52
+- **Prima volta**: 2026-08-09T18:34:15+0200
+- **Ultima volta**: 2026-08-23T15:12:05+0200
+- **Modalita' coinvolte**: minimax
+- **Esempio**: `stripped=['WebSearch', 'WebFetch'] kept=4/6`
 
 ### `ctx_gate` (ok)
 
@@ -2281,26 +2511,6 @@
 - **Prima volta**: 2026-08-09T18:40:42+0200
 - **Ultima volta**: 2026-08-16T13:59:22+0200
 - **Modalita' coinvolte**: minimax
-
-### `tool_isolation_strip`
-
-- **Firma**: `75c828c0da8ae843`
-- **Severita'**: info
-- **Occorrenze**: 22
-- **Prima volta**: 2026-08-20T07:08:03+0200
-- **Ultima volta**: 2026-08-22T14:35:45+0200
-- **Modalita' coinvolte**: minimax
-- **Esempio**: `stripped=['WebSearch'] kept=8/9`
-
-### `tool_isolation_strip`
-
-- **Firma**: `bce312d3f2af300c`
-- **Severita'**: info
-- **Occorrenze**: 12
-- **Prima volta**: 2026-08-09T18:34:15+0200
-- **Ultima volta**: 2026-08-09T18:34:56+0200
-- **Modalita' coinvolte**: minimax
-- **Esempio**: `stripped=['WebSearch', 'WebFetch'] kept=4/6`
 
 ### `tool_isolation_strip`
 
@@ -2395,7 +2605,65 @@
 
 ## Modalita': `mix-ag-2`
 
-1 tipi distinti, 1 occorrenze.
+8 tipi distinti, 373 occorrenze.
+
+### `relay_error_400` (400)
+
+- **Firma**: `bfe96028112084b2`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 15
+- **Prima volta**: 2026-08-24T13:10:56+0200
+- **Ultima volta**: 2026-08-30T08:48:58+0200
+- **Modalita' coinvolte**: mix-ag-2
+- **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","code":"1210","message":"[1210][Invalid API parameter, please check the documentation.][202608301448575c4186d27bad4445]"},"request_id":"202608301448575c4186d27bad4445"}`
+
+### `truncated_response_mix-ag-2` (200)
+
+- **Firma**: `118d8bed45cd945a`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 14
+- **Prima volta**: 2026-08-24T11:44:20+0200
+- **Ultima volta**: 2026-08-30T09:20:15+0200
+- **Modalita' coinvolte**: mix-ag-2
+
+### `relay_error_401` (401)
+
+- **Firma**: `22b65aa59994465b`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-29T17:55:08+0200
+- **Ultima volta**: 2026-08-29T17:55:08+0200
+- **Modalita' coinvolte**: mix-ag-2
+- **Esempio**: `{"type":"error","error":{"type":"authentication_error","message":"OAuth access token has been revoked."},"request_id":null}`
+
+### `relay_error_400` (400)
+
+- **Firma**: `a1d77bddfc0cde59`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-25T06:14:49+0200
+- **Ultima volta**: 2026-08-25T06:14:49+0200
+- **Modalita' coinvolte**: mix-ag-2
+- **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","code":"1214","message":"[1214][modelCode: does not exist][202608251214490e6fd0dcd71b467f]"},"request_id":"202608251214490e6fd0dcd71b467f"}`
+
+### `empty_response_mix-ag-2` (200)
+
+- **Firma**: `4a3f1b668b4a0189`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-25T05:39:18+0200
+- **Ultima volta**: 2026-08-25T05:39:18+0200
+- **Modalita' coinvolte**: mix-ag-2
+- **Esempio**: `[binario non testuale, 300 caratteri]`
+
+### `test_minimax_429`
+
+- **Firma**: `57942c9becd5b151`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-24T19:22:16+0200
+- **Ultima volta**: 2026-08-24T19:22:16+0200
+- **Modalita' coinvolte**: mix-ag-2
 
 ### `relay_error_400` (400)
 
@@ -2406,6 +2674,15 @@
 - **Ultima volta**: 2026-08-09T03:33:40+0200
 - **Modalita' coinvolte**: mix-ag-2
 - **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0: Invalid `signature` in `thinking` block"},"request_id":"req_011CdrK9qe9g1Tt71J3L872R"}`
+
+### `ctx_gate` (ok)
+
+- **Firma**: `0aa889b241e4c4b5`
+- **Severita'**: info
+- **Occorrenze**: 339
+- **Prima volta**: 2026-08-24T13:07:42+0200
+- **Ultima volta**: 2026-08-30T16:33:54+0200
+- **Modalita' coinvolte**: mix-ag-2
 
 ## Modalita': `mix-al`
 
@@ -3180,7 +3457,7 @@
 
 ## Modalita': `mix-am-2`
 
-1008 tipi distinti, 3858 occorrenze.
+1191 tipi distinti, 4251 occorrenze.
 
 ### `ctx_gate` (error)
 
@@ -3205,18 +3482,18 @@
 
 - **Firma**: `535b18fa8fb2ae48`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 76
+- **Occorrenze**: 85
 - **Prima volta**: 2026-08-10T08:16:17+0200
-- **Ultima volta**: 2026-08-22T14:34:11+0200
+- **Ultima volta**: 2026-08-23T17:52:56+0200
 - **Modalita' coinvolte**: mix-am-2
 
 ### `empty_response_mix-am-2` (200)
 
 - **Firma**: `c2d147e1489ecb74`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 44
+- **Occorrenze**: 64
 - **Prima volta**: 2026-08-14T14:27:38+0200
-- **Ultima volta**: 2026-08-23T08:13:33+0200
+- **Ultima volta**: 2026-08-25T05:01:33+0200
 - **Modalita' coinvolte**: mix-am-2
 - **Esempio**: `[binario non testuale, 300 caratteri]`
 
@@ -3230,13 +3507,23 @@
 - **Modalita' coinvolte**: mix-am-2
 - **Esempio**: `{"input_tokens":12691}`
 
+### `minimax_429_token_plan` (429)
+
+- **Firma**: `d53d3b185916d458`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 22
+- **Prima volta**: 2026-08-25T05:02:56+0200
+- **Ultima volta**: 2026-08-25T05:07:54+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `{"type":"error","error":{"type":"rate_limit_error","message":"Token Plan usage limit reached: Upgrade your Token Plan or purchase Credits for more usage. (2056)"},"request_id":"06dc3a0a5f66bf15065e4cdbdf9f1046"}`
+
 ### `relay_error_401` (401)
 
 - **Firma**: `dae88d6db43cba14`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 13
+- **Occorrenze**: 14
 - **Prima volta**: 2026-08-20T09:27:15+0200
-- **Ultima volta**: 2026-08-22T09:32:41+0200
+- **Ultima volta**: 2026-08-24T13:04:33+0200
 - **Modalita' coinvolte**: mix-am-2
 - **Esempio**: `{"type":"error","error":{"type":"authentication_error","message":"OAuth access token has been revoked."},"request_id":null}`
 
@@ -3279,6 +3566,1826 @@
 - **Ultima volta**: 2026-08-21T16:23:35+0200
 - **Modalita' coinvolte**: mix-am-2
 - **Esempio**: `event: error data: {"type":"error","error":{"details":null,"type":"overloaded_error","message":"Overloaded"},"request_id":"req_011CeG3a5h8nJkv2rtiTarco"         }`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `1edc5a3a17decaa9`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T21:07:33+0200
+- **Ultima volta**: 2026-08-23T21:07:33+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da77e9932f01cbb6d2bba7a14c74a2","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":46474,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `10bee190fc1ebf01`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T18:19:03+0200
+- **Ultima volta**: 2026-08-23T18:19:03+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da5075d9b3b9704d2085f10492bc40","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":100,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `529e499d9e745d4f`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T18:19:00+0200
+- **Ultima volta**: 2026-08-23T18:19:00+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da5072ef6babb6cb8f8b70a6412ea9","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":35765,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `ddc1e3cdbda7f786`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T18:18:56+0200
+- **Ultima volta**: 2026-08-23T18:18:56+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da506eca3d2255e2a987f304b7d9d7","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":99,"output_tokens":0}}}  event: ping data: {"type`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `b4fc633da41d9534`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T18:18:56+0200
+- **Ultima volta**: 2026-08-23T18:18:56+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da506eb0af106d5aa5ee6593c98f8c","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":96,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `2760a9e9c3c15868`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T18:18:54+0200
+- **Ultima volta**: 2026-08-23T18:18:54+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da506b60258c34670a5e284df2f00f","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":35297,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `ddf0528abb3bd8d7`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T18:18:49+0200
+- **Ultima volta**: 2026-08-23T18:18:49+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da5067399724befc7ba02237f00453","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":98,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `1a269ee04701cc52`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T18:18:48+0200
+- **Ultima volta**: 2026-08-23T18:18:48+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da506449de31073220cce13c4b9ef4","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":34881,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `63baaa2efe72c3a7`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T18:18:34+0200
+- **Ultima volta**: 2026-08-23T18:18:34+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da505826b3529f94c397e1bb780b0c","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":96,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `166cf356b033b92e`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T18:18:32+0200
+- **Ultima volta**: 2026-08-23T18:18:32+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da505462a5185e63d6dd09ed120487","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":33910,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `130febc6f5b7cc2f`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T18:18:27+0200
+- **Ultima volta**: 2026-08-23T18:18:27+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da505181d897a971bd7318f70675be","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":98,"output_tokens":0}}}  event: ping data: {"type`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `1bd7ccb914dbb191`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T18:18:27+0200
+- **Ultima volta**: 2026-08-23T18:18:27+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da5050ea445ed5a2745c8d44c41fa7","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":94,"output_tokens":0}}}  event: ping data: {"type`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `a4355860951ae34e`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T18:18:26+0200
+- **Ultima volta**: 2026-08-23T18:18:26+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da50507495f6d33c8644e9dd05c0c7","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":93,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `0669ca6822f6d08e`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T18:18:25+0200
+- **Ultima volta**: 2026-08-23T18:18:25+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da504e3d116288aff2b672ef10290a","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":33350,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `1dcbb18415605984`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T18:18:21+0200
+- **Ultima volta**: 2026-08-23T18:18:21+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da5049249c545d66cb5c38777bbf9f","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":102,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `7df554646623044a`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T18:18:17+0200
+- **Ultima volta**: 2026-08-23T18:18:17+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da5045a962fa3daf346b192d7c43f3","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":32841,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `635676b2600fbfd2`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T18:18:12+0200
+- **Ultima volta**: 2026-08-23T18:18:12+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da5038464909354889e9aea7465737","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":93,"output_tokens":0}}}  event: ping data: {"type`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `d2b54d7e4eb43aac`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T18:18:04+0200
+- **Ultima volta**: 2026-08-23T18:18:04+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da503816ac80bd316790e076ea2750","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":92,"output_tokens":0}}}  event: ping data: {"type`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `a89c356f1504aeea`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T18:18:03+0200
+- **Ultima volta**: 2026-08-23T18:18:03+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da50385028a75007d7f42e2702fc69","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":101,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `2bea2a514a87b2c2`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T18:18:00+0200
+- **Ultima volta**: 2026-08-23T18:18:00+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da50343396e4c5bfe9b8db42371eee","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":31673,"output_tokens":0,"cache_creation_input_tok`
+
+### `relay_error_404` (404)
+
+- **Firma**: `526048286dd3d64c`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T15:13:07+0200
+- **Ultima volta**: 2026-08-23T15:13:07+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `<html> <head><title>404 Not Found</title></head> <body> <center><h1>404 Not Found</h1></center> <hr><center>nginx</center> </body> </html>`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `0d16e421e5202ede`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T13:02:12+0200
+- **Ultima volta**: 2026-08-23T13:02:12+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da0631c7dd8ec6f6bb2121b02d9268","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":98,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `385b4e78213094ff`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T13:02:08+0200
+- **Ultima volta**: 2026-08-23T13:02:08+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da0624cf056c56032d4b01ddb43c0e","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":37255,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `ab05505555e58fd4`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:59:41+0200
+- **Ultima volta**: 2026-08-23T12:59:41+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da0599012d0b83a1a406a7163985c9","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":36688,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `2b2bbf38d8562df7`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:59:35+0200
+- **Ultima volta**: 2026-08-23T12:59:35+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da059556b0817bc1c9ee6ec86d50b4","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":102,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `3a5223a714057daa`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:59:33+0200
+- **Ultima volta**: 2026-08-23T12:59:33+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da05918798343acd26b0d2f2c8fb6e","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":36131,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `22eb6ab9c6d60e0f`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:59:23+0200
+- **Ultima volta**: 2026-08-23T12:59:23+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da05877395b4a8d6b994260d987d18","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":35595,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `c9600355f62988fa`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:59:12+0200
+- **Ultima volta**: 2026-08-23T12:59:12+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da057bf137b892971ce0236534d787","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":34942,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `86e38b6cbc02c41d`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:58:59+0200
+- **Ultima volta**: 2026-08-23T12:58:59+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da05719e6e3ddc0b4e9a499a1a0265","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":95,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `8a11a2e392ed3f49`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:58:58+0200
+- **Ultima volta**: 2026-08-23T12:58:58+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da056efe473dd73453bd7e0ea188e0","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":34079,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `6a33684b70664c5c`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:58:47+0200
+- **Ultima volta**: 2026-08-23T12:58:47+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da05654a869737693f5ebe176e9f92","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":96,"output_tokens":0}}}  event: ping data: {"type`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `482bf9f101420e91`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:58:47+0200
+- **Ultima volta**: 2026-08-23T12:58:47+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da056559341daaf4d713c6118fee15","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":95,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `5e9b97f5eaaffcf6`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:58:45+0200
+- **Ultima volta**: 2026-08-23T12:58:45+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da056021ecaa3d92fb3dcb60944adf","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":33366,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `4fe8f3415b303261`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:58:33+0200
+- **Ultima volta**: 2026-08-23T12:58:33+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da05560d80fd3046b3c5f2c9be6818","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":94,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `b8259231d1bc040b`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:58:30+0200
+- **Ultima volta**: 2026-08-23T12:58:30+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da055311907bbaff4900824edb133a","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":32855,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `f6d38a58aba7aa9e`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:58:20+0200
+- **Ultima volta**: 2026-08-23T12:58:20+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da05475f905c64e082509f349217a3","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":32242,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `a057f6112651a443`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:58:14+0200
+- **Ultima volta**: 2026-08-23T12:58:14+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da0544481e9be23861f7d1ec76dc02","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":94,"output_tokens":0}}}  event: ping data: {"type`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `7d0b36ff83c2c206`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:58:14+0200
+- **Ultima volta**: 2026-08-23T12:58:14+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da05443336e0373506c5098e764006","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":95,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `6ed84938bab10752`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:58:12+0200
+- **Ultima volta**: 2026-08-23T12:58:12+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da0541c3aebdc4eac2010b4969c28e","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":31770,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `3e7240ee47672423`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:58:02+0200
+- **Ultima volta**: 2026-08-23T12:58:02+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da05380b0e7b95ca15500dcfde44a8","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":100,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `7fafc456ae977713`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:58:02+0200
+- **Ultima volta**: 2026-08-23T12:58:02+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da0538861ff5fb749bbb6e21aafc64","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":96,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `0e48edfc0c6a303a`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:58:00+0200
+- **Ultima volta**: 2026-08-23T12:58:00+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da053304102267b77a1dbeb2c77892","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":30894,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `d74dadd553b105ad`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:51:39+0200
+- **Ultima volta**: 2026-08-23T12:51:39+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da03b88bfd673b4c437bc255429663","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":39307,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `abe1727201ac9ea1`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:51:36+0200
+- **Ultima volta**: 2026-08-23T12:51:36+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da03b557042ca71bf9368e52dee15d","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":101,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `6ed4d1a05d466214`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:51:33+0200
+- **Ultima volta**: 2026-08-23T12:51:33+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da03b0a32f8a3bae1a35e35217d368","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":38973,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `4e79303e1596945b`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:51:16+0200
+- **Ultima volta**: 2026-08-23T12:51:16+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da03a049a407d91ec42ce3cc0160b8","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":38126,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `255f8ee0f301e3f2`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:51:11+0200
+- **Ultima volta**: 2026-08-23T12:51:11+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da039c4cb34f1210e369a2fe06409c","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":97,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `3752042d39f4e043`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:51:08+0200
+- **Ultima volta**: 2026-08-23T12:51:08+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da0399d99682be6a0226e6cad5b159","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":37733,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `82b532e3eb903a6c`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:50:59+0200
+- **Ultima volta**: 2026-08-23T12:50:59+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da038fb69f543232a0641d884750a1","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":37220,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `0eb331e161aed5af`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:50:52+0200
+- **Ultima volta**: 2026-08-23T12:50:52+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da03887d30b7a3e5c9149a41d33010","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":36814,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `8a11c2ff2b03afb1`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:50:43+0200
+- **Ultima volta**: 2026-08-23T12:50:43+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da037e8a62c1d7b4dde78147d9feb6","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":36347,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `7a9ae3b7a943ced1`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:50:37+0200
+- **Ultima volta**: 2026-08-23T12:50:37+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da037b566947e58d81e835f38489e3","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":101,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `3717bb648662d202`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:50:35+0200
+- **Ultima volta**: 2026-08-23T12:50:35+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da037866951b94d2bdcfed53b04f0f","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":35944,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `a8b68433de6bae99`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:50:23+0200
+- **Ultima volta**: 2026-08-23T12:50:23+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da036ae01830e8f7c852b8b5bb5a2e","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":35225,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `40d1fae5444974c5`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:49:20+0200
+- **Ultima volta**: 2026-08-23T12:49:20+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da032d4992563b70df4d895924be6f","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":97,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `6590f02cbba51a49`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:49:17+0200
+- **Ultima volta**: 2026-08-23T12:49:17+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da032a9508a34a0c5b72e1cd030f10","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":34628,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `e17c95ab9780a5cd`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:49:13+0200
+- **Ultima volta**: 2026-08-23T12:49:13+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da03266f5139ac32abd0a8c79a6d95","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":104,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `9581e0faf7a13427`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:49:13+0200
+- **Ultima volta**: 2026-08-23T12:49:13+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da03255b56e6fe676f028343308b69","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":34251,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `9ff31ba5f5ecd529`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:49:12+0200
+- **Ultima volta**: 2026-08-23T12:49:12+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da0326a2ef88a0adf6c7af770c566e","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":98,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `fc6693138c04601d`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:49:10+0200
+- **Ultima volta**: 2026-08-23T12:49:10+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da03212a071b0a4d3011c34e0fa740","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":36915,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `5cab0caa7438b3ae`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:49:08+0200
+- **Ultima volta**: 2026-08-23T12:49:08+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da0322c9abac9327a49210e5857294","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":96,"output_tokens":0}}}  event: ping data: {"type`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `fbb93a35026fc50d`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:49:07+0200
+- **Ultima volta**: 2026-08-23T12:49:07+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da0321a003342666b839269dd42ffa","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":96,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `5bdd04aaecc50c28`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:49:05+0200
+- **Ultima volta**: 2026-08-23T12:49:05+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da031ecd73ca85a9d5d3c719dc2991","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":33659,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `a609300e39b7166b`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:48:56+0200
+- **Ultima volta**: 2026-08-23T12:48:56+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da03158a830c5ad5df867a9e3f0c96","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":96,"output_tokens":0}}}  event: ping data: {"type`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `4627f957be34149b`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:48:56+0200
+- **Ultima volta**: 2026-08-23T12:48:56+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da0316c57e80e083338e9846d63072","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":98,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `c7d82f2741dbca12`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:48:54+0200
+- **Ultima volta**: 2026-08-23T12:48:54+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da0312c60c84a3802b6742409faccb","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":36381,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `7222ca10b09aa6a4`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:48:21+0200
+- **Ultima volta**: 2026-08-23T12:48:21+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02f00aa78628b1d4657bc1f6903f","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":35785,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `2433af38e5aefab8`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:48:19+0200
+- **Ultima volta**: 2026-08-23T12:48:19+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02f08b9682666ebc1e15c254606e","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":30433,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `3d9baa4582d9b007`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:48:15+0200
+- **Ultima volta**: 2026-08-23T12:48:15+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02ec59ffc58b748caea21ce8d9d8","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":96,"output_tokens":0}}}  event: ping data: {"type`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `65c7bab359383e5b`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:48:14+0200
+- **Ultima volta**: 2026-08-23T12:48:14+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02ec8087a2be921781585d4c0d41","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":97,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `61ec73f5e4645ed9`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:48:13+0200
+- **Ultima volta**: 2026-08-23T12:48:13+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02ea40a6da8ecfac11f9820d39f9","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":35226,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `7756ccf9bd734f0b`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:48:10+0200
+- **Ultima volta**: 2026-08-23T12:48:10+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02e75e0bc5bc6d2d98f4c6ae5197","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":34793,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `7ed431057e1f4ca6`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:48:07+0200
+- **Ultima volta**: 2026-08-23T12:48:07+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02e481aae62cb709530246e69d31","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":93,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `1db45040a3ed1a83`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:48:05+0200
+- **Ultima volta**: 2026-08-23T12:48:05+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02df3571860c14e2d3c2bc3746eb","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":29786,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `903f72b29fc95158`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:48:04+0200
+- **Ultima volta**: 2026-08-23T12:48:04+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02df31f7aa8be8bc37ae76686454","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":34253,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `a35dd51b0dbb39be`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:48:03+0200
+- **Ultima volta**: 2026-08-23T12:48:03+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02dde2869fb24e81ca7703d700ac","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":33066,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `4f0474d2e226485c`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:58+0200
+- **Ultima volta**: 2026-08-23T12:47:58+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02dca7b44c2c68f60edc4a878f8f","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":93,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `21937761d95fd2e1`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:57+0200
+- **Ultima volta**: 2026-08-23T12:47:57+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02d95ecdd2758f39b7cb58fb7e56","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":33844,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `7407458ae4eece51`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:56+0200
+- **Ultima volta**: 2026-08-23T12:47:56+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02d99d9514d75b8ef6b6f54d10a8","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":32797,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `4602fce8e865aed9`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:53+0200
+- **Ultima volta**: 2026-08-23T12:47:53+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02d62514af609cf74311d6178da6","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":102,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `25e3a6fc95f0e3c7`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:53+0200
+- **Ultima volta**: 2026-08-23T12:47:53+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02d56418d759d17439a72748abb6","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":101,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `8da8c06fe452ccbb`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:52+0200
+- **Ultima volta**: 2026-08-23T12:47:52+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02d43b7fe04c43718d250c0b10a8","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":96,"output_tokens":0}}}  event: ping data: {"type`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `ec8031983674ff86`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:52+0200
+- **Ultima volta**: 2026-08-23T12:47:52+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02d6902b99095553b26a6c20c431","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":96,"output_tokens":0}}}  event: ping data: {"type`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `18ce419465b7028a`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:50+0200
+- **Ultima volta**: 2026-08-23T12:47:50+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02d320c87ca24f428c49d143eddd","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":99,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `d01bcee64847d4c2`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:50+0200
+- **Ultima volta**: 2026-08-23T12:47:50+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02d1e898f03f7323dd0472b68121","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":33275,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `7ff96315fedbaa7d`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:50+0200
+- **Ultima volta**: 2026-08-23T12:47:50+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02d4db58e8af720d20ff713b3d15","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":97,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `d734da12532d8973`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:48+0200
+- **Ultima volta**: 2026-08-23T12:47:48+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02d0bcc65683673ac442dabd9852","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":32158,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `c2da86ccd0dbce6e`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:47+0200
+- **Ultima volta**: 2026-08-23T12:47:47+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02cfd449a625f41a1ba43ad2c362","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":28619,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `b9b363c788d0a97b`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:45+0200
+- **Ultima volta**: 2026-08-23T12:47:45+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02cefec712902196548a8658ec9d","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":101,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `50bc29da6358df9a`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:44+0200
+- **Ultima volta**: 2026-08-23T12:47:44+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02ce920b9b2f927a0b76b763aefa","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":95,"output_tokens":0}}}  event: ping data: {"type`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `8c10adc163409880`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:43+0200
+- **Ultima volta**: 2026-08-23T12:47:43+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02ccaf016c741316b7591cb83460","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":108,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `389410909168fce9`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:42+0200
+- **Ultima volta**: 2026-08-23T12:47:42+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02cb8054cf0473fa04268bab6550","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":32829,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `b6c0db04b6d037d7`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:41+0200
+- **Ultima volta**: 2026-08-23T12:47:41+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02c9fc9b7b938254041482f5ae18","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":28147,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `43a3d2ceb68eb5d7`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:38+0200
+- **Ultima volta**: 2026-08-23T12:47:38+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02c80188c0c3234ca04158a53d66","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":103,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `36252472230d1676`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:36+0200
+- **Ultima volta**: 2026-08-23T12:47:36+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02c2a6eaba942db1b6d1441dcb86","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":32188,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `52d09c33ab86aa76`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:29+0200
+- **Ultima volta**: 2026-08-23T12:47:29+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02bddb41ea22ffc06d134676f3d1","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":27192,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `7c2f192be9e3b351`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:24+0200
+- **Ultima volta**: 2026-08-23T12:47:24+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02bad76b5c2a890cb02c4af911dc","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":96,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `aab94940d42bba9a`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:47:22+0200
+- **Ultima volta**: 2026-08-23T12:47:22+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06da02b69c8467fef03cfb9e03602c67","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":26692,"output_tokens":0,"cache_creation_input_tok`
+
+### `relay_error_502` (502)
+
+- **Firma**: `76fc285732756f3c`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T12:01:24+0200
+- **Ultima volta**: 2026-08-23T12:01:24+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `<html> <head><title>502 Bad Gateway</title></head> <body bgcolor="white"> <center><h1>502 Bad Gateway</h1></center> <hr><center>alb</center> </body> </html>`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `92644020f9bf47ea`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:57:56+0200
+- **Ultima volta**: 2026-08-23T09:57:56+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9dafd072f83eb4090c9f98c58a366","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":29005,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `77c3811476200431`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:56:25+0200
+- **Ultima volta**: 2026-08-23T09:56:25+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9da9cc2290bf52900c9378ed29c0e","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":28221,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `7e8e059a8015144f`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:55:58+0200
+- **Ultima volta**: 2026-08-23T09:55:58+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9da894259f10be6dfc694f29589b6","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":27279,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `9e209722b87a2d17`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:55:56+0200
+- **Ultima volta**: 2026-08-23T09:55:56+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9da877a2b51d7934fb0c582207865","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":24821,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `59d8e6d52a32c394`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:54:32+0200
+- **Ultima volta**: 2026-08-23T09:54:32+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9da34d3a3d119167f68c5bd454530","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":24248,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `38f6999717b1b85e`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:54:32+0200
+- **Ultima volta**: 2026-08-23T09:54:32+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9da307a959eaa3b41424b10d6f1c5","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":26938,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `9fa9e0d5b73612bf`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:54:28+0200
+- **Ultima volta**: 2026-08-23T09:54:28+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9da31d7676a2b195f655d156fb32f","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":24043,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `a74c62019400a911`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:12:10+0200
+- **Ultima volta**: 2026-08-23T09:12:10+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9d03e3042e048acda157546468e84","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":53970,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `b506d199170d54b3`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:09:58+0200
+- **Ultima volta**: 2026-08-23T09:09:58+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cfc158f4b59af2c7e1893705ae3a","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":24641,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `9b7e983424df346b`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:09:48+0200
+- **Ultima volta**: 2026-08-23T09:09:48+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cfab1e7c844ab390601387f58c95","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":24401,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `09dae8b2f4fce990`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:08:37+0200
+- **Ultima volta**: 2026-08-23T09:08:37+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cf738e1cb090b8e49bba662bfb86","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":24030,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `eeb18e55bd492f53`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:08:34+0200
+- **Ultima volta**: 2026-08-23T09:08:34+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cf7013e15fee46b10fd66f380290","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":23917,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `bde3350cc3e8b16e`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:05:30+0200
+- **Ultima volta**: 2026-08-23T09:05:30+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ceb268158b4f664f4160516b56f7","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":42761,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `b689d32c318f044a`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:04:40+0200
+- **Ultima volta**: 2026-08-23T09:04:40+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce83b4f34cf3552bba20c08c5383","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":54316,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `53c2adb9222428e1`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:04:34+0200
+- **Ultima volta**: 2026-08-23T09:04:34+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce7f2f7ee3a9b8489abeb578e912","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":95,"output_tokens":0}}}  event: ping data: {"type`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `e6e042b4a1143817`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:04:33+0200
+- **Ultima volta**: 2026-08-23T09:04:33+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce7ee98261a380f7f2f776edce00","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":94,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `f4834b3af26f2e17`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:04:31+0200
+- **Ultima volta**: 2026-08-23T09:04:31+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce7c2d96d6363ddd106c944fb782","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":54041,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `b01b63e1a5323593`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:04:26+0200
+- **Ultima volta**: 2026-08-23T09:04:26+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce774db06f7c639cf7a384f66789","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":95,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `1e7f980387e6f8ad`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:04:23+0200
+- **Ultima volta**: 2026-08-23T09:04:23+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce73f2a7c9c591839add6190ae58","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":53742,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `2f4fc6ddd4adf30d`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:04:20+0200
+- **Ultima volta**: 2026-08-23T09:04:20+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce6f9dcd4ee5f51e1daf4b8b3ecf","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":32214,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `0722dd170654ed7d`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:04:15+0200
+- **Ultima volta**: 2026-08-23T09:04:15+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce677ba8a507a3db80f83f870e30","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":52884,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `0aa56d019b98e4b1`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:03:55+0200
+- **Ultima volta**: 2026-08-23T09:03:55+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce5379d113124c3e8e44899139ba","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":50868,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `350cb47c6190ce13`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:03:50+0200
+- **Ultima volta**: 2026-08-23T09:03:50+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce530248e7513959d4f3b6d0920d","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":31385,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `936a38b1683ea71d`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:03:30+0200
+- **Ultima volta**: 2026-08-23T09:03:30+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce35e2137c07060b722f2aa49e2b","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":48895,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `13fc522dae4cb8f3`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:03:20+0200
+- **Ultima volta**: 2026-08-23T09:03:20+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce333011bf9218309eccb07129c8","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":30870,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `246a1fa2683d0d10`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:03:18+0200
+- **Ultima volta**: 2026-08-23T09:03:18+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce349142c073fe9d2bfeddf2fb14","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":99,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `f370efd22cb95e2c`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:03:16+0200
+- **Ultima volta**: 2026-08-23T09:03:16+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce2cf2a1e33200b3ba728cf8ebfa","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":50198,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `cc4171ad65a49e32`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:03:09+0200
+- **Ultima volta**: 2026-08-23T09:03:09+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce26c61d463a5ae8c04fcceb6c1a","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":48404,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `da7229e195c42d61`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:03:01+0200
+- **Ultima volta**: 2026-08-23T09:03:01+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce20edf195c5c957700d5e161759","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":51653,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `b64c38311fbcac26`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:02:55+0200
+- **Ultima volta**: 2026-08-23T09:02:55+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce19a9b1da3fe3b03370d2edb4e3","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":30117,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `73e4c007ff9e2411`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:02:53+0200
+- **Ultima volta**: 2026-08-23T09:02:53+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce19680f3b0fbf3d100800585e62","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":102,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `fabc5e6ef0f91636`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:02:53+0200
+- **Ultima volta**: 2026-08-23T09:02:53+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce19a323afe632d462a3a9e570a8","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":123,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `266147dfdd5e7bff`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:02:51+0200
+- **Ultima volta**: 2026-08-23T09:02:51+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce16d4e412ed942d7becff4232ba","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":34000,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `8c9a2f53988f84af`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:02:31+0200
+- **Ultima volta**: 2026-08-23T09:02:31+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce027ff5549d25f462148611af8c","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":30012,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `ca2d0f8170bebf99`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:02:27+0200
+- **Ultima volta**: 2026-08-23T09:02:27+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9ce00745024ac3154ef47a1d36e8e","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":26622,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `5e10b8517c0cfc8b`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:02:25+0200
+- **Ultima volta**: 2026-08-23T09:02:25+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cdfe704d86ff2897de19aed12311","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":108,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `83737c205e26f4a9`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:02:22+0200
+- **Ultima volta**: 2026-08-23T09:02:22+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cdd2d69a593da70ad4cf7492ac8e","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":34357,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `2c4914aa810b8324`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:02:22+0200
+- **Ultima volta**: 2026-08-23T09:02:22+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cdd29c2979c457be58c97a7a9715","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":34486,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `75d1bfccb786e350`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:02:22+0200
+- **Ultima volta**: 2026-08-23T09:02:22+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cdd258e88b1e6ce1ce49926590ef","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":98,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `f0acc7cf24b21faa`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:02:22+0200
+- **Ultima volta**: 2026-08-23T09:02:22+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cdd3e7e6c486b0f8bb06a9b8bdf7","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":32320,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `66e942c11b5de32c`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:02:22+0200
+- **Ultima volta**: 2026-08-23T09:02:22+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cdd3872778d11de02a47cbe128b3","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":36229,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `f7a0d976f1a6b96f`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:00:32+0200
+- **Ultima volta**: 2026-08-23T09:00:32+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd8bb254011c68def680afdeaab3","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":26710,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `5abcab106b9f8127`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:00:31+0200
+- **Ultima volta**: 2026-08-23T09:00:31+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd8be17ef9ba09481c7c9849dcea","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":29534,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `069e972bab0c8a9b`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:00:30+0200
+- **Ultima volta**: 2026-08-23T09:00:30+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd8b77e6dac036667107c2611a6d","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":112,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `19c5423547aecbb2`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:00:29+0200
+- **Ultima volta**: 2026-08-23T09:00:29+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd8ada682a6f7e3e961fd1b5f705","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":111,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `57fc1e61c9c3235d`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:00:27+0200
+- **Ultima volta**: 2026-08-23T09:00:27+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd84ef1f645fc565bcd3ce8d96b4","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":32925,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `321929956cf41bf8`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:00:20+0200
+- **Ultima volta**: 2026-08-23T09:00:20+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd8070f1bd1197570b5b51ef6c89","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":26762,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `b7ee4adbe8faf35c`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:00:20+0200
+- **Ultima volta**: 2026-08-23T09:00:20+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd8268df60255c20c07a1e573ce3","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":95,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `b4818391b4e01255`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:00:18+0200
+- **Ultima volta**: 2026-08-23T09:00:18+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd7e4b6d6599b13cb2cca163cd49","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":25880,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `1c5c1ce36eb6fb55`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:00:15+0200
+- **Ultima volta**: 2026-08-23T09:00:15+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd76f2856a671eee225c06e04a6f","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens"`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `d8f836f736a4cfcb`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:00:14+0200
+- **Ultima volta**: 2026-08-23T09:00:14+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd768b3370abba598dbad70f4f18","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":29064,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `5e994dba16110284`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:00:12+0200
+- **Ultima volta**: 2026-08-23T09:00:12+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd7617e37d26f8005d3d03c80344","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":26441,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `b5ef261cae72401f`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:00:11+0200
+- **Ultima volta**: 2026-08-23T09:00:11+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd782788fbf93d384f26f54fceb4","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":100,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `af43e254f6f02405`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:00:11+0200
+- **Ultima volta**: 2026-08-23T09:00:11+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd79e08d2704ed640bf02a760b1e","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":98,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `7a038fdd7036c6b7`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:00:09+0200
+- **Ultima volta**: 2026-08-23T09:00:09+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd759979ab8f74af9f258ce01ee2","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":25576,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `b86793752d74f242`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:00:08+0200
+- **Ultima volta**: 2026-08-23T09:00:08+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd739b63fc17c8a0397c55763075","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":25687,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `6b9d90536d711640`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:00:07+0200
+- **Ultima volta**: 2026-08-23T09:00:07+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd73cc9233f3ae73e5b103a878e5","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":25422,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `1ac04bc11e189425`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T09:00:07+0200
+- **Ultima volta**: 2026-08-23T09:00:07+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd734985e018a62eaa5be8a80d9f","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":26182,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `91ed87b777148bf9`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:59:03+0200
+- **Ultima volta**: 2026-08-23T08:59:03+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd23dae6cf5859b40758f0edcc0e","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":93,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `84810be137d5ee35`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:59:01+0200
+- **Ultima volta**: 2026-08-23T08:59:01+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd299400cd964ece36e36de3d8f4","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":27123,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `802a427c06e5087a`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:55+0200
+- **Ultima volta**: 2026-08-23T08:58:55+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd2bbc7f92c01f514060a2a347f7","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":28303,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `03c65b36fe6ca178`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:53+0200
+- **Ultima volta**: 2026-08-23T08:58:53+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd2a7aac8cf5143da819f4c640f1","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":28058,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `851dc8e6ecd80343`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:53+0200
+- **Ultima volta**: 2026-08-23T08:58:53+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd2a5101371bc7858c51685439c2","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":25172,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `aaedd23545faebfc`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:52+0200
+- **Ultima volta**: 2026-08-23T08:58:52+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd2856f3adf155ecc32865c56420","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":102,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `64d72f68f14124a3`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:51+0200
+- **Ultima volta**: 2026-08-23T08:58:51+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd2675b1d0b578da563a951d4845","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":25156,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `68a328354d601f06`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:50+0200
+- **Ultima volta**: 2026-08-23T08:58:50+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd22f1a17e904334f5a24f47ca13","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":97,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `5130e03d8ec22da4`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:50+0200
+- **Ultima volta**: 2026-08-23T08:58:50+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd28b80a74271d0e6e2850ad2cbc","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":24853,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `c6347ebf927b35da`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:48+0200
+- **Ultima volta**: 2026-08-23T08:58:48+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd1c18246f00de7365d6a8cc9bf6","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":27934,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `dfc900b55e6d2d7f`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:47+0200
+- **Ultima volta**: 2026-08-23T08:58:47+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd1e8c08fd349ba2cb3f95298720","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":100,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `6180a210fc8f64aa`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:47+0200
+- **Ultima volta**: 2026-08-23T08:58:47+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd1e98e4fe7e352ebfb4d342b7ac","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":96,"output_tokens":0}}}  event: ping data: {"type`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `060fbfb27b9e5204`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:45+0200
+- **Ultima volta**: 2026-08-23T08:58:45+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd1c26a78e750418612d5afa247f","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":103,"output_tokens":0}}}  event: ping data: {"typ`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `fc6358303ac7f570`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:42+0200
+- **Ultima volta**: 2026-08-23T08:58:42+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd1a94dd1d08fa834f2b045f5298","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":26053,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `1f2e0345adcede74`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:41+0200
+- **Ultima volta**: 2026-08-23T08:58:41+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd1ca22eef7923dd7001b9d6d5bf","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":24916,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `97427c77110e2a6e`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:40+0200
+- **Ultima volta**: 2026-08-23T08:58:40+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd19eac7f4b1e056e2687f346491","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":24623,"output_tokens":0,"cache_creation_input_tok`
+
+### `pseudo_toolcall_text` (200)
+
+- **Firma**: `b5124992381d0d52`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:39+0200
+- **Ultima volta**: 2026-08-23T08:58:39+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd1b71cd676f4a19db0680aed6f5","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":97,"output_tokens":0}}}  event: ping data: {"type`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `5ecde6674415e0ba`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:38+0200
+- **Ultima volta**: 2026-08-23T08:58:38+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd1955787a653e75b57addb1a531","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":24549,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `82239f53a985073e`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:38+0200
+- **Ultima volta**: 2026-08-23T08:58:38+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd1aa72f01596234ecdb16aef532","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":24636,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `bda5b52ec7ca80a6`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:38+0200
+- **Ultima volta**: 2026-08-23T08:58:38+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd1b214c601b6a50be38274841b0","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":24783,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `2041f54a6e26ded4`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:38+0200
+- **Ultima volta**: 2026-08-23T08:58:38+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd19917b7c098519181573e54b96","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":24533,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `2e0412146e9e5b56`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:37+0200
+- **Ultima volta**: 2026-08-23T08:58:37+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd1a5c936e7cbd431d8ba919e2b9","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":24876,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `2269f570a9718fa9`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:36+0200
+- **Ultima volta**: 2026-08-23T08:58:36+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd1922d1284929d1c283f6ebf97c","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":24593,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `66321f0ff29b985f`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:35+0200
+- **Ultima volta**: 2026-08-23T08:58:35+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd182ad97c4cc2fd7b76fbb11eaa","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":24617,"output_tokens":0,"cache_creation_input_tok`
+
+### `foreign_tool_use_response` (200)
+
+- **Firma**: `2a6a7d5d8b005256`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-23T08:58:35+0200
+- **Ultima volta**: 2026-08-23T08:58:35+0200
+- **Modalita' coinvolte**: mix-am-2
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"id":"06d9cd188e95da881f323b60e09b906b","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5-20251001","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":24553,"output_tokens":0,"cache_creation_input_tok`
 
 ### `foreign_tool_use_response` (200)
 
@@ -13233,9 +15340,9 @@
 
 - **Firma**: `5db5276fa1db6e1c`
 - **Severita'**: info
-- **Occorrenze**: 831
+- **Occorrenze**: 990
 - **Prima volta**: 2026-08-09T00:51:52+0200
-- **Ultima volta**: 2026-08-23T08:33:54+0200
+- **Ultima volta**: 2026-08-25T05:07:55+0200
 - **Modalita' coinvolte**: mix-am-2
 
 ### `ctx_gate` (warn)
@@ -13614,6 +15721,62 @@
 - **Prima volta**: 2026-08-09T03:37:35+0200
 - **Ultima volta**: 2026-08-18T18:49:40+0200
 - **Modalita' coinvolte**: mix-gm-2
+
+## Modalita': `openrouter`
+
+1 tipi distinti, 2 occorrenze.
+
+### `relay_error_403` (403)
+
+- **Firma**: `9eb098e90fe01807`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 2
+- **Prima volta**: 2026-08-25T05:47:40+0200
+- **Ultima volta**: 2026-08-25T05:47:46+0200
+- **Modalita' coinvolte**: openrouter
+- **Esempio**: `{"error":{"message":"key not allowed to access model. This key can only access models=['code-max', 'code-max-ollama', 'code-fast', 'coder-abliterated']. Tried to access ox-alpha","type":"key_model_access_denied","param":"model","code":"403"}}`
+
+## Modalita': `opr`
+
+4 tipi distinti, 8 occorrenze.
+
+### `truncated_response_opr` (200)
+
+- **Firma**: `1b2065d8e5bf13c4`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 5
+- **Prima volta**: 2026-08-25T06:38:01+0200
+- **Ultima volta**: 2026-08-25T06:38:16+0200
+- **Modalita' coinvolte**: opr
+
+### `relay_error_502` (502)
+
+- **Firma**: `e489fc01bd952925`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-25T07:23:03+0200
+- **Ultima volta**: 2026-08-25T07:23:03+0200
+- **Modalita' coinvolte**: opr
+- **Esempio**: `{"type": "error", "error": {"type": "local_unavailable", "message": "{\"type\":\"error\",\"error\":{\"type\":\"local_unavailable\",\"message\":\"Local LLM backend unreachable: \"}}"}}`
+
+### `relay_error_400` (400)
+
+- **Firma**: `dd7674637f598118`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-25T06:10:12+0200
+- **Ultima volta**: 2026-08-25T06:10:12+0200
+- **Modalita' coinvolte**: opr
+- **Esempio**: `{"error":{"message":"litellm.UnsupportedParamsError: openrouter does not support parameters: ['reasoning_effort'], for model=stealth/ox-alpha. To drop these, set `litellm.drop_params=True` or for proxy:\n\n`litellm_settings:\n drop_params: true`\n. \n If you want to use these params dynamically send`
+
+### `ctx_gate` (ok)
+
+- **Firma**: `d46c467ad79a5e85`
+- **Severita'**: info
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-25T06:08:52+0200
+- **Ultima volta**: 2026-08-25T06:08:52+0200
+- **Modalita' coinvolte**: opr
 
 ## Modalita': `qwen`
 

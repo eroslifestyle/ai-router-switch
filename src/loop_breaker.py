@@ -25,11 +25,14 @@ Disattivabile con AIROUTER_LOOP_BREAKER=0; soglia in AIROUTER_LOOP_BREAKER_N.
 import hashlib
 import json
 import os
+import time
 
 ENABLED = os.environ.get("AIROUTER_LOOP_BREAKER", "1") not in ("0", "false", "no")
 LOOP_BREAKER_N = int(os.environ.get("AIROUTER_LOOP_BREAKER_N", "4"))
+# TTL per le entry tracciate (secondi). Dopo 10 minuti di inattività, il contatore riparte.
+LOOP_BREAKER_ENTRY_TTL_SEC = 600
 
-# fp -> [firma_ultimo_assistant, ripetizioni, hash_corpo_precedente]
+# fp -> [firma_ultimo_assistant, ripetizioni, hash_corpo_precedente, timestamp]
 _seen: dict = {}
 # Oltre questa soglia lo stato viene azzerato: e' una cache di sessioni vive, non un log.
 MAX_TRACKED_CHATS = 512
@@ -72,6 +75,8 @@ def check(fp: str, body: bytes) -> int:
     assistant resta uguale perche' il modello riproduce lo stesso turno.
     Retry (NON incrementa): il corpo e' byte-identico al precedente -> stessa
     richiesta ritentata dopo 529 upstream.
+
+    Le entry scadono dopo LOOP_BREAKER_ENTRY_TTL_SEC secondi di inattività.
     """
     if not ENABLED or not fp:
         return 0
@@ -86,15 +91,20 @@ def check(fp: str, body: bytes) -> int:
     # ponytail: corpo hashato full-body, un SHA1 e' sufficiente per il confronto
     body_hash = hashlib.sha1(body).hexdigest()
     prev = _seen.get(fp)
+    now = time.time()
+
+    # Entry scaduta -> trattala come inesistente
+    if prev and (now - prev[3]) > LOOP_BREAKER_ENTRY_TTL_SEC:
+        prev = None
 
     # Corpo identico -> retry, non loop (non incrementare)
     if prev and prev[2] == body_hash:
-        _seen[fp] = [sig, prev[1], body_hash]
+        _seen[fp] = [sig, prev[1], body_hash, now]
         return prev[1]
 
     # Corpo cambiato ma firma uguale -> loop vero
     repeats = prev[1] + 1 if prev and prev[0] == sig else 1
-    _seen[fp] = [sig, repeats, body_hash]
+    _seen[fp] = [sig, repeats, body_hash, now]
     return repeats
 
 

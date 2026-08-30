@@ -54,6 +54,11 @@ LOCAL_ACT = "code-max"
 # perche' e' citato altrove; non introdurre un secondo modello locale senza motivo.
 LOCAL_ACT_FAST = LOCAL_ACT
 
+# OPENROUTER_ACT: Ox Alpha via OpenRouter (modello stealth gratuito, 1M contesto).
+# Usato come provider unico nella modalità 'openrouter' (THINK+ACT entrambi su ox-alpha).
+# Nome LiteLLM: ox-alpha (config.yaml), non lo slug completo openrouter/stealth/ox-alpha.
+OPENROUTER_ACT = "ox-alpha"
+
 # ── Role constants ─────────────────────────────────────────────────────────────
 ROLE_THINK = "think"
 ROLE_ACT = "act"
@@ -124,6 +129,10 @@ ROUTING_TABLE = {
     # secondo residente. GPT_MODE_THINK resta configurabile via AIROUTER_GPT_MODEL.
     ("gpt", ROLE_THINK): ("local", GPT_MODE_THINK),
     ("gpt", ROLE_ACT): ("local", GPT_MODE_THINK),
+    # openrouter: modalità pura OpenRouter (THINK+ACT entrambi su ox-alpha).
+    # Usato per testare modello OpenRouter senza toccare altre modalità.
+    ("opr", ROLE_THINK): ("local", OPENROUTER_ACT),
+    ("opr", ROLE_ACT): ("local", OPENROUTER_ACT),
 }
 
 # ── Default provider per mode (used for unknown roles) ────────────────────────
@@ -143,9 +152,10 @@ _MODE_DEFAULT_PROVIDER = {
     "mix-al": "local",
     "local": "local",
     "gpt": "local",
+    "opr": "local",
 }
 
-VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-am-2", "mix-ag", "mix-ag-2", "mix-gm", "mix-gm-2", "mix-al", "local", "gpt", "ultra")
+VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-am-2", "mix-ag", "mix-ag-2", "mix-gm", "mix-gm-2", "mix-al", "local", "gpt", "ultra", "opr")
 
 # ponytail: stima semplice len(body)/4, nessun tokenizer vero
 CHARS_PER_TOKEN_ESTIMATE = 4
@@ -332,6 +342,12 @@ def resolve_route(mode: str, model_name: str | None) -> tuple[str, str | None]:
 
     role = model_role(model_name)
 
+    # Special case: ox-alpha in openrouter mode always routes to OPENROUTER_ACT
+    # (bypass role system since ox-alpha is not a Claude model)
+    if mode == "opr" and model_name and model_name.lower() == "ox-alpha":
+        provider, override = ROUTING_TABLE[(mode, ROLE_ACT)]
+        return (provider, override)
+
     # First try to lookup (mode, role) in the table
     if (mode, role) in ROUTING_TABLE:
         provider, override = ROUTING_TABLE[(mode, role)]
@@ -340,6 +356,9 @@ def resolve_route(mode: str, model_name: str | None) -> tuple[str, str | None]:
     # If role is unknown, use the mode's default provider with model=None
     if role == ROLE_UNKNOWN:
         provider = _MODE_DEFAULT_PROVIDER[mode]
+        # Special case for openrouter: ox-alpha is not a Claude model but is the intended target
+        if mode == "opr" and model_name and model_name.lower() == "ox-alpha":
+            return (provider, OPENROUTER_ACT)
         return (provider, _nativize(provider, None, model_name))
 
     # Should never reach here if ROUTING_TABLE and _MODE_DEFAULT_PROVIDER are complete

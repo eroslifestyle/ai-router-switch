@@ -163,7 +163,7 @@ update(){
 
 case "${1:-status}" in
   anthropic|minimax|mix-am|mix-ag|mix-gm|mix-al|glm|qwen|local|\
-  mixed|mixam|mixgm|mixag|mixal|glm-minimax|anthropic-glm)
+  mixed|mixam|mixgm|mixag|mixal|glm-minimax|anthropic-glm|opr)
     apply_mode "$1"
     ;;
   status) status ;;
@@ -178,7 +178,7 @@ case "${1:-status}" in
     ;;
   log)     tail -n 40 "$LOG" 2>/dev/null || echo "(nessun log)";;
   update)  shift; update "$@" ;;
-  *) echo "uso: ai-mode [anthropic|minimax|mix-am|mix-ag|mix-gm|mix-al|glm|qwen|local|status|start|stop|restart|log|update]"
+  *) echo "uso: ai-mode [anthropic|minimax|mix-am|mix-ag|mix-gm|mix-al|glm|qwen|local|opr|status|start|stop|restart|log|update]"
      echo "     alias: mixam=mix-am  mixag=mix-ag  mixgm=mix-gm  mixal=mix-al  (legacy: mixed/glm-minimax/anthropic-glm)"
      exit 1;;
 esac

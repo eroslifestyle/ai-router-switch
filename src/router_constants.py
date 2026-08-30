@@ -78,6 +78,9 @@ MINIMAX_RETRY_CAP_SEC = float(os.environ.get("AIROUTER_MINIMAX_RETRY_CAP_SEC", "
 MINIMAX_CONCURRENCY = int(os.environ.get("AIROUTER_MINIMAX_SEMAPHORE", "8"))
 MINIMAX_BACKOFF_STEPS = (5, 10, 20, 40, 60)
 MINIMAX_ALERTS_LOG = str(paths.log_file("minimax-alerts.log"))
+# Retry per OpenRouter (ox-alpha) su 429 upstream pool condiviso
+OPENROUTER_BACKOFF_STEPS_SEC = (3, 8, 15)
+OPENROUTER_MAX_RETRY_SEC = float(os.environ.get("AIROUTER_OPENROUTER_RETRY_CAP_SEC", "30"))
 # MINIMAX_RETRY_BUDGET_SHORT rimossa il 2026-08-07 con _fwd_minimax_short, il
 # suo unico lettore: il wrapper serviva alle chiamate non-streaming della
 # pipeline, che non esiste piu' dal 2026-07-25.
@@ -119,7 +122,7 @@ HOP_HEADERS = frozenset({
 })
 
 # ── Valid modes ────────────────────────────────────────────────────────────────
-VALID_MODES = ("anthropic", "minimax", "mix-am", "mix-am-2", "mix-ag", "mix-ag-2", "mix-gm", "mix-gm-2", "glm", "qwen", "mix-al", "local", "gpt", "ultra")
+VALID_MODES = ("anthropic", "minimax", "mix-am", "mix-am-2", "mix-ag", "mix-ag-2", "mix-gm", "mix-gm-2", "glm", "qwen", "mix-al", "local", "gpt", "ultra", "opr")
 
 # Modalita' che instradano traffico verso Anthropic (THINK o ESECUZIONE).
 # Sorgente: tabella gerarchica in ~/.claude/CLAUDE.md. Le modalita qui elencate
@@ -152,6 +155,7 @@ PORT_MODE = {
     8785: "mix-ag-2",   # sandbox: variante mix-ag con enforcement deny (delega aggressiva)
     8786: "gpt",     # sandbox: prova gpt (pura locale, THINK e ACT sullo stesso modello)
     8788: "ultra",   # 14a modalita': Anthropic THINK + GLM ACT + MiniMax codice via CLI
+    8789: "opr",   # sandbox: prova openrouter (pura OpenRouter) senza toccare :8787
 }
 _pm_override = os.environ.get("AIROUTER_PORT_MODE_JSON", "").strip()
 if _pm_override:
