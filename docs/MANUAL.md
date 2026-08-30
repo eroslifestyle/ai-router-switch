@@ -10,7 +10,7 @@ AI Router Proxy è un proxy **self-hosted** che si pone davanti a Claude Code (e
 Anthropic-format) e instrada il traffico verso **Claude**, **MiniMax**, o **GLM/z.ai** scegliendo
 il backend a seconda della modalità attiva.
 
-Il router è un **singolo processo Python/aiohttp** in ascolto su 10 porte:
+Il router è un **singolo processo Python/aiohttp** in ascolto su 16 porte (1 dinamica + 15 fisse):
 
 | Porta | Ruolo |
 |-------|-------|
@@ -24,6 +24,12 @@ Il router è un **singolo processo Python/aiohttp** in ascolto su 10 porte:
 | `8777` | Forzata: `mix-ag` |
 | `8778` | Forzata: `qwen` |
 | `8779` | Forzata: `local` |
+| `8781` | Forzata: `mix-am-2` |
+| `8784` | Forzata: `mix-gm-2` |
+| `8785` | Forzata: `mix-ag-2` |
+| `8786` | Forzata: `gpt` |
+| `8788` | Forzata: `ultra` |
+| `8789` | Forzata: `opr` |
 
 *(la `8774` era della modalità `inverse`, rimossa il 2026-07-26; dal 2026-08-04 è di `mix-al`)*
 
@@ -37,7 +43,7 @@ del client, non qui. La mappa è una tabella-dati in `src/role_routing.py`.
 
 ---
 
-## Le Nove Modalità
+## Le Quindici Modalità
 
 Ogni modalità è una coppia di destinazioni: una per il modello che **pensa** (THINK)
 e una per il modello che **esegue** (ACT). Il router deduce il ruolo dal nome del
@@ -57,6 +63,17 @@ ricade da sé sulla rotta THINK. Nelle modalità miste ne segue che *chi verific
 | `mix-am` | Anthropic | MiniMax-M2.7 | `mixed` |
 | `mix-ag` | Anthropic | glm-4.7 | `anthropic-glm` |
 | `mix-gm` | glm-5.2 | MiniMax-M2.7 | `glm-minimax` |
+| `qwen` | qwen3.8-max | qwen3-coder-plus | — |
+| `mix-al` | Anthropic | locale (code-max) | — |
+| `local` | locale (code-max) | locale (code-max) | — |
+| `gpt` | locale (code-max) | locale (code-max) | — |
+| `opr` | OpenRouter/ox-alpha | OpenRouter/ox-alpha | — |
+| `ultra` | Anthropic | GLM (MiniMax per codice via CLI) | — |
+| `mix-am-2` | Anthropic | MiniMax-M2.7 | — |
+| `mix-ag-2` | Anthropic | glm-4.7 | — |
+| `mix-gm-2` | glm-5.2 | MiniMax-M2.7 | — |
+
+**Varianti `-2`** (mix-am-2, mix-gm-2, mix-ag-2): routing identico alla modalità base, ma con enforcement "deny" più aggressivo sulla delega tramite hook `enforce_hierarchy.py`. MiniMax non è raggiungibile dal router in `ultra` — solo le CLI dirette `m3-code`/`m3x` lo invocano, saltando il proxy.
 
 Fonte: `ROUTING_TABLE` in `src/role_routing.py` (funzione pura, coperta da 48 test).
 Gli alias legacy sono accettati da `ai-mode`, che scrive **sempre** il nome canonico
@@ -226,6 +243,38 @@ Porta fissa: `8779`. Stesse chiavi (`LOCAL_LLM_API_KEY` / `LOCAL_LLM_API_BASE`, 
 Il router accetta solo `code-max`: qualsiasi altro modello richiesto viene ricondotto a quello. Prima dell'inoltro aggiunge un suggerimento di sistema al prompt.
 
 **Uso:** lavorare completamente offline, senza che alcun dato esca dalla macchina.
+
+---
+
+### 10. `gpt` — modello locale unico
+
+- **code-max** fa il THINK, il VERIFY e l'esecuzione
+
+Porta fissa: `8786`. Come `local`, il router accetta solo `code-max`; qualsiasi altro modello richiesto viene ricondotto a quello. Non ha un modello THINK separato: è un wrapper puramente locale.
+
+**Uso:** sandbox completamente locale, nessuna dipendenza da provider esterni.
+
+---
+
+### 11. `opr` — OpenRouter/ox-alpha puro
+
+- **OpenRouter/ox-alpha** fa il THINK, il VERIFY e l'esecuzione
+
+Porta fissa: `8789`. Modalità sandbox pura per sperimentazione con OpenRouter. Chiave: `secrets.sh get opr.api_key`.
+
+**Uso:** testare modelli OpenRouter con lo stesso formato Anthropic.
+
+---
+
+### 12. `ultra` — TRE provider (UNICA modalità con questa caratteristica)
+
+- **Claude** (Fable 5 / Opus 5 / Sonnet 5) fa THINK e VERIFY
+- **glm-4.7** fa l'ACT (esplorazione, lettura, analisi)
+- **MiniMax per il CODICE solo via CLI dirette** (`m3-code`/`m3x`, che saltano il proxy)
+
+Porta fissa: `8788`. È nata per i task immensi che esauriscono la quota Anthropic: il contesto riportato a ogni turno costa molto più del codice scritto. MiniMax non è raggiungibile dal router in questa modalità — `resolve_route("ultra", "MiniMax...")` torna sempre GLM, ed è voluto.
+
+**Uso:** task massivi con thinking Anthropic (1M finestra), esecuzione GLM economica, codice MiniMax via CLI.
 
 ---
 
@@ -514,6 +563,8 @@ Le altre modalità continuano a funzionare normalmente.
 3. **SessionStart hook** — verifica che lo stack sia attivo all'avvio dell'IDE.
 
 Testato: `kill -9` su tutti i servizi → ripristino completo in <10 secondi.
+
+Suite di test: 930 test raccolti da `python3 -m pytest -q --collect-only`. Esegui con `python3 -m pytest -q`.
 
 ### Cosa NON fare
 

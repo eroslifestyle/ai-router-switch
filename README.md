@@ -28,12 +28,18 @@ Anthropic  MiniMax   GLM/z.ai   Qwen    local model
 | mix-gm | GLM | MiniMax |
 | mix-al | Claude | local model (code-max) |
 | local | local model | local model |
+| gpt | local model (code-max) | local model (code-max) |
+| opr | OpenRouter/ox-alpha | OpenRouter/ox-alpha |
+| ultra | Claude | GLM (MiniMax for code via CLI) |
+| mix-am-2 | Claude | MiniMax (deny enforcement) |
+| mix-ag-2 | Claude | GLM (deny enforcement) |
+| mix-gm-2 | GLM | MiniMax (deny enforcement) |
 
-Legacy aliases accepted: `mixed` = mix-am, `glm-minimax` = mix-gm, `anthropic-glm` = mix-ag, plus the short forms `mixam`, `mixag`, `mixgm`, `mixal`.
+Legacy aliases accepted: `mixed` = mix-am, `glm-minimax` = mix-gm, `anthropic-glm` = mix-ag, plus the short forms `mixam`, `mixag`, `mixgm`, `mixal`. The `-2` variants have identical routing but stricter delegation enforcement via hooks.
 
 ## Ports (source: PORT_MODE in src/router_constants.py)
 
-8787 is dynamic and tracks the current mode. One fixed port per mode: 8771 anthropic, 8772 minimax, 8773 mix-am, 8774 mix-al, 8775 glm, 8776 mix-gm, 8777 mix-ag, 8778 qwen, 8779 local.
+8787 is dynamic and tracks the current mode. One fixed port per mode: 8771 anthropic, 8772 minimax, 8773 mix-am, 8774 mix-al, 8775 glm, 8776 mix-gm, 8777 mix-ag, 8778 qwen, 8779 local, 8781 mix-am-2, 8784 mix-gm-2, 8785 mix-ag-2, 8786 gpt, 8788 ultra, 8789 opr.
 
 ## Switching the backend
 
@@ -67,7 +73,7 @@ For Anthropic no key is required: the OAuth token is handled by Claude Code, in 
 
 ## Updating
 
-`ai-mode update` runs the following steps in order: refuse if there are uncommitted local changes (no automatic stash), `fetch`, `pull` in fast-forward only, the test suite, restart the service, wait for health, and verify all ten ports. If a step fails it rolls back to the previous commit and restarts. Options: `--check`, `--dry-run`, `--no-test`, `--no-restart`, `--yes`. A weekly timer exists; it is NOT installed by default.
+`ai-mode update` runs the following steps in order: refuse if there are uncommitted local changes (no automatic stash), `fetch`, `pull` in fast-forward only, the test suite, restart the service, wait for health, and verify all fixed ports. If a step fails it rolls back to the previous commit and restarts. Options: `--check`, `--dry-run`, `--no-test`, `--no-restart`, `--yes`. A weekly timer exists; it is NOT installed by default.
 
 ## Local model
 
@@ -91,7 +97,7 @@ If `AIROUTER_LISTEN_HOST` is set to a non-loopback address those routes stop bei
 
 ## Tests
 
-366 tests. Run them with `python3 -m pytest -q` from the repository root.
+930 tests. Run them with `python3 -m pytest -q` from the repository root.
 
 ## What is NOT included
 

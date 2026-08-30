@@ -10,7 +10,7 @@ AI Router Proxy is a **self-hosted** proxy that sits in front of Claude Code (an
 Anthropic-format client) and routes traffic to **Claude**, **MiniMax**, or **GLM/z.ai**
 depending on the active mode.
 
-The router is a **single Python/aiohttp process** listening on 10 ports:
+The router is a **single Python/aiohttp process** listening on 16 ports (1 dynamic + 15 fixed):
 
 | Port | Role |
 |------|------|
@@ -24,6 +24,12 @@ The router is a **single Python/aiohttp process** listening on 10 ports:
 | `8777` | Forced: `mix-ag` |
 | `8778` | Forced: `qwen` |
 | `8779` | Forced: `local` |
+| `8781` | Forced: `mix-am-2` |
+| `8784` | Forced: `mix-gm-2` |
+| `8785` | Forced: `mix-ag-2` |
+| `8786` | Forced: `gpt` |
+| `8788` | Forced: `ultra` |
+| `8789` | Forced: `opr` |
 
 *(port `8774` served the `inverse` mode, removed on 2026-07-26; since 2026-08-04 it serves `mix-al`)*
 
@@ -37,7 +43,7 @@ configuration, not here. The map is a data table in `src/role_routing.py`.
 
 ---
 
-## The Nine Modes
+## The Fifteen Modes
 
 Each mode is a pair of destinations: one for the model that **thinks** (THINK) and
 one for the model that **executes** (ACT). The router infers the role from the
@@ -57,6 +63,17 @@ who executed*.
 | `mix-am` | Anthropic | MiniMax-M2.7 | `mixed` |
 | `mix-ag` | Anthropic | glm-4.7 | `anthropic-glm` |
 | `mix-gm` | glm-5.2 | MiniMax-M2.7 | `glm-minimax` |
+| `qwen` | qwen3.8-max | qwen3-coder-plus | — |
+| `mix-al` | Anthropic | local (code-max) | — |
+| `local` | local (code-max) | local (code-max) | — |
+| `gpt` | local (code-max) | local (code-max) | — |
+| `opr` | OpenRouter/ox-alpha | OpenRouter/ox-alpha | — |
+| `ultra` | Anthropic | GLM (MiniMax for code via CLI) | — |
+| `mix-am-2` | Anthropic | MiniMax-M2.7 | — |
+| `mix-ag-2` | Anthropic | glm-4.7 | — |
+| `mix-gm-2` | glm-5.2 | MiniMax-M2.7 | — |
+
+**`-2` variants** (mix-am-2, mix-gm-2, mix-ag-2): identical routing to the base mode, but with stricter "deny" enforcement on delegation via the `enforce_hierarchy.py` hook. MiniMax is not reachable from the router in `ultra` mode — only direct CLI tools `m3-code`/`m3x` invoke it, bypassing the proxy.
 
 Source: `ROUTING_TABLE` in `src/role_routing.py` (pure function, covered by 48 tests).
 Legacy aliases are accepted by `ai-mode`, which **always** writes the canonical name
@@ -167,6 +184,38 @@ Fixed port: `8779`. Same keys (`LOCAL_LLM_API_KEY` / `LOCAL_LLM_API_BASE`, fallb
 The router accepts only `code-max`: any other requested model is folded back to that one. Before forwarding, it appends a system hint to the prompt.
 
 **Use:** work fully offline, with no data leaving the machine.
+
+---
+
+### 10. `gpt` — single local model
+
+- **code-max** does THINK, VERIFY, and execution
+
+Fixed port: `8786`. Like `local`, the router accepts only `code-max`; any other requested model is folded back. No separate THINK model: purely local wrapper.
+
+**Use:** completely local sandbox, no external provider dependencies.
+
+---
+
+### 11. `opr` — OpenRouter/ox-alpha pure
+
+- **OpenRouter/ox-alpha** does THINK, VERIFY, and execution
+
+Fixed port: `8789`. Pure sandbox mode for experimenting with OpenRouter. Key: `secrets.sh get opr.api_key`.
+
+**Use:** test OpenRouter models with the same Anthropic format.
+
+---
+
+### 12. `ultra` — THREE providers (ONLY mode with this feature)
+
+- **Claude** (Fable 5 / Opus 5 / Sonnet 5) does THINK and VERIFY
+- **glm-4.7** does ACT (exploration, reading, analysis)
+- **MiniMax for CODE only via direct CLI** (`m3-code`/`m3x`, bypassing the proxy)
+
+Fixed port: `8788`. Born for massive tasks that exhaust Anthropic quota: context re-sent each turn costs far more than code written. MiniMax is not reachable from the router in this mode — `resolve_route("ultra", "MiniMax...")` always returns GLM, by design.
+
+**Use:** massive tasks with Anthropic thinking (1M window), GLM cheap execution, MiniMax code via CLI.
 
 ---
 
@@ -363,6 +412,8 @@ All other modes continue to work normally.
 3. **SessionStart hook** — verifies the stack is up when the IDE starts.
 
 Tested: `kill -9` on all services → full restore in <10 seconds.
+
+Test suite: 930 tests collected by `python3 -m pytest -q --collect-only`. Run with `python3 -m pytest -q`.
 
 ### What NOT to Do
 
