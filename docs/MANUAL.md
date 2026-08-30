@@ -41,6 +41,23 @@ quale modello è richiesto e quale modalità è attiva, riscrive il campo `model
 inoltra. La gerarchia THINK/ACT/VERIFY e l'escalation vivono nella configurazione
 del client, non qui. La mappa è una tabella-dati in `src/role_routing.py`.
 
+### Installazione
+
+Requisiti: Python 3.10 o superiore. Dipendenze runtime: `aiohttp`, `brotli`, `multidict`, `Pillow` (vedi requirements.txt). `PySide6` serve solo per il pannello GUI opzionale.
+
+Passi:
+
+1. Clona il repository.
+2. Esegui `python3 install.py`.
+
+Il programma controlla Python e le dipendenze, crea la directory di configurazione, copia `.env.example` senza mai sovrascrivere un `.env` esistente, e registra un servizio: una unit systemd utente su Linux, un launchd plist su macOS, un file di avvio più istruzioni su Windows.
+
+Opzioni: `--dry-run`, `--no-service`, `--start`, `--yes`.
+
+Poi imposta `"ANTHROPIC_BASE_URL": "http://127.0.0.1:8787"` nel settings.json di Claude Code. Un frammento pronto è in `config/settings.anthropic.example.json`.
+
+**Opzionale — disciplina gerarchica per Claude Code:** se vuoi che Claude Code stesso rispetti la separazione THINK/ACT su cui è costruito il router (mai un subagent senza `model` esplicito, mai il modello di pianificazione che scrive codice di progetto direttamente nelle modalità miste), incolla il prompt pronto in `docs/claude-hierarchy/README.md` in una sessione Claude Code pulita.
+
 ---
 
 ## Le Quindici Modalità

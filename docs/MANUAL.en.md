@@ -41,6 +41,23 @@ it looks at which model is requested and which mode is active, rewrites the `mod
 field, and forwards. The THINK/ACT/VERIFY hierarchy and escalation live in the client
 configuration, not here. The map is a data table in `src/role_routing.py`.
 
+### Installation
+
+Requirements: Python 3.10 or later. Runtime dependencies are `aiohttp`, `brotli`, `multidict`, and `Pillow` (see requirements.txt). `PySide6` is needed only for the optional GUI panel.
+
+Steps:
+
+1. Clone the repository.
+2. Run `python3 install.py`.
+
+The installer checks Python and the dependencies, creates the configuration directory, copies `.env.example` without ever overwriting an existing `.env`, and registers a service: a user systemd unit on Linux, a launchd plist on macOS, a startup-file plus instructions on Windows.
+
+Options: `--dry-run`, `--no-service`, `--start`, `--yes`.
+
+Then set `"ANTHROPIC_BASE_URL": "http://127.0.0.1:8787"` in Claude Code's settings.json. A ready-to-use fragment is in `config/settings.anthropic.example.json`.
+
+**Optional — hierarchy discipline for Claude Code:** if you want Claude Code itself to respect the THINK/ACT split the router is built for (never a subagent without explicit `model`, never the planning model writing project code directly in mixed modes), paste the ready-made prompt in `docs/claude-hierarchy/README.md` into a fresh Claude Code session.
+
 ---
 
 ## The Fifteen Modes

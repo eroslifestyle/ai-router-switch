@@ -63,6 +63,8 @@ Options: `--dry-run`, `--no-service`, `--start`, `--yes`.
 
 Then set `"ANTHROPIC_BASE_URL": "http://127.0.0.1:8787"` in Claude Code's settings.json. A ready-to-use fragment is in `config/settings.anthropic.example.json`.
 
+Optional: if you want Claude Code itself to respect the THINK/ACT role split the router is built for (never call a subagent without an explicit model, never let the planning model write project code directly in mixed modes), paste the ready-made prompt in `docs/claude-hierarchy/README.md` into a fresh Claude Code session.
+
 ## Where configuration lives
 
 The router resolves its configuration directory in this order: the `AIROUTER_HOME` environment variable; then `~/.claude` if it exists (backwards compatibility); then `~/.config/ai-router-switch` on Linux, `~/Library/Application Support/ai-router-switch` on macOS, `%APPDATA%\ai-router-switch` on Windows.
