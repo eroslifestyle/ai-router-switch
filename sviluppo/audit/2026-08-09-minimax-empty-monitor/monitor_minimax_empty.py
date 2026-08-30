@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 ROUTER_USAGE = Path('/home/mrxxx/.claude/logs/router-usage.jsonl')
-DEBUG_EVENTS = Path('/mnt/backup/Dropbox/1 Programmazione/Progetti/ai-router-switch/logs/debug-events.jsonl')
+DEBUG_EVENTS = Path('/mnt/nvme2/projects/Dropbox-Progetti/ai-router-switch/logs/debug-events.jsonl')
 OUT = Path(__file__).resolve().parent / 'samples.jsonl'
 DEFAULT_WINDOW_S = 600
 
