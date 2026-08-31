@@ -451,6 +451,25 @@ written inline. A few properties matter more than the exact threshold:
   that auto-allows after N denials within a time window, logged under a
   distinct reason so it's still measurable, turns a silent stall into a
   visible, debuggable signal instead.
+- **The hook must be able to tell the orchestrator apart from the sub-task
+  it just spawned, or it blocks both.** This sounds obvious written down,
+  but it's the single most consequential detail in this whole pattern, and
+  it's easy to omit by accident: if the guard has no way to check who is
+  calling it (e.g. an `agent_id`/session-origin field present on sub-task
+  invocations and absent on the orchestrator's own), it will deny the
+  orchestrator's direct write *and* deny the sub-task's legitimate write
+  with the identical message — nothing can ever write more than the
+  micro-edit threshold, from either side, and the mode's execution role
+  never actually engages. A hand-rolled version of this pattern missing
+  exactly this check was the confirmed root cause of a real "the executor
+  never executes, it just plans" report: a sub-task spawned specifically to
+  write a 25-line file was refused by the same rule meant to redirect the
+  orchestrator *toward* it. Adding the origin check and re-running the same
+  controlled test (a sub-task writing a file past the micro-edit threshold)
+  fixed it immediately. Test this specific case explicitly before trusting
+  any implementation of this pattern: spawn a sub-task, have it write
+  something past your threshold, and confirm it's allowed — don't just
+  confirm the orchestrator is blocked.
 
 ### 3. Derive the "legal provider chain" from the same routing table the proxy uses
 
@@ -481,7 +500,26 @@ verify discipline without re-injecting the same text on every single turn
 and bloating context for no benefit. Fire it once, mark that it fired, and
 move on.
 
-### 5. Watch out for delegation overhead exceeding delegation benefit
+### 5. A sub-task's context grows from what *it* reads, not just from what the parent hands it
+
+It's tempting to assume that once a sub-task has its own scoped context
+(pattern 1), the token cost of delegation is under control. It isn't
+automatically: a sub-task that's told to "edit this file" and then reads
+the *entire* file itself — repeatedly, across several of its own internal
+turns, as it iterates — can accumulate a large context independent of
+anything the parent passed it. In one measurement, the heaviest individual
+delegations (up to ~100K tokens, tens of seconds of added latency) weren't
+caused by dragged-along conversation history at all — every one of them
+was a sub-task reading a large source file in full to make a change to it,
+turn after turn, inside its own context. The fix isn't in the governance
+layer, it's in how the delegation is worded: **point the sub-task at the
+specific function or line range that needs to change, and require it to
+use targeted, offset-based reads instead of reading whole files**,
+mirroring the same discipline a careful human reviewer would use. This
+matters independent of provider — it affects the executor regardless of
+which mode routes to it.
+
+### 6. Watch out for delegation overhead exceeding delegation benefit
 
 Spawning a sub-task has a fixed cost (the round trip, the sub-task's own
 context setup). For genuinely small or repetitive generation tasks — many
@@ -490,7 +528,7 @@ than it saves. A soft threshold ("after N sub-task spawns for the same kind
 of generation work in one session, prefer a single batched call to the
 executor instead") avoids trading one inefficiency for another.
 
-None of this layer needs to be complex to be effective — the five patterns
+None of this layer needs to be complex to be effective — the six patterns
 above are each a few dozen lines. What matters is that they exist at all:
 without *some* client-side mechanism enforcing "the orchestrator plans, the
 executor writes," switching this router's mode changes which provider your

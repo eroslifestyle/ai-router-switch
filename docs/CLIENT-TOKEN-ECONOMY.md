@@ -45,6 +45,17 @@ sub-task spawn (rather than trusting each prompt to remember to ask for a
 short report) is what makes it reliable across a long session instead of
 degrading as the session goes on.
 
+**Know which kind of "cap" you actually have.** A prompt-injected contract
+("keep your report under 2000 characters") is a *request*, not a limit — it
+relies on the executor choosing to comply, and an executor that occasionally
+misreports its own work (claims a file was written when it wasn't, claims
+an import exists when it doesn't) will just as easily ignore a soft report-
+size request under the same conditions. That's a real, separate reliability
+problem — this section is about avoiding wasted tokens, not about trusting
+an unverified report — but the two compound: don't treat a request-based
+cap as if it were structural enforcement, and don't skip verifying a
+sub-task's claimed result just because its report was appropriately short.
+
 ### 2. Tool/skill catalog size, paid on every single turn regardless of use
 
 Anything registered as an available tool, command, or skill has its
