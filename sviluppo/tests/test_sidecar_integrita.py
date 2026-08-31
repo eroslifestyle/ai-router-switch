@@ -196,7 +196,7 @@ if __name__ == "__main__":
     for nome, fn in tests:
         r = subprocess.run([sys.executable, "-c",
             "from sviluppo.tests.test_sidecar_integrita import " + fn.__name__ + ";" + fn.__name__ + "()"],
-            capture_output=True, text=True, cwd="/mnt/nvme2/projects/Dropbox-Progetti/ai-router-switch")
+            capture_output=True, text=True, cwd="/mnt/nvme2/projects/Progetti/ai-router-switch")
         if r.returncode:
             print("FAIL " + nome + ": " + r.stderr.strip().splitlines()[-1])
             ok = False

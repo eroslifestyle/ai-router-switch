@@ -41,9 +41,19 @@ router-mode/__pycache__/
 # Note di lavoro personali: restano sul disco, fuori dal repo pubblico
 .claude/TODO.md
 .claude/WIKI.md
+.claude/HANDOFF_*.md
+.claude/release-notes-*.md
 docs/sessions/
 docs/articles/
 sviluppo/backup-20260806/
+
+# Cache locale del tool Playwright MCP (screenshot/traccia di sessioni browser,
+# rigenerata ad ogni uso, mai contenuto di progetto).
+.playwright-mcp/
+
+# Log ruotati (logs/*.jsonl copre solo il file corrente, non le rotazioni
+# .jsonl.1/.jsonl.2/... che logrotate o la rotazione applicativa producono).
+logs/*.jsonl.*
 
 # File generato per errore da ImageMagick il 2026-07-19 (5,9 MB di PostScript):
 # era il file più grande del repo. Il nome resta ignorato perché una redirezione

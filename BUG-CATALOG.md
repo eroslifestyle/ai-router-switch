@@ -2,11 +2,11 @@
 
 > Generato automaticamente da `scripts/generate_bug_report.py` a partire da `logs/BUG-CATALOG.jsonl`. Non modificare a mano — rilanciare lo script. Vedi `DEBUG-CATALOG-SPEC.md` per lo schema completo.
 
-**1594 tipi distinti di bug/blocco/errore** · **63670 occorrenze totali** su 16 modalita'.
+**1595 tipi distinti di bug/blocco/errore** · **63870 occorrenze totali** su 16 modalita'.
 
 ## Modalita': `anthropic`
 
-125 tipi distinti, 37904 occorrenze.
+126 tipi distinti, 37945 occorrenze.
 
 ### `rate_limit_429_exhausted` (429)
 
@@ -134,6 +134,16 @@
 - **Ultima volta**: 2026-07-27T23:02:48+0200
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 208904 tokens > 200000 maximum"},"request_id":"req_011CdTEnv8dPM4AZnueLkxmb"}`
+
+### `empty_response_anthropic` (200)
+
+- **Firma**: `47f4a8d844a3d4e0`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 1
+- **Prima volta**: 2026-08-31T12:48:28+0200
+- **Ultima volta**: 2026-08-31T12:48:28+0200
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `event: message_start data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_011CeahFqFDtTaM7x1tX2ttR","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":7,"cache_creation_input_tokens":6`
 
 ### `relay_error_529` (529)
 
@@ -1199,9 +1209,9 @@
 
 - **Firma**: `77864e7a51a32f02`
 - **Severita'**: info
-- **Occorrenze**: 192
+- **Occorrenze**: 232
 - **Prima volta**: 2026-07-30T03:21:40+0200
-- **Ultima volta**: 2026-08-28T18:17:06+0200
+- **Ultima volta**: 2026-08-31T15:18:56+0200
 - **Modalita' coinvolte**: anthropic
 
 ### `tool_isolation_strip`
@@ -1255,7 +1265,7 @@
 
 ## Modalita': `glm`
 
-58 tipi distinti, 6593 occorrenze.
+58 tipi distinti, 6730 occorrenze.
 
 ### `forward_exception`
 
@@ -1538,6 +1548,16 @@
 
 ### `glm_ratelimit_exhausted` (429)
 
+- **Firma**: `5d2ba46f12bd738f`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 144
+- **Prima volta**: 2026-07-22T10:37:17Z
+- **Ultima volta**: 2026-08-30T22:02:30+0200
+- **Modalita' coinvolte**: glm
+- **Esempio**: `model=glm-4.7 glm rate-limit: budget 8s esaurito (waited 0s)`
+
+### `glm_ratelimit_exhausted` (429)
+
 - **Firma**: `6e43cd08801003c3`
 - **Severita'**: 🟡 Blocchi
 - **Occorrenze**: 104
@@ -1545,6 +1565,16 @@
 - **Ultima volta**: 2026-08-09T06:13:27+0200
 - **Modalita' coinvolte**: glm
 - **Esempio**: `model=claude-opus-5 glm rate-limit: budget 8s esaurito (waited 0s)`
+
+### `glm_429_rpm_tpm` (429)
+
+- **Firma**: `905bdf64f46d8ba0`
+- **Severita'**: 🟡 Blocchi
+- **Occorrenze**: 55
+- **Prima volta**: 2026-08-03T23:50:35+0200
+- **Ultima volta**: 2026-08-30T22:01:48+0200
+- **Modalita' coinvolte**: glm
+- **Esempio**: `attempt=2 backoff=60s kind=rpm_tpm model=glm-4.7`
 
 ### `glm_429_backoff` (429)
 
@@ -1555,16 +1585,6 @@
 - **Ultima volta**: 2026-07-31T08:22:27+0200
 - **Modalita' coinvolte**: glm
 - **Esempio**: `attempt=2 backoff=60s model=claude-opus-5`
-
-### `glm_ratelimit_exhausted` (429)
-
-- **Firma**: `5d2ba46f12bd738f`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 40
-- **Prima volta**: 2026-07-22T10:37:17Z
-- **Ultima volta**: 2026-08-04T03:16:32+0200
-- **Modalita' coinvolte**: glm
-- **Esempio**: `model=glm-4.7 glm rate-limit: budget 8s esaurito (waited 6s)`
 
 ### `glm_ratelimit_exhausted` (429)
 
@@ -1615,16 +1635,6 @@
 - **Ultima volta**: 2026-08-03T23:15:22+0200
 - **Modalita' coinvolte**: glm
 - **Esempio**: `attempt=1 backoff=5s model=glm-4.7`
-
-### `glm_429_rpm_tpm` (429)
-
-- **Firma**: `905bdf64f46d8ba0`
-- **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 22
-- **Prima volta**: 2026-08-03T23:50:35+0200
-- **Ultima volta**: 2026-08-19T07:06:51+0200
-- **Modalita' coinvolte**: glm
-- **Esempio**: `attempt=1 backoff=5s kind=rpm_tpm model=glm-4.7`
 
 ### `glm_429_quota_5h` (429)
 
@@ -2605,7 +2615,16 @@
 
 ## Modalita': `mix-ag-2`
 
-8 tipi distinti, 373 occorrenze.
+8 tipi distinti, 395 occorrenze.
+
+### `truncated_response_mix-ag-2` (200)
+
+- **Firma**: `118d8bed45cd945a`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 15
+- **Prima volta**: 2026-08-24T11:44:20+0200
+- **Ultima volta**: 2026-08-30T20:20:31+0200
+- **Modalita' coinvolte**: mix-ag-2
 
 ### `relay_error_400` (400)
 
@@ -2617,14 +2636,15 @@
 - **Modalita' coinvolte**: mix-ag-2
 - **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","code":"1210","message":"[1210][Invalid API parameter, please check the documentation.][202608301448575c4186d27bad4445]"},"request_id":"202608301448575c4186d27bad4445"}`
 
-### `truncated_response_mix-ag-2` (200)
+### `empty_response_mix-ag-2` (200)
 
-- **Firma**: `118d8bed45cd945a`
+- **Firma**: `4a3f1b668b4a0189`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 14
-- **Prima volta**: 2026-08-24T11:44:20+0200
-- **Ultima volta**: 2026-08-30T09:20:15+0200
+- **Occorrenze**: 2
+- **Prima volta**: 2026-08-25T05:39:18+0200
+- **Ultima volta**: 2026-08-30T17:24:09+0200
 - **Modalita' coinvolte**: mix-ag-2
+- **Esempio**: `[binario non testuale, 300 caratteri]`
 
 ### `relay_error_401` (401)
 
@@ -2645,16 +2665,6 @@
 - **Ultima volta**: 2026-08-25T06:14:49+0200
 - **Modalita' coinvolte**: mix-ag-2
 - **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","code":"1214","message":"[1214][modelCode: does not exist][202608251214490e6fd0dcd71b467f]"},"request_id":"202608251214490e6fd0dcd71b467f"}`
-
-### `empty_response_mix-ag-2` (200)
-
-- **Firma**: `4a3f1b668b4a0189`
-- **Severita'**: 🔴 Errori
-- **Occorrenze**: 1
-- **Prima volta**: 2026-08-25T05:39:18+0200
-- **Ultima volta**: 2026-08-25T05:39:18+0200
-- **Modalita' coinvolte**: mix-ag-2
-- **Esempio**: `[binario non testuale, 300 caratteri]`
 
 ### `test_minimax_429`
 
@@ -2679,9 +2689,9 @@
 
 - **Firma**: `0aa889b241e4c4b5`
 - **Severita'**: info
-- **Occorrenze**: 339
+- **Occorrenze**: 359
 - **Prima volta**: 2026-08-24T13:07:42+0200
-- **Ultima volta**: 2026-08-30T16:33:54+0200
+- **Ultima volta**: 2026-08-30T21:59:31+0200
 - **Modalita' coinvolte**: mix-ag-2
 
 ## Modalita': `mix-al`
