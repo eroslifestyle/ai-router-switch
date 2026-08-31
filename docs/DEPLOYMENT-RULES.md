@@ -329,6 +329,22 @@ standard deployment.** If you do enable it, understand you are letting a
 model write to your own repository, and `--merge` means letting it do so
 without human review.
 
+## 13. Optional: client-side token economy
+
+A correct deployment of the router doesn't by itself stop an inefficiently
+configured client from burning through quota — the router can only cache
+and trim what it actually receives cheap. `docs/CLIENT-TOKEN-ECONOMY.md`
+covers the client/terminal-side half: capping what a delegated sub-task is
+allowed to report back, measuring real tool/skill catalog usage instead of
+leaving everything loaded by default, verifying that MCP per-project
+gating actually applies on the client surface you're using, splitting
+always-loaded boot instructions from on-demand detail, watching the
+`cache_read`/`cache_creation` health signal per session, and sizing
+context-budget alerts to the active model's real window instead of a fixed
+number. Read it alongside §11 above (the THINK/ACT/VERIFY governance kit)
+— one controls *where* execution happens, the other controls *how much*
+context each session actually pays for.
+
 ## Summary — do / do not
 
 | Do | Do not |
@@ -342,3 +358,4 @@ without human review.
 | Treat `install.py` exiting 0 as "setup ran," then run the §9 checklist | Treat `install.py` exiting 0 as "done" |
 | Install the optional `docs/claude-hierarchy/` kit if you need the ACT role to actually engage | Assume switching modes alone moves execution off the orchestrator model |
 | Leave the self-fixer off unless you specifically want it | Enable `AIROUTER_SELF_FIX_ENABLED` + `--merge` as part of a default setup |
+| Read `docs/CLIENT-TOKEN-ECONOMY.md` and cap sub-task reports, tool catalog size, and boot instructions | Assume a correctly deployed router alone prevents a wasteful client from saturating a session |
