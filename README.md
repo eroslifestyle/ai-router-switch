@@ -116,5 +116,6 @@ Model weights. API keys. Provider accounts. The router itself does not grant acc
 - Project notes: `docs/PIANO.md`
 - Deployment rules — read before a fresh deploy: `docs/DEPLOYMENT-RULES.md`
 - Reliability, cache & context — engineering history: `docs/RELIABILITY-AND-PERFORMANCE.md`
+- Client-side token economy — configuring the terminal to avoid waste: `docs/CLIENT-TOKEN-ECONOMY.md`
 - Local stack: `local-stack/README.md`
 - Claude Code hierarchy bootstrap (ready-to-paste prompt): `docs/claude-hierarchy/README.md`
