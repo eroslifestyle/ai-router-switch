@@ -50,6 +50,10 @@ Legacy aliases accepted: `mixed` = mix-am, `glm-minimax` = mix-gm, `anthropic-gl
 
 ## Installation
 
+Full rules for a correct, unattended deployment (ports, secrets, systemd,
+network exposure): `docs/DEPLOYMENT-RULES.md`. This section is the quick
+version.
+
 Requirements: Python 3.10 or later. Runtime dependencies are `aiohttp`, `brotli`, `multidict`, and `Pillow` (see requirements.txt). `PySide6` is needed only for the optional GUI panel.
 
 Steps:
@@ -110,6 +114,7 @@ Model weights. API keys. Provider accounts. The router itself does not grant acc
 - Italian manual: `docs/MANUAL.md`
 - English manual: `docs/MANUAL.en.md`
 - Project notes: `docs/PIANO.md`
+- Deployment rules — read before a fresh deploy: `docs/DEPLOYMENT-RULES.md`
 - Reliability, cache & context — engineering history: `docs/RELIABILITY-AND-PERFORMANCE.md`
 - Local stack: `local-stack/README.md`
 - Claude Code hierarchy bootstrap (ready-to-paste prompt): `docs/claude-hierarchy/README.md`
