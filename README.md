@@ -123,3 +123,4 @@ Model weights. API keys. Provider accounts. The router itself does not grant acc
 - Local stack: `local-stack/README.md`
 - Claude Code hierarchy bootstrap (ready-to-paste prompt): `docs/claude-hierarchy/README.md`
 - Windows resilience gap + ready-to-paste implementation prompt: `docs/WINDOWS-RESILIENCE-PLAN.md`
+- Cross-platform audit — hardcoded paths, script portability, secrets: `docs/CROSS-PLATFORM-AUDIT.md`
