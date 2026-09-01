@@ -1,6 +1,6 @@
 # Audit velocità reale — perché il router "sembra" lento
 
-**Data:** 2026-09-02 · **Tipo:** solo lettura, nessuna modifica al codice/config.
+**Data:** 2026-09-02 · **Tipo:** originariamente solo lettura; §9 aggiunta con i fix implementati nella sessione successiva (stesso giorno).
 **Fonti:** `/home/mrxxx/.claude/logs/router-usage.jsonl(.1)` (224.996 richieste reali, 2026-06-30 → 2026-09-02, campi `ttfb_ms`/`total_ms` presenti su 79.183), lettura di `src/ai-router-proxy.py`, `src/secrets_provider.py`, `src/stream_peek.py`, `src/context_manager.py`, `src/token_counter.py`, `src/glm_backend.py`, `src/local_backend.py`, commenti storici nel codice, benchmark sintetici locali (nessuna chiamata upstream).
 
 ## 1. Il quadro generale (tutte le modalità, 79.183 richieste con timing)
@@ -92,6 +92,25 @@ Confronto `total_ms` mediano fra richieste andate a buon fine (status 200) e fal
 
 ## 8. Prossimi passi suggeriti (nessuno eseguito — solo audit)
 - Test A/B controllato: stesso body (con e senza i 200+ tool MCP) via `mode=anthropic` vs chiamata diretta ad Anthropic, per isolare l'overhead vero del tunnel dal costo del prompt.
-- Instrumentare `outcome=empty` + `total_ms` vicino al cap (§4.1) con un fail-fast (timeout più corto specifico per quel pattern) invece di aspettare 240s.
-- Profilare `mix-am` sul path di errore per capire quali retry si incatenano fino a 125s mediani.
-- Consolidare gli 8 `json.loads(body)` in un parse unico salvato su `request` — spreco piccolo ma gratuito da eliminare.
+- ~~Instrumentare `outcome=empty` + `total_ms` vicino al cap (§4.1) con un fail-fast~~ → fatto, vedi §9.2.
+- ~~Profilare `mix-am` sul path di errore~~ → fatto, vedi §9.1.
+- Consolidare gli 8 `json.loads(body)` in un parse unico salvato su `request` — spreco piccolo (~6ms misurati) e gratuito da eliminare, non ancora fatto: priorità bassa, non spiega la lentezza percepita (§3.1).
+
+## 9. Fix implementati (sessione successiva, stesso giorno — `/loop` iterativo con stress test)
+
+Due dei tre pattern patologici di §4 sono stati diagnosticati alla causa esatta nel codice, corretti, testati e committati. **Nessuno dei due è ancora deployato sul servizio live** (`:8787`, protetto, serve tutte le sessioni): resta su disco in attesa di riavvio esplicito, per decisione dell'utente durante questa sessione.
+
+### 9.1 Fix mix-am: retry budget raddoppiato (causa dei 125s mediani di §4.3)
+Causa esatta isolata leggendo `pipeline_minimax.py`: `_pipeline_minimax_orchestrate` chiama `forward_minimax()` due volte in sequenza (preflight con shrink del contesto, poi tentativo principale) e **nessuna delle due passava `retry_budget_sec`** — ognuna riceveva `MINIMAX_RETRY_CAP_SEC` (90s) pieno e indipendente, fino a 180s nel caso peggiore invece del tetto dichiarato di 90s. Coerente con la mediana di 125s misurata su un contesto medio Anthropic di 234K token, spesso oltre `MINIMAX_CONTEXT_BYTE_LIMIT` (750KB) che innesca il doppio path.
+
+Fix: un'unica finestra di tempo condivisa (`_budget_left()`) fra le due chiamate — se il preflight ha già consumato il budget, il tentativo principale fallisce subito invece di ritentare per altri 90s. Commit `8183b37`, 2 test nuovi (`test_pipeline_minimax_retry_budget.py`), suite completa confrontata via `git stash` prima/dopo: stesso set di fallimenti preesistenti, nessuna nuova regressione.
+
+### 9.2 Fix local/code-max: idle-read timeout (causa dei 146 hang a ~241s di §4.1)
+Causa esatta: `forward_local` usava solo `ClientTimeout(total=LOCAL_TIMEOUT_SEC=240s)` — una connessione **completamente silenziosa** restava appesa fino al tetto pieno, indistinguibile da una generazione attiva ma lenta. Vincolo di sistema scoperto e rispettato durante il fix (commento preesistente nel codice, non nell'audit originale): il client Claude Code abbandona a 300s di default, quindi il tetto totale router-side **deve** restare sotto quella soglia — altrimenti lo slot GPU di llama.cpp resta occupato da richieste che nessuno aspetta più (saturazione auto-alimentata). Per lo stesso motivo la soglia idle NON è stata allineata a `STREAM_SOCK_READ_SEC` (300s, usata per MiniMax/GLM) come pianificato inizialmente — avrebbe violato quel vincolo.
+
+Fix: `sock_read=AIROUTER_LOCAL_IDLE_READ_SEC` (default 90s) aggiunto ACCANTO al `total` invariato (240s, resta sotto i 300s del client). Una connessione muta fallisce a 90s invece di 240s; una generazione che manda byte regolarmente (anche lenta) non viene toccata, perché `sock_read` si resetta a ogni lettura. Deliberatamente NON alzato il tetto totale nonostante il caso di prefill-lungo documentato altrove nel codice (104K token di schemi-tool può già oggi superare 240s) — quel caso è fuori scope di questo fix ed è già mitigato diversamente (modello locale unico residente, 2026-08-19); allentare il tetto qui avrebbe rotto l'invariante anti-saturazione GPU. Commit `072f9cd`, 3 test nuovi (`test_local_backend_idle_timeout.py`), docs aggiornate (`MANUAL.md`/`.en.md`), stessa verifica di non-regressione di §9.1.
+
+### 9.3 Cosa NON è stato toccato, e perché
+- **Causa dominante di §2 (tool-schema >40KB → 10x TTFB)**: non è un bug del router, è il payload che Claude Code manda (200+ tool MCP eager-loaded). Non è un fix di codice router — è una decisione di configurazione MCP che spetta all'utente, fuori mandato di questo `/loop`.
+- **8x `json.loads(body)` ridondante (§3.1)**: confermato negoziabile ma marginale (~6ms), non tra le cause dei ritardi di secondi osservati. Non eseguito in questo giro.
+- **Deploy sul servizio live**: entrambi i fix restano su disco. L'utente ha scelto esplicitamente "solo commit" per il fix #1 durante la sessione — il riavvio del router (`:8787`) resta un passo separato, da fare seguendo il protocollo obbligatorio del progetto quando l'utente lo decide.
