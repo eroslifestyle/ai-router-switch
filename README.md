@@ -93,6 +93,8 @@ A component exists that analyzes recurring errors and tries to propose a fix by 
 
 The systemd service runs with `Restart=always`. A watchdog script lives in the `scripts` directory. A resilience module enters a degraded state when the OAuth token is missing or expired and exits it on its own as soon as the user logs in again.
 
+This process-supervision layer (auto-restart, watchdog, freeze detection) is currently Linux-only, built on systemd. On Windows, `install.py` only generates a start-at-logon batch file today — no crash-restart, no watchdog. The `DEGRADED`/OAuth state machine itself (`src/ai_router_resilience.py`) is plain Python and already works on any OS; only the systemd-specific supervision scripts need a Windows-native equivalent. See `docs/WINDOWS-RESILIENCE-PLAN.md` for the gap analysis and a ready-to-use implementation prompt.
+
 ## Network exposure and the /debug routes
 
 By default the router binds to 127.0.0.1, which is the recommended configuration.
@@ -120,3 +122,4 @@ Model weights. API keys. Provider accounts. The router itself does not grant acc
 - Release history: `CHANGELOG.md`
 - Local stack: `local-stack/README.md`
 - Claude Code hierarchy bootstrap (ready-to-paste prompt): `docs/claude-hierarchy/README.md`
+- Windows resilience gap + ready-to-paste implementation prompt: `docs/WINDOWS-RESILIENCE-PLAN.md`
