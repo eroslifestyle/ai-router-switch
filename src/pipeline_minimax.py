@@ -8,7 +8,7 @@ from aiohttp import web  # usato nei rami d'errore (righe ~65 e ~98): senza ques
                          # rispondeva 500 "Server got itself in trouble" opaco.
 
 from router_constants import (
-    MINIMAX_MODEL, MINIMAX_CONTEXT_BYTE_LIMIT,
+    MINIMAX_MODEL, MINIMAX_CONTEXT_BYTE_LIMIT, MINIMAX_RETRY_CAP_SEC,
 )
 from router_utils import log, log_router_usage, _request_orig_model
 import debug_catalog
@@ -59,6 +59,7 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
     immagini (vision), web-search block. Lo stream MiniMax passa al client via relay()
     senza bufferizzazione (primo byte non appena MiniMax risponde)."""
     # Lazy import to avoid circular dependencies
+    import time
     from router_mode import _resolve_chat_fingerprint
     from forward_minimax import forward_minimax
     from pipeline_anthropic import (
@@ -68,11 +69,28 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
 
     chat_fp = _resolve_chat_fingerprint(request)
 
+    # Budget di retry CONDIVISO fra preflight-shrink e tentativo principale.
+    # forward_minimax(retry_budget_sec=None) userebbe MINIMAX_RETRY_CAP_SEC per
+    # OGNI chiamata: due chiamate in sequenza (preflight + main, sotto) potevano
+    # sommare fino a 2x MINIMAX_RETRY_CAP_SEC (180s invece dei 90s dichiarati
+    # come tetto) — root cause dei fallimenti mix-am con mediana 125s misurata
+    # nell'audit 2026-09-02 (sviluppo/audit/2026-09-02-audit-velocita-reale).
+    # Passando qui il tempo residuo, il tetto reale torna a essere il tetto
+    # dichiarato: se il preflight ha già consumato tutto il budget, il
+    # tentativo principale fallisce subito invece di ritentare per altri 90s
+    # contro un servizio già dichiaratamente sovraccarico.
+    _t0 = time.monotonic()
+
+    def _budget_left():
+        return max(0.0, MINIMAX_RETRY_CAP_SEC - (time.monotonic() - _t0))
+
     if _is_context_too_large_for_minimax(body):
         shrunk = await _try_shrink_body(orig, MINIMAX_CONTEXT_BYTE_LIMIT)
         if shrunk is not None and shrunk != body:
             try:
-                up_pre = await forward_minimax(request, shrunk, session, model_override=model_override)
+                up_pre = await forward_minimax(request, shrunk, session,
+                                               retry_budget_sec=_budget_left(),
+                                               model_override=model_override)
                 if up_pre.status < 400:
                     log(f"minimax PRE shrunk OK {up_pre.status} fp={chat_fp}")
                     return await relay(up_pre, extra_headers={"x-ai-verified": "minimax-m3-shrunk"}, final_override=_effective_minimax_model(orig, model_override))
@@ -111,7 +129,9 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
 
     # Passthrough streaming diretto: primo byte appena MiniMax risponde, zero overhead.
     try:
-        up = await forward_minimax(request, body, session, model_override=model_override)
+        up = await forward_minimax(request, body, session,
+                                   retry_budget_sec=_budget_left(),
+                                   model_override=model_override)
     except Exception as e:
         log(f"minimax passthrough EXC: {e} fp={chat_fp}")
         debug_catalog.record_event(severity="error", category="minimax",
