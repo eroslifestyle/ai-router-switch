@@ -183,7 +183,7 @@ When local execution fails, the escalation climbs back up the Anthropic tiers: S
 
 Fixed port: `8774`. It was the port of `inverse`, a mode removed on 2026-07-26; on 2026-08-04 it was reassigned to `mix-al`.
 
-The local model is exposed via LiteLLM, which speaks the native Anthropic protocol on `/v1/messages`. Key and base URL are read from `LOCAL_LLM_API_KEY` and `LOCAL_LLM_API_BASE`; if missing, the router loads `secrets/local-llm.env`. Timeout: `AIROUTER_LOCAL_TIMEOUT_SEC`, default 240 seconds. Retry: maximum 2.
+The local model is exposed via LiteLLM, which speaks the native Anthropic protocol on `/v1/messages`. Key and base URL are read from `LOCAL_LLM_API_KEY` and `LOCAL_LLM_API_BASE`; if missing, the router loads `secrets/local-llm.env`. Timeout: `AIROUTER_LOCAL_TIMEOUT_SEC` (absolute cap, default 240s) + `AIROUTER_LOCAL_IDLE_READ_SEC` (max silence between reads, default 90s — 2026-09-02). Retry: maximum 2.
 
 **Use:** zero-cost execution with code that never leaves the machine, orchestration and reasoning on Claude.
 
@@ -196,7 +196,7 @@ The local model is exposed via LiteLLM, which speaks the native Anthropic protoc
 
 PURE mode: both THINK and ACT go to the local `code-max` model; neither Anthropic, nor MiniMax, nor GLM step in.
 
-Fixed port: `8779`. Same keys (`LOCAL_LLM_API_KEY` / `LOCAL_LLM_API_BASE`, fallback `secrets/local-llm.env`), same timeout (`AIROUTER_LOCAL_TIMEOUT_SEC`, default 240 s) and same 2 retries as `mix-al`.
+Fixed port: `8779`. Same keys (`LOCAL_LLM_API_KEY` / `LOCAL_LLM_API_BASE`, fallback `secrets/local-llm.env`), same timeouts (`AIROUTER_LOCAL_TIMEOUT_SEC` + `AIROUTER_LOCAL_IDLE_READ_SEC`) and same 2 retries as `mix-al`.
 
 The router accepts only `code-max`: any other requested model is folded back to that one. Before forwarding, it appends a system hint to the prompt.
 
@@ -486,7 +486,8 @@ curl http://127.0.0.1:8787/__router_health
 | `AIROUTER_MINIMAX_CONTEXT_LIMIT` | `750000` | Request context limit in BYTES, not tokens |
 | `AIROUTER_NON_STREAM_SOCK_READ_SEC` | `600` | Read ceiling for non-streaming responses; streaming does not use it |
 | `AIROUTER_MINIMAX_SEMAPHORE` | `8` | Max concurrent requests to MiniMax (see also `AIROUTER_GLM_SEMAPHORE`, `AIROUTER_QWEN_SEMAPHORE`) |
-| `AIROUTER_LOCAL_TIMEOUT_SEC` | `240` | Local backend timeout, used by the `local` and `mix-al` modes |
+| `AIROUTER_LOCAL_TIMEOUT_SEC` | `240` | Absolute duration cap for the local backend (`local`/`mix-al`) — must stay under the client's 300s default |
+| `AIROUTER_LOCAL_IDLE_READ_SEC` | `90` | Max silence between two network reads from the local backend before aborting (2026-09-02): a mute connection fails before waiting for the absolute cap; a generation sending bytes regularly is unaffected |
 | `AIROUTER_TOOLS_TELEMETRY` | `0` | Measures the weight of each request's `tools` block and records it in the sidecar |
 | `AIROUTER_CATALOG_PATH` | — | Relocates `BUG-CATALOG.jsonl`; the test suite points it at a tmpdir so it never writes to the production one |
 | `AIROUTER_DEEP_DEBUG` | `0` | Extended diagnostics on the hot path |

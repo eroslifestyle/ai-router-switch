@@ -31,8 +31,25 @@ LOCAL_MODEL_OPENROUTER = 'ox-alpha'  # Ox Alpha via OpenRouter (modalità openro
 LOCAL_MODEL_FALLBACK = LOCAL_MODEL_CODE  # default per modalità openrouter quando non specificato
 # Il client Claude Code taglia a API_TIMEOUT_MS (300s di default): il router DEVE
 # scadere PRIMA, altrimenti dopo l'abbandono del client la richiesta continua a
-# occupare uno slot GPU di llama.cpp e la saturazione si auto-alimenta.
+# occupare uno slot GPU di llama.cpp e la saturazione si auto-alimenta. Questo
+# tetto resta INVARIATO (vincolo di stabilita' del sistema, non negoziabile qui):
+# vedi LOCAL_IDLE_READ_SEC sotto per il fix del 2026-09-02.
 LOCAL_TIMEOUT_SEC = int(os.environ.get('AIROUTER_LOCAL_TIMEOUT_SEC', 240))
+# Idle-read timeout (2026-09-02, audit velocita' reale — sviluppo/audit/2026-09-02-
+# audit-velocita-reale/REPORT.md §4.1): 146 richieste (0,06% del totale, 63 su
+# code-max) restavano appese fino al tetto LOCAL_TIMEOUT_SEC con status 200 e un
+# outcome "empty" (nessun byte utile arrivato in tutto quel tempo) — 240s pieni
+# sprecati per scoprire un fallimento che con connessione davvero silenziosa era
+# gia' evidente molto prima. sock_read aborta appena il SILENZIO fra due letture
+# supera questa soglia, mentre LOCAL_TIMEOUT_SEC resta il tetto assoluto invariato
+# (una generazione che manda byte regolarmente, anche lenta, non viene toccata da
+# questa soglia: puo' correre fino al tetto totale come oggi). Deliberatamente
+# SOTTO il caso di prefill-lungo documentato in role_routing.py (104K token di
+# schemi-tool, ~250 tok/s, puo' gia' superare 240s TOTALI): quel caso e' gia'
+# oltre LOCAL_TIMEOUT_SEC stesso e viene gestito lasciando correre finche' arriva
+# ALMENO un byte (keep-alive/primo chunk) entro questa soglia — non e' il target
+# di questo fix, che riguarda le connessioni COMPLETAMENTE silenziose.
+LOCAL_IDLE_READ_SEC = int(os.environ.get('AIROUTER_LOCAL_IDLE_READ_SEC', 90))
 # Retry solo su errori di connessione (rapidi). Su timeout NON si ritenta: vedi forward_local.
 LOCAL_MAX_RETRY = 2
 
@@ -399,7 +416,8 @@ async def forward_local(
                 url,
                 data=body,
                 headers=headers,
-                timeout=aiohttp.ClientTimeout(total=LOCAL_TIMEOUT_SEC)
+                timeout=aiohttp.ClientTimeout(total=LOCAL_TIMEOUT_SEC,
+                                              sock_read=LOCAL_IDLE_READ_SEC)
             )
             status = resp.status
             elapsed_ms = (asyncio.get_event_loop().time() - start) * 1000
@@ -471,7 +489,9 @@ async def forward_local(
                 await asyncio.sleep(2)
                 continue
             if _is_timeout:
-                log_fn(f"forward_local TIMEOUT dopo {elapsed_ms:.0f}ms (limite {LOCAL_TIMEOUT_SEC}s): nessun retry")
+                _causa = "idle-read" if elapsed_ms < LOCAL_IDLE_READ_SEC * 1000 + 5000 else "totale"
+                log_fn(f"forward_local TIMEOUT dopo {elapsed_ms:.0f}ms (causa presunta: {_causa}, "
+                       f"soglie idle={LOCAL_IDLE_READ_SEC}s/totale={LOCAL_TIMEOUT_SEC}s): nessun retry")
             log_fn(f"forward_local error: {type(e).__name__} elapsed={elapsed_ms:.0f}ms")
             debug_catalog.record_event(
                 severity="error", category="local",
