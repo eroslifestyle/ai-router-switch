@@ -17,6 +17,8 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "src"))
 
+from conftest import wait_for_sidecar_text
+
 
 def _import_router_utils():
     """Ricarica router_utils: la conftest purga i moduli di src/ da sys.modules."""
@@ -38,8 +40,8 @@ def _write_jsonl(path, entries):
 
 
 def _ultima_entry(sidecar):
-    """Rilegge l'ultima riga scritta nel sidecar."""
-    righe = sidecar.read_text(encoding="utf-8").strip().split("\n")
+    """Rilegge l'ultima riga scritta nel sidecar (attende il thread scrittore async)."""
+    righe = wait_for_sidecar_text(sidecar).strip().split("\n")
     return json.loads(righe[-1])
 
 

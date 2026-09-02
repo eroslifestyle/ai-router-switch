@@ -948,7 +948,6 @@ async def handle(request):
                 pass
 
             # Registra trace
-            from router_debug_ext import trace_logger
             trace_logger.capture(
                 mode=mode,
                 model=_local_model,
@@ -1235,7 +1234,6 @@ def main():
     # journal, ma con "shutdown complete" senza "shutdown signal received".
     # Questo hook logga SINCRONAMENTE su file separato OGNI possibile causa
     # di uscita: eccezione non gestita, exit pulito, segnali fatali.
-    import sys as _sys
     import tempfile as _tempfile
     import traceback as _tb
     _DEATH_LOG = os.path.join(_tempfile.gettempdir(), "ai-router-death.log")

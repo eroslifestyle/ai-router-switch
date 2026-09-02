@@ -385,14 +385,19 @@ class TestQwenMode:
             assert provider == 'qwen'
 
     def test_le_sei_modalita_preesistenti_sono_invariate(self):
-        """Non-regression: sei modalita' esistenti restano identiche."""
+        """Non-regression: sei modalita' esistenti restano identiche.
+
+        THINK GLM 'glm-5.3', non 'glm-5.2': il commit 6d458b6 ha migrato di
+        proposito il THINK della catena GLM, questo test non era mai stato
+        aggiornato dopo quella migrazione.
+        """
         expected = {
             'anthropic': (('anthropic', None), ('anthropic', None)),
             'minimax': (('minimax', 'MiniMax-M3'), ('minimax', 'MiniMax-M2.7')),
-            'glm': (('glm', 'glm-5.2'), ('glm', 'glm-4.7')),
+            'glm': (('glm', 'glm-5.3'), ('glm', 'glm-4.7')),
             'mix-am': (('anthropic', None), ('minimax', 'MiniMax-M2.7')),
             'mix-ag': (('anthropic', None), ('glm', 'glm-4.7')),
-            'mix-gm': (('glm', 'glm-5.2'), ('minimax', 'MiniMax-M2.7')),
+            'mix-gm': (('glm', 'glm-5.3'), ('minimax', 'MiniMax-M2.7')),
         }
         think_model = 'claude-opus-5'
         act_model = 'claude-haiku-4-5-20251001'

@@ -6,6 +6,8 @@ import sys
 import importlib
 from pathlib import Path
 
+from conftest import wait_for_sidecar_text
+
 
 def _import_router_utils(flag_acceso: bool):
     """Importa il modulo router_utils con il flag di telemetria specificato."""
@@ -156,7 +158,7 @@ def test_sidecar_invariato_senza_tools(tmp_path):
             path="/v1/chat"
         )
 
-        content = sidecar_file.read_text()
+        content = wait_for_sidecar_text(sidecar_file)
         line = json.loads(content.strip())
 
         # Chiavi originali (backward-compat) + chiavi self-healing Fase 1 (sempre presenti).
@@ -198,7 +200,7 @@ def test_sidecar_arricchito_con_tools(tmp_path):
             tools={"tools_count": 5, "tools_bytes": 1234}
         )
 
-        content = sidecar_file.read_text()
+        content = wait_for_sidecar_text(sidecar_file)
         line = json.loads(content.strip())
 
         chiavi_originali = {

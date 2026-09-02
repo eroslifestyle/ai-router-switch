@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import wait_for_sidecar_text
+
 
 def _import_router_utils():
     sys.modules.pop('router_utils', None)
@@ -40,7 +42,7 @@ class TestCampiLatenza:
             total_ms=7890.12,
         )
 
-        entries = sidecar_path.read_text().strip().split('\n')
+        entries = wait_for_sidecar_text(sidecar_path).strip().split('\n')
         entry = json.loads(entries[-1])
 
         assert 'ttfb_ms' in entry
@@ -61,7 +63,7 @@ class TestCampiLatenza:
             mode='chat',
         )
 
-        entries = sidecar_path.read_text().strip().split('\n')
+        entries = wait_for_sidecar_text(sidecar_path).strip().split('\n')
         entry = json.loads(entries[-1])
 
         assert 'ttfb_ms' not in entry
@@ -81,7 +83,7 @@ class TestCampiLatenza:
             ttfb_ms=50.0,
         )
 
-        entries = sidecar_path.read_text().strip().split('\n')
+        entries = wait_for_sidecar_text(sidecar_path).strip().split('\n')
         entry = json.loads(entries[-1])
 
         assert 'ttfb_ms' in entry
@@ -102,7 +104,7 @@ class TestCampiLatenza:
             ttfb_ms=0.0,
         )
 
-        entries = sidecar_path.read_text().strip().split('\n')
+        entries = wait_for_sidecar_text(sidecar_path).strip().split('\n')
         entry = json.loads(entries[-1])
 
         assert 'ttfb_ms' in entry
@@ -123,7 +125,7 @@ class TestCampiLatenza:
             total_ms='12.34',
         )
 
-        entries = sidecar_path.read_text().strip().split('\n')
+        entries = wait_for_sidecar_text(sidecar_path).strip().split('\n')
         entry = json.loads(entries[-1])
 
         assert entry['ttfb_ms'] == 5.0
@@ -150,7 +152,7 @@ class TestCampiLatenza:
             status=200,
         )
 
-        entries = sidecar_path.read_text().strip().split('\n')
+        entries = wait_for_sidecar_text(sidecar_path).strip().split('\n')
         entry = json.loads(entries[-1])
 
         storici = [
@@ -183,7 +185,7 @@ class TestCampiLatenza:
             total_ms=20.0,
         )
 
-        entries = sidecar_path.read_text().strip().split('\n')
+        entries = wait_for_sidecar_text(sidecar_path).strip().split('\n')
         entry = json.loads(entries[-1])
         keys = list(entry.keys())
 

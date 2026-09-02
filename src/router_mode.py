@@ -126,7 +126,7 @@ def _resolve_chat_fingerprint(request) -> str:
                 return f"hash:{fp_hash}"
     except Exception:
         pass
-    return request.remote or "default"
+    return getattr(request, "remote", None) or "default"
 
 
 # ── Chat mode store (lock-free, cache-first) ───────────────────────────────────

@@ -136,9 +136,18 @@ def test_glm_image_plus_peak_routes_to_vision():
 
 def test_mix_gm_oversize_reroutes():
     """mix-gm oversize -> reroute a glm-5.3."""
+    """mix-gm oversize -> reroute a glm-5.3.
+
+    Pinnata fuori fascia peak (ora 9, stesso pattern dei test gemelli sopra):
+    senza run_with_hour il test chiama datetime.now() reale e fallisce ogni
+    pomeriggio feriale (peak-cap lun-ven 14-18 Asia/Shanghai declassa a
+    glm-4.7 correttamente) — non e' un bug di resolve_effective_route, e'
+    l'oversize-reroute che va isolato dal peak-cap, non confuso con esso.
+    """
     from role_routing import resolve_effective_route
+    ps_vivo = importlib.import_module("peak_scheduler")
     body = _large_body(900)
-    prov, model = resolve_effective_route("mix-gm", "MiniMax-M2.7", body)
+    prov, model = run_with_hour(9, resolve_effective_route, "mix-gm", "MiniMax-M2.7", body, modulo=ps_vivo)
     assert prov == "glm", f"Atteso glm, ottenuto {prov}"
     assert model == "glm-5.3", f"Atteso glm-5.3, ottenuto {model}"
 

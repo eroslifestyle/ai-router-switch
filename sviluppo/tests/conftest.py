@@ -36,6 +36,25 @@ import pytest_asyncio
 SRC = pathlib.Path(__file__).resolve().parents[2] / "src"
 
 
+# ── Attesa del sidecar asincrono ─────────────────────────────────────────────
+def wait_for_sidecar_text(path: pathlib.Path, timeout: float = 2.0, interval: float = 0.02) -> str:
+    """Attende il contenuto di un file scritto da router_utils.log_router_usage().
+
+    Dal fix del restart-loop (2026-08-23, commit 6044a01) la scrittura del
+    sidecar passa da una coda + thread dedicato, non più sincrona nel thread
+    che chiama log_router_usage(). Un `path.read_text()` subito dopo la
+    chiamata perde la corsa in modo deterministico, non solo a volte: da qui
+    il poll invece di un read diretto.
+    """
+    import time
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.exists() and path.stat().st_size > 0:
+            return path.read_text(encoding="utf-8")
+        time.sleep(interval)
+    raise TimeoutError(f"sidecar non scritto entro {timeout}s dal thread writer: {path}")
+
+
 # ── Isolamento del BUG-CATALOG ───────────────────────────────────────────────
 # `debug_catalog` ancora il percorso alla root del repo e lo risolve UNA volta,
 # all'import: senza override ogni test che importa il modulo scrive nel catalogo

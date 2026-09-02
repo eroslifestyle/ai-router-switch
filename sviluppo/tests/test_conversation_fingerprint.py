@@ -110,8 +110,15 @@ class TestConversationFingerprint:
         fp = conversation_fingerprint(data)
         assert fp == "default", f"Messaggio vuoto deve restituire 'default': {fp}"
 
-    def test_default_message_too_short(self):
-        """Primo messaggio utente troppo corto (< 32 char) → 'default'."""
+    def test_short_message_is_hashed_not_bucketed(self):
+        """Messaggio corto ma non vuoto → hash reale, non 'default'.
+
+        Il commit 80772c3 (2026-08-23) ha eliminato di proposito la soglia
+        "< 32 char -> default": bucketare i messaggi brevi in un unico
+        fingerprint condiviso faceva collidere chat diverse sotto lo stesso
+        override di modalita'. Solo il messaggio vuoto resta 'default'
+        (vedi test_default_empty_message).
+        """
         data = {
             "system": "Sistema",
             "messages": [
@@ -119,7 +126,7 @@ class TestConversationFingerprint:
             ]
         }
         fp = conversation_fingerprint(data)
-        assert fp == "default", f"Messaggio troppo corto deve restituire 'default': {fp}"
+        assert fp == "b133a0c0e9be", f"Atteso l'hash di 'ciao', ottenuto: {fp}"
 
     def test_default_only_system_reminder(self):
         """Messaggio fatto solo di un blocco <system-reminder> → 'default'."""
@@ -154,7 +161,13 @@ class TestConversationFingerprint:
             assert False, f"Non deve sollevare eccezione su messages non-lista: {e}"
 
     def test_no_exception_content_unexpected_type(self):
-        """Input malformato (content di tipo inatteso) → nessuna eccezione."""
+        """Input malformato (content di tipo inatteso) → nessuna eccezione, hash reale.
+
+        12345 non e' stringa ne' lista, entra nel ramo str() e diventa "12345"
+        (5 char, non vuoto): dal commit 80772c3 (2026-08-23) va hashato come
+        qualunque altro contenuto non vuoto, non piu' bucketato su 'default'
+        (vedi test_short_message_is_hashed_not_bucketed).
+        """
         data = {
             "system": "Sistema",
             "messages": [
@@ -163,8 +176,7 @@ class TestConversationFingerprint:
         }
         try:
             fp = conversation_fingerprint(data)
-            # Il comportamento è: 12345 non è stringa né lista, entra in str() e diventa "12345" (5 char) → 'default'
-            assert fp == "default", f"Content tipo int deve restituire 'default': {fp}"
+            assert fp == "5994471abb01", f"Atteso l'hash di \"12345\", ottenuto: {fp}"
         except Exception as e:
             assert False, f"Non deve sollevare eccezione su content tipo int: {e}"
 

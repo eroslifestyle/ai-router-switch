@@ -16,6 +16,7 @@ class _FakeRequest:
     method = "POST"
     path_qs = "/v1/messages"
     headers = {}
+    remote = None
 
 
 class _FakeResp:

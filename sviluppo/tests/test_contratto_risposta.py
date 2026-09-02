@@ -74,6 +74,11 @@ CONTRATTO_OSSERVATO = {
     # ultra: gzip + msg_ — OSSERVATO su traffico reale il 2026-08-22, non dedotto:
     # probe ACT sulla porta della modalita' -> model=glm-4.7, id=msg_2026...
     "ultra": {"encoding": "gzip", "id": "msg_"},
+    # opr: THINK e ACT instradano entrambi su provider "local" (role_routing.py,
+    # OPENROUTER_ACT) — stesso backend di `gpt`, stesso contratto per costruzione.
+    # Non ancora verificata su traffico reale (2026-09-02): modalita' sandbox,
+    # nessun traffico registrato in produzione.
+    "opr": {"encoding": "identity", "id": "resp_"},
 }
 
 IDENTIFICATIVI = {
