@@ -26,21 +26,37 @@ heartbeat-file + health-endpoint polling described in
 table in that document applies to macOS for the watchdog rows; the
 "Restart=always" row does not apply since macOS already has `KeepAlive`.
 
-## Two real bugs: hardcoded `/tmp/` breaks on Windows
+## Three real bugs: hardcoded `/tmp/` breaks on Windows
 
-Two module-level constants use a Linux/macOS-only path with no fallback:
+Three places use a Linux/macOS-only path with no fallback, none going
+through `src/paths.py` (which already resolves config directories
+correctly per-OS: `AIROUTER_HOME` → `~/.claude` → XDG/APPDATA/Application
+Support):
 
-- `src/local_backend.py:146` — `SAVED_IMAGE_DIR = "/tmp/claude-local-images"`
+- `src/local_backend.py:163` — `SAVED_IMAGE_DIR = "/tmp/claude-local-images"`
 - `src/ai-router-proxy.py:1240` — `_DEATH_LOG = "/tmp/ai-router-death.log"`
+- `src/context_manager.py:33` — `self._db_path = db_path or "/tmp/ai-router-ctx.db"`,
+  and the only call site, `CTX = ContextManager()` in
+  `src/ai-router-proxy.py:39`, passes no `db_path` — so the default is not
+  a theoretical fallback, it's what actually runs, unconditionally, on
+  every proxy start. (An earlier pass classified this one as non-blocking
+  on the assumption that a caller overrides it; that assumption was wrong —
+  verified by grepping every `ContextManager(` call site, there is exactly
+  one and it takes no arguments.)
 
-Neither goes through `src/paths.py` (which already resolves config
-directories correctly per-OS: `AIROUTER_HOME` → `~/.claude` → XDG/APPDATA/
-Application Support). On Windows, `/tmp` is not a valid absolute path, so
-whichever of these two runs first fails outright the first time it's
-touched — `SAVED_IMAGE_DIR` on the first local-mode image save,
-`_DEATH_LOG` on the first unhandled crash it tries to record. The fix is
-`tempfile.gettempdir()` in place of the literal string; not yet applied,
-pending confirmation since it touches `src/`.
+On Windows, `/tmp` is not a valid absolute path, so each of these fails the
+first time it's touched — `SAVED_IMAGE_DIR` on the first local-mode image
+save, `_DEATH_LOG` on the first unhandled crash it tries to record,
+`context_manager`'s SQLite file on the first attempt to open it, which
+given the unconditional call site means at proxy startup itself. The fix is
+`tempfile.gettempdir()` in place of the literal string in all three; not
+yet applied, pending confirmation since it touches `src/`.
+
+**Verified still present, unfixed, as of `HEAD 90ccb90`** (checked directly
+against the working tree, not inferred from an earlier pass — a parallel
+session committed twice to this repo in the meantime, which is why the
+`local_backend.py` line number moved from an earlier count of 146 to the
+163 above; the content of all three lines is unchanged).
 
 ## Confirmed OK, no action needed
 
@@ -55,8 +71,10 @@ pending confirmation since it touches `src/`.
 - `notify-send` calls in `src/router_utils.py`, `src/glm_backend.py`,
   `src/qwen_backend.py` — best-effort desktop notifications, Linux-only
   binary, fail silently if absent. Cosmetic, not a portability blocker.
-- `src/paths.py` and the rest of the config/path resolution use `pathlib`
-  consistently; no other hardcoded POSIX path was found in `src/`.
+- `src/paths.py` itself uses `pathlib` consistently and resolves config
+  directories correctly per-OS — the three hardcoded `/tmp/` paths above are
+  the only ones bypassing it; a full `grep '"/tmp/' src/*.py` found no
+  others.
 - `scripts/ai-router-watchdog.sh` / `ai-router-freeze-watchdog.sh` are
   bash-only (curl, systemctl, `ss`) but are invoked exclusively from
   systemd timer units, never from `install.py` or any code path in `src/`
@@ -66,6 +84,7 @@ pending confirmation since it touches `src/`.
 
 ## Status
 
-Documented, not yet fixed. The two `/tmp/` constants are a small, low-risk
-change (swap for `tempfile.gettempdir()`); everything else here is either
-already fine or tracked separately in `docs/WINDOWS-RESILIENCE-PLAN.md`.
+Documented, not yet fixed. The three `/tmp/` occurrences are a small,
+low-risk change (swap for `tempfile.gettempdir()`); everything else here is
+either already fine or tracked separately in
+`docs/WINDOWS-RESILIENCE-PLAN.md`.
