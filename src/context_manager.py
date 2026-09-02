@@ -4,7 +4,9 @@ Soglie: 80% warn / 90% compact / 100% error (AQ-3).
 Token counting: stima byte//4 (il campionamento AQ-8 non è mai stato completato, rimosso il 2026-08-04).
 Storage: SQLite per-chat, isolato per chat_fp + modo.
 """
+import os
 import sqlite3
+import tempfile
 import threading
 
 from model_context_map import get_context_limit
@@ -30,7 +32,7 @@ class ContextManager:
     """
 
     def __init__(self, db_path: str | None = None):
-        self._db_path = db_path or "/tmp/ai-router-ctx.db"
+        self._db_path = db_path or os.path.join(tempfile.gettempdir(), "ai-router-ctx.db")
         self._lock = threading.Lock()
         self._init_db()
 

@@ -1236,8 +1236,9 @@ def main():
     # Questo hook logga SINCRONAMENTE su file separato OGNI possibile causa
     # di uscita: eccezione non gestita, exit pulito, segnali fatali.
     import sys as _sys
+    import tempfile as _tempfile
     import traceback as _tb
-    _DEATH_LOG = "/tmp/ai-router-death.log"
+    _DEATH_LOG = os.path.join(_tempfile.gettempdir(), "ai-router-death.log")
     def _death(msg: str):
         try:
             with open(_DEATH_LOG, "a") as f:

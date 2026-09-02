@@ -84,7 +84,23 @@ session committed twice to this repo in the meantime, which is why the
 
 ## Status
 
-Documented, not yet fixed. The three `/tmp/` occurrences are a small,
-low-risk change (swap for `tempfile.gettempdir()`); everything else here is
-either already fine or tracked separately in
-`docs/WINDOWS-RESILIENCE-PLAN.md`.
+**Fixed.** All three constants now build their path with
+`os.path.join(tempfile.gettempdir(), ...)` instead of the literal `/tmp/...`
+string — `tempfile.gettempdir()` resolves correctly per-OS (`/tmp` on
+Linux/macOS unless `$TMPDIR` overrides it, `%TEMP%` on Windows). Verified:
+`py_compile` on all three files, a runtime import confirming
+`SAVED_IMAGE_DIR` resolves through `tempfile.gettempdir()`, a
+`grep '"/tmp/' src/*.py` with zero remaining hits, and the full test suite
+run before and after the change (`git stash`/`pop`) to confirm no test
+depends on the literal path — same 907 passed / 28 failed either way, so
+the 28 are a pre-existing, unrelated issue (see note below), not something
+this change touched.
+
+Everything else in this document is either already fine or tracked
+separately in `docs/WINDOWS-RESILIENCE-PLAN.md`.
+
+**Unrelated finding surfaced while verifying this fix**: the test suite
+currently has 28 failing tests out of 935 (907 passed), pre-existing before
+this change (confirmed via `git stash`). Past sessions recorded a "930
+passed, 0 failed" baseline, so this looks like a regression introduced
+since then — not investigated here, out of scope for this fix.

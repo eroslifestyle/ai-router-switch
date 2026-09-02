@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import tempfile
 from typing import Optional, Callable
 
 import aiohttp
@@ -160,7 +161,7 @@ def inject_system_hint(body: bytes) -> bytes:
 # con 500. Le SALVIAMO su disco e le sostituiamo con una nota che contiene il
 # PERCORSO ESATTO, così il modello fa una sola chiamata a vision_local/ocr_image
 # invece di brancolare (Read, ricerca file, percorsi indovinati).
-SAVED_IMAGE_DIR = "/tmp/claude-local-images"
+SAVED_IMAGE_DIR = os.path.join(tempfile.gettempdir(), "claude-local-images")
 
 _IMG_EXT = {
     "image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg",
