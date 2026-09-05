@@ -224,6 +224,63 @@ def preserva_cache_control(originali: list, kept: list) -> None:
         kept[i] = {**kept[i], "cache_control": cc}
 
 
+def demote_foreign_tool_use(data: dict, backend: str) -> int:
+    """Converte in blocchi `text` i `tool_use` (e i `tool_result` abbinati per
+    `tool_use_id`) di brand diverso da `backend` rimasti nella history. Muta `data`.
+
+    Anthropic (e gli altri backend) rifiutano con 400 "Tool reference '<nome>'
+    not found in available tools" quando un `tool_use` della history nomina un
+    tool che l'attuale array `tools` non dichiara più — esattamente ciò che lo
+    strip per-brand qui sopra produce. Succede per costruzione quando una chat
+    cambia modalità a metà conversazione (es. da `ultra`/mix-am, dove l'ACT ha
+    chiamato `mcp__MiniMax__web_search`, a `anthropic` puro): la definizione
+    sparisce dai `tools`, il riferimento resta nella history. Osservato in
+    produzione (BUG-CATALOG.md, relay_error_400 su anthropic, 2026-09-02):
+    "Tool reference 'mcp__MiniMax__understand_image' not found in available tools".
+
+    Si converte a testo invece di eliminare, stesso schema di
+    `declassa_thinking_estranei`/`strip_server_tools_for_minimax`: il contesto
+    della chiamata resta leggibile e nessun `content` finisce vuoto (altro 400)."""
+    messages = data.get("messages")
+    if not isinstance(messages, list):
+        return 0
+    demoted_ids: set[str] = set()
+    converted = 0
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for i, blk in enumerate(content):
+            if not isinstance(blk, dict) or blk.get("type") != "tool_use":
+                continue
+            brand = brand_of_tool_name(blk.get("name"))
+            if brand is None or brand == backend:
+                continue
+            tool_id = blk.get("id")
+            if isinstance(tool_id, str):
+                demoted_ids.add(tool_id)
+            content[i] = {"type": "text",
+                          "text": f"[tool_use {blk.get('name')}] "
+                                  + json.dumps(blk.get("input"), ensure_ascii=False, default=str)[:2000]}
+            converted += 1
+    if demoted_ids:
+        for msg in messages:
+            if not isinstance(msg, dict):
+                continue
+            content = msg.get("content")
+            if not isinstance(content, list):
+                continue
+            for i, blk in enumerate(content):
+                if (isinstance(blk, dict) and blk.get("type") == "tool_result"
+                        and blk.get("tool_use_id") in demoted_ids):
+                    content[i] = {"type": "text",
+                                  "text": f"[tool_result {blk.get('tool_use_id')}] "
+                                          + json.dumps(blk.get("content"), ensure_ascii=False, default=str)[:2000]}
+    return converted
+
+
 def filter_tools_for_backend(body: bytes, backend: str) -> bytes:
     """Rimuove dall'array `tools` i tool brandizzati di provider DIVERSI da
     `backend` ('anthropic'|'minimax'|'glm'). I tool locali di Claude Code
@@ -236,13 +293,14 @@ def filter_tools_for_backend(body: bytes, backend: str) -> bytes:
         data = json.loads(body)
     except Exception:
         return body
+    demoted = demote_foreign_tool_use(data, backend) if b'"tool_use"' in body else 0
     tools = data.get("tools")
     if not isinstance(tools, list) or not tools:
-        return body
+        return json.dumps(data).encode() if demoted else body
     foreign = [check for name, check in _BRAND_CHECK.items() if name != backend]
     kept = [t for t in tools if not any(check(t) for check in foreign)]
     if len(kept) == len(tools):
-        return body
+        return json.dumps(data).encode() if demoted else body
     stripped_names = [t.get("name", "?") for t in tools if t not in kept]
     debug_catalog.record_event(
         # "info" e non "block": è l'esito NORMALE dell'isolamento in modalità pura,
