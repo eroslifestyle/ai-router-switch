@@ -29,7 +29,6 @@ Il router è un **singolo processo Python/aiohttp** in ascolto su 16 porte (1 di
 | `8785` | Forzata: `mix-ag-2` |
 | `8786` | Forzata: `gpt` |
 | `8788` | Forzata: `ultra` |
-| `8789` | Forzata: `opr` |
 
 *(la `8774` era della modalità `inverse`, rimossa il 2026-07-26; dal 2026-08-04 è di `mix-al`)*
 
@@ -84,7 +83,6 @@ ricade da sé sulla rotta THINK. Nelle modalità miste ne segue che *chi verific
 | `mix-al` | Anthropic | locale (code-max) | — |
 | `local` | locale (code-max) | locale (code-max) | — |
 | `gpt` | locale (code-max) | locale (code-max) | — |
-| `opr` | OpenRouter/ox-alpha | OpenRouter/ox-alpha | — |
 | `ultra` | Anthropic | GLM (MiniMax per codice via CLI) | — |
 | `mix-am-2` | Anthropic | MiniMax-M2.7 | — |
 | `mix-ag-2` | Anthropic | glm-4.7 | — |
@@ -270,16 +268,6 @@ Il router accetta solo `code-max`: qualsiasi altro modello richiesto viene ricon
 Porta fissa: `8786`. Come `local`, il router accetta solo `code-max`; qualsiasi altro modello richiesto viene ricondotto a quello. Non ha un modello THINK separato: è un wrapper puramente locale.
 
 **Uso:** sandbox completamente locale, nessuna dipendenza da provider esterni.
-
----
-
-### 11. `opr` — OpenRouter/ox-alpha puro
-
-- **OpenRouter/ox-alpha** fa il THINK, il VERIFY e l'esecuzione
-
-Porta fissa: `8789`. Modalità sandbox pura per sperimentazione con OpenRouter. Chiave: `secrets.sh get opr.api_key`.
-
-**Uso:** testare modelli OpenRouter con lo stesso formato Anthropic.
 
 ---
 

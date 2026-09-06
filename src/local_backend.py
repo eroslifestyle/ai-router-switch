@@ -14,7 +14,6 @@ import paths
 import tool_isolation
 import secrets_provider
 from synthetic_response import synthetic_error
-from router_constants import OPENROUTER_BACKOFF_STEPS_SEC, OPENROUTER_MAX_RETRY_SEC
 
 LOCAL_MODEL_CODE = 'code-max'
 # Era 'code-fast', tolto il 2026-08-19 (decisione utente: un solo modello locale).
@@ -26,10 +25,9 @@ LOCAL_MODEL_FAST = LOCAL_MODEL_CODE
 # Senza questa voce nell'allow-list di resolve_local_model, il THINK di gpt veniva
 # scartato su code-max (:8083) — resolve_route lo instrada bene, ma qui ripiegava.
 LOCAL_MODEL_THINK = 'coder-abliterated'
-LOCAL_MODEL_OPENROUTER = 'ox-alpha'  # Ox Alpha via OpenRouter (modalità openrouter)
 # Nessun fallback: il modello locale ha una sola via, llama.cpp :8083 dietro LiteLLM.
 # L'alias Ollama code-max-ollama e' stato rimosso il 2026-08-04 (duplicazione da 48GB).
-LOCAL_MODEL_FALLBACK = LOCAL_MODEL_CODE  # default per modalità openrouter quando non specificato
+LOCAL_MODEL_FALLBACK = LOCAL_MODEL_CODE  # default quando non specificato
 # Il client Claude Code taglia a API_TIMEOUT_MS (300s di default): il router DEVE
 # scadere PRIMA, altrimenti dopo l'abbandono del client la richiesta continua a
 # occupare uno slot GPU di llama.cpp e la saturazione si auto-alimenta. Questo
@@ -86,7 +84,7 @@ def set_body_model(body: bytes, model: str) -> bytes:
 
 def resolve_local_model(requested: Optional[str]) -> str:
     """Restituisce il modello richiesto se consentito, altrimenti LOCAL_MODEL_CODE."""
-    if requested in (LOCAL_MODEL_CODE, LOCAL_MODEL_FALLBACK, LOCAL_MODEL_FAST, LOCAL_MODEL_THINK, LOCAL_MODEL_OPENROUTER):
+    if requested in (LOCAL_MODEL_CODE, LOCAL_MODEL_FALLBACK, LOCAL_MODEL_FAST, LOCAL_MODEL_THINK):
         return requested
     return LOCAL_MODEL_CODE
 
@@ -406,9 +404,8 @@ async def forward_local(
         'anthropic-version': anth_version,
     }
 
-    # Loop retry: OpenRouter ha il suo ciclo di retry (0..len(steps)), altri provider usano LOCAL_MAX_RETRY
-    max_openrouter_attempts = len(OPENROUTER_BACKOFF_STEPS_SEC) + 1  # Tentativi 0,1,2,3 per 3 steps
-    max_attempts = max_openrouter_attempts if mod_reale == "ox-alpha" else LOCAL_MAX_RETRY + 1
+    # Loop retry: singolo tentativo per tutti i provider
+    max_attempts = LOCAL_MAX_RETRY + 1
 
     for attempt in range(max_attempts):
         try:
@@ -433,33 +430,7 @@ async def forward_local(
                     await asyncio.sleep(2)
                     continue
             if status == 429:
-                # Retry OpenRouter 429 upstream pool shared (solo ox-alpha)
-                if mod_reale == "ox-alpha":
-                    body_bytes = await resp.read()
-                    await resp.release()
-                    body_low = body_bytes.lower() if isinstance(body_bytes, bytes) else str(body_bytes).lower().encode()
-                    is_upstream_pool = b"rate-limited upstream" in body_low or b"upstream_provider_shared_pool" in body_low
-                    if is_upstream_pool:
-                        # Prova retry OpenRouter se ancora sotto il limite
-                        if attempt < len(OPENROUTER_BACKOFF_STEPS_SEC):
-                            backoff = OPENROUTER_BACKOFF_STEPS_SEC[min(attempt, len(OPENROUTER_BACKOFF_STEPS_SEC) - 1)]
-                            log_fn(f"forward_local OpenRouter 429 upstream pool: retry in {backoff}s (attempt {attempt+1}/{len(OPENROUTER_BACKOFF_STEPS_SEC)+1})")
-                            debug_catalog.record_event(
-                                severity="warn", category="local", kind="openrouter_429_upstream_retry",
-                                code=429, snippet=f"model=ox-alpha retry_after={backoff}s attempt={attempt+1}")
-                            await asyncio.sleep(backoff)
-                            continue
-                        # Retry OpenRouter esauriti: propaga 429 immediatamente (non lasciar cadere in exhausted generali)
-                        log_fn(f"forward_local OpenRouter 429: OpenRouter retries exhausted, propagating error")
-                        if passthrough:
-                            return synthetic_error(429, 'rate_limit', body_bytes.decode() if isinstance(body_bytes, bytes) else body_bytes)
-                        return web.Response(body=body_bytes, status=429, content_type='application/json')
-                    # Non è upstream pool: propaga 429
-                    log_fn(f"forward_local OpenRouter 429: not upstream pool, propagating error")
-                    if passthrough:
-                        return synthetic_error(429, 'rate_limit', body_bytes.decode() if isinstance(body_bytes, bytes) else body_bytes)
-                    return web.Response(body=body_bytes, status=429, content_type='application/json')
-                # 429 altri provider locali
+                # 429 provider locali
                 debug_catalog.record_event(
                     severity="block", category="local", kind="quota_429_local",
                     code=429, snippet=f"model={mod_reale}")

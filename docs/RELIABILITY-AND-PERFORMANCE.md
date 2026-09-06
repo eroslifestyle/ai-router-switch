@@ -41,7 +41,6 @@ estimates: every one is cited against its source file or its audit report.
 | 8779 | `local` | local | local | pure local, same model both roles |
 | 8786 | `gpt` | local (`code-max`) | local (`code-max`) | sandbox: pure local without touching the live `:8787` mode |
 | 8788 | `ultra` | Anthropic | GLM-4.7, **plus MiniMax for code specifically via the `m3-code`/`m3x` CLIs (bypass the proxy)** | the only 3-provider mode |
-| 8789 | `opr` | OpenRouter | OpenRouter | sandbox, pure OpenRouter |
 | 8787 | — | — | — | the live port; follows whichever mode is currently active, not fixed to one |
 
 Ports **8780, 8782, 8783 are not usable** — occupied by unrelated services on

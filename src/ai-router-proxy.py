@@ -943,12 +943,6 @@ async def handle(request):
             _local_body = strip_thinking_blocks(_local_body)
             _local_body = _local_mod.set_body_model(_local_body, _local_model)
 
-            # Sanitizzazione per OpenRouter: rimuovi parametri non supportati
-            # (es. reasoning_effort) prima di passare a LiteLLM
-            if _local_model == "ox-alpha":
-                from openrouter_sanitize import sanitize_for_openrouter
-                _local_body = sanitize_for_openrouter(_local_body)
-
             # Trace completo per debug provider local
             start_trace = time.monotonic()
             up = await _local_mod.forward_local(request, _local_body, session,

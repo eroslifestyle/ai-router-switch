@@ -29,7 +29,6 @@ The router is a **single Python/aiohttp process** listening on 16 ports (1 dynam
 | `8785` | Forced: `mix-ag-2` |
 | `8786` | Forced: `gpt` |
 | `8788` | Forced: `ultra` |
-| `8789` | Forced: `opr` |
 
 *(port `8774` served the `inverse` mode, removed on 2026-07-26; since 2026-08-04 it serves `mix-al`)*
 
@@ -84,7 +83,6 @@ who executed*.
 | `mix-al` | Anthropic | local (code-max) | — |
 | `local` | local (code-max) | local (code-max) | — |
 | `gpt` | local (code-max) | local (code-max) | — |
-| `opr` | OpenRouter/ox-alpha | OpenRouter/ox-alpha | — |
 | `ultra` | Anthropic | GLM (MiniMax for code via CLI) | — |
 | `mix-am-2` | Anthropic | MiniMax-M2.7 | — |
 | `mix-ag-2` | Anthropic | glm-4.7 | — |
@@ -211,16 +209,6 @@ The router accepts only `code-max`: any other requested model is folded back to 
 Fixed port: `8786`. Like `local`, the router accepts only `code-max`; any other requested model is folded back. No separate THINK model: purely local wrapper.
 
 **Use:** completely local sandbox, no external provider dependencies.
-
----
-
-### 11. `opr` — OpenRouter/ox-alpha pure
-
-- **OpenRouter/ox-alpha** does THINK, VERIFY, and execution
-
-Fixed port: `8789`. Pure sandbox mode for experimenting with OpenRouter. Key: `secrets.sh get opr.api_key`.
-
-**Use:** test OpenRouter models with the same Anthropic format.
 
 ---
 
