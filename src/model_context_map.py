@@ -119,6 +119,29 @@ for model in list(MODEL_CONTEXT_MAP.keys()):
     if val:
         MODEL_CONTEXT_MAP[model] = int(val)
 
+def _lookup_context_limit(model: str) -> int | None:
+    """Lookup puro: match esatto, case-insensitive, prefisso piu lungo.
+
+    Ritorna None se nessun match trovato (caller decidera' se usare default).
+    Nessun fallback interno: questa funzione e' il DRY della ricerca.
+    """
+    key = model.lower()
+    if key in MODEL_CONTEXT_MAP:
+        return MODEL_CONTEXT_MAP[key]
+    for name, limit in MODEL_CONTEXT_MAP.items():
+        if name.lower() == key:
+            return limit
+    # Match per prefisso: scegli la chiave piu lunga che e' prefisso di key
+    best_match = None
+    best_len = 0
+    for name in MODEL_CONTEXT_MAP.keys():
+        name_lower = name.lower()
+        if key.startswith(name_lower) and len(name_lower) > best_len:
+            best_match = MODEL_CONTEXT_MAP[name]
+            best_len = len(name_lower)
+    return best_match
+
+
 def get_context_limit(model: str) -> int:
     """Restituisce il context window per un modello. Default 200K.
 
@@ -138,23 +161,19 @@ def get_context_limit(model: str) -> int:
     riscritto a 160000 dal gate di contesto. Quando entra in uso un nuovo
     modello, aggiungere qui la voce con il context corretto.
     """
-    key = model.lower()
-    if key in MODEL_CONTEXT_MAP:
-        return MODEL_CONTEXT_MAP[key]
-    for name, limit in MODEL_CONTEXT_MAP.items():
-        if name.lower() == key:
-            return limit
-    # Match per prefisso: scegli la chiave piu lunga che e' prefisso di key
-    best_match = None
-    best_len = 0
-    for name in MODEL_CONTEXT_MAP.keys():
-        name_lower = name.lower()
-        if key.startswith(name_lower) and len(name_lower) > best_len:
-            best_match = MODEL_CONTEXT_MAP[name]
-            best_len = len(name_lower)
-    if best_match is not None:
-        return best_match
-    return 200_000
+    v = _lookup_context_limit(model)
+    return v if v is not None else 200_000
+
+
+def has_measured_context_limit(model: str) -> bool:
+    """True se la finestra di questo modello e' dichiarata in MODEL_CONTEXT_MAP.
+
+    False significa che get_context_limit sta ripiegando sul default 200.000:
+    un valore plausibile ma NON misurato. Chi prende decisioni distruttive
+    (chiudere una chat) deve astenersi, perche' la percentuale che ne deriva
+    non descrive il modello reale.
+    """
+    return _lookup_context_limit(model) is not None
 
 MIN_OUTPUT_HEADROOM = 8_192  # spazio minimo garantito all'output
 

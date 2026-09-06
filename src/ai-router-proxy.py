@@ -39,7 +39,7 @@ from context_manager import ContextManager
 CTX = ContextManager()
 
 # ── Moduli condivisi (gia' estratti in file separati) ───────────────────────
-from model_context_map import get_safe_input_limit
+from model_context_map import get_safe_input_limit, has_measured_context_limit
 from context_rewrite import rewrite_for_context
 from context_alert import notify_context_threshold
 from sse_utils import _sse_events_from_message, _send_sse_message
@@ -367,15 +367,16 @@ async def handle(request):
         import loop_breaker
         _repeats = loop_breaker.check(fp, body)
         _ctx_pct = ctx_check.get("pct", 0.0) or 0.0
-        if _repeats >= loop_breaker.LOOP_BREAKER_N:
-            if _ctx_pct >= loop_breaker.LOOP_BREAKER_MIN_CTX_PCT:
-                log(f"loop-breaker: {_repeats} turni identici fp={fp} mode={mode} "
-                    f"ctx={_ctx_pct:.1%} — interrotto")
-                loop_breaker.reset(fp)
-                return _err_response(loop_breaker.message(mode, _repeats), status=400)
+        _misurato = has_measured_context_limit(ctx_model)
+        if loop_breaker.should_break(_repeats, _ctx_pct, _misurato):
             log(f"loop-breaker: {_repeats} turni identici fp={fp} mode={mode} "
-                f"ctx={_ctx_pct:.1%} < {loop_breaker.LOOP_BREAKER_MIN_CTX_PCT:.0%} "
-                f"— inoltro comunque (probabile polling, non impantanamento)")
+                f"ctx={_ctx_pct:.1%} — interrotto")
+            loop_breaker.reset(fp)
+            return _err_response(loop_breaker.message(mode, _repeats), status=400)
+        if _repeats >= loop_breaker.LOOP_BREAKER_N:
+            log(f"loop-breaker: {_repeats} turni identici fp={fp} mode={mode} "
+                f"ctx={_ctx_pct:.1%} — inoltro (finestra non misurata={not _misurato}, "
+                f"ctx_pct < {loop_breaker.LOOP_BREAKER_MIN_CTX_PCT:.0%}: {_ctx_pct < loop_breaker.LOOP_BREAKER_MIN_CTX_PCT})")
     except Exception as _e:
         log(f"loop-breaker EXC {_e} fp={fp}")
 

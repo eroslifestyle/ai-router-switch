@@ -28,11 +28,11 @@ def test_soglia_di_saturazione_fra_i_due_casi_misurati():
 
 
 def test_il_proxy_interrompe_solo_sopra_la_soglia():
-    """Il 400 deve stare dietro il confronto con LOOP_BREAKER_MIN_CTX_PCT.
+    """Il 400 deve stare dietro il controllo should_break().
 
     Regressione a livello sorgente: `handle()` non e' isolabile senza avviare il
-    proxy, ma il difetto era strutturale — il `return _err_response(...)` non aveva
-    nessuna guardia di contesto sopra di se'.
+    proxy, ma il difetto era strutturale — il `return _err_response(...)` non era
+    protetto da una guardia di contesto. Ora deve arrivare DOPO should_break().
     """
     src = PROXY.read_text()
     blocco = re.search(
@@ -41,12 +41,12 @@ def test_il_proxy_interrompe_solo_sopra_la_soglia():
     assert blocco, "blocco loop-breaker non trovato in ai-router-proxy.py"
     testo = blocco.group(0)
 
-    assert "LOOP_BREAKER_MIN_CTX_PCT" in testo, (
-        "il loop-breaker interrompe senza guardare la saturazione del contesto")
-    # Il 400 deve venire DOPO il confronto sulla saturazione, non prima.
-    i_guardia = testo.index("LOOP_BREAKER_MIN_CTX_PCT")
+    assert "should_break(" in testo, (
+        "il loop-breaker non chiama should_break()")
+    # Il 400 deve venire DOPO should_break(), non prima.
+    i_guardia = testo.index("should_break(")
     i_errore = testo.index("_err_response")
-    assert i_guardia < i_errore, "il 400 non e' protetto dalla guardia di contesto"
+    assert i_guardia < i_errore, "il 400 non e' protetto da should_break()"
 
 
 def test_la_misura_del_contesto_precede_il_loop_breaker():

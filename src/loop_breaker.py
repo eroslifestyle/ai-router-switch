@@ -125,6 +125,35 @@ def reset(fp: str) -> None:
     _seen.pop(fp, None)
 
 
+def should_break(repeats: int, ctx_pct: float, limite_misurato: bool) -> bool:
+    """Decide se chiudere il giro. Funzione pura: nessuno stato, nessun I/O.
+
+    Tre condizioni, tutte necessarie: il breaker e' attivo, la ripetizione ha
+    raggiunto la soglia, e il contesto e' davvero saturo su una finestra NOTA.
+
+    Args:
+        repeats: numero di turni consecutivi con firma identica.
+        ctx_pct: percentuale di utilizzo del contesto (0.0 a 1.0+).
+                 Gestito come 0.0 se None o non numerico (nessuna eccezione).
+        limite_misurato: True se la finestra del modello e' dichiarata in
+                        MODEL_CONTEXT_MAP, False se il default 200k.
+
+    Returns:
+        bool: True se il giro deve essere interrotto, False altrimenti.
+    """
+    if not ENABLED:
+        return False
+    if repeats < LOOP_BREAKER_N:
+        return False
+    if not limite_misurato:
+        return False
+    try:
+        ctx = float(ctx_pct) if ctx_pct is not None else 0.0
+    except (TypeError, ValueError):
+        ctx = 0.0
+    return ctx >= LOOP_BREAKER_MIN_CTX_PCT
+
+
 def message(mode: str, repeats: int) -> str:
     return (
         f"Loop rilevato: {repeats} turni consecutivi identici in modalita' '{mode}'. "

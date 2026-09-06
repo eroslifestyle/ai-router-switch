@@ -404,7 +404,7 @@ async def forward_local(
         'anthropic-version': anth_version,
     }
 
-    # Loop retry: singolo tentativo per tutti i provider
+    # Loop retry: stesso numero di tentativi per tutti i provider locali.
     max_attempts = LOCAL_MAX_RETRY + 1
 
     for attempt in range(max_attempts):
