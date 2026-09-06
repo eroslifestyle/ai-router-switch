@@ -72,3 +72,7 @@ logs/*.jsonl.*
 /bench/results/
 /bench/__pycache__/
 .claude/PROMPT-*.md
+
+# Audit locale: contiene una copia della config globale ~/.claude (settings.json,
+# CLAUDE.md, hook personali, indirizzi di rete interni). Il repo e' PUBBLICO: resta fuori.
+sviluppo/audit/2026-08-30-fix-gerarchia-routing-esterno/
