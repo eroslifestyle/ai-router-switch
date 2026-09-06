@@ -29,6 +29,18 @@ import time
 
 ENABLED = os.environ.get("AIROUTER_LOOP_BREAKER", "1") not in ("0", "false", "no")
 LOOP_BREAKER_N = int(os.environ.get("AIROUTER_LOOP_BREAKER_N", "4"))
+# Saturazione minima del contesto perche' la ripetizione valga come impantanamento
+# (misura 2026-09-05). La firma identica da sola NON distingue un modello bloccato
+# da un polling legittimo: una chat sana che ripete lo stesso tool_use a cadenza
+# regolare (attesa di un job, watch, monitor) produce esattamente la stessa firma.
+# I due casi osservati si separano solo sul contesto:
+#   - impantanamento vero (sessione 74070e0d, mode gpt): 167% della finestra;
+#   - polling sano (sid:82e400cf, mode anthropic, 5 turni a 112s esatti l'uno
+#     dall'altro): 94k token su 200k, cioe' 47% — ucciso con un 400 in faccia
+#     all'utente a meta' lavoro.
+# Sotto questa soglia il modello ha ancora spazio per uscire da solo dal giro, e
+# un falso positivo costa molto piu' di qualche turno di prefill sprecato.
+LOOP_BREAKER_MIN_CTX_PCT = float(os.environ.get("AIROUTER_LOOP_BREAKER_MIN_CTX", "0.8"))
 # TTL per le entry tracciate (secondi). Dopo 10 minuti di inattività, il contatore riparte.
 LOOP_BREAKER_ENTRY_TTL_SEC = 600
 

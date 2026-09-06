@@ -350,22 +350,36 @@ async def handle(request):
         log(f"[ctx-route] EXC {_e} mode={mode} model={_early_model}")
         ctx_model = _early_model or "MiniMax-M2.7"
 
-    # Loop-breaker: una chat che riemette lo stesso turno non si sblocca inoltrandolo
-    # di nuovo. Sta prima del ctx perche' il rewrite di un turno gia' visto e' lavoro
-    # buttato. Vedi loop_breaker.py.
-    try:
-        import loop_breaker
-        _repeats = loop_breaker.check(fp, body)
-        if _repeats >= loop_breaker.LOOP_BREAKER_N:
-            log(f"loop-breaker: {_repeats} turni identici fp={fp} mode={mode} — interrotto")
-            loop_breaker.reset(fp)
-            return _err_response(loop_breaker.message(mode, _repeats), status=400)
-    except Exception as _e:
-        log(f"loop-breaker EXC {_e} fp={fp}")
-
+    # La misura del contesto serve al loop-breaker qui sotto, quindi si calcola
+    # PRIMA. E' solo misura: il rewrite (l'unica parte costosa) resta piu' in
+    # basso, dopo il loop-breaker, quindi un turno gia' visto non fa lavoro
+    # buttato — l'ordine che il commento originale voleva garantire.
     ctx_check = {"action": "ok", "pct": 0.0}
     try:
         ctx_check = CTX.pre_check(fp, mode, len(body), model=ctx_model, body=body)
+    except Exception as _e:
+        log(f"ctx pre_check EXC {_e} fp={fp}")
+
+    # Loop-breaker: una chat che riemette lo stesso turno non si sblocca inoltrandolo
+    # di nuovo. Vale SOLO a contesto saturo: sotto la soglia la stessa firma e' molto
+    # piu' spesso un polling legittimo che un impantanamento. Vedi loop_breaker.py.
+    try:
+        import loop_breaker
+        _repeats = loop_breaker.check(fp, body)
+        _ctx_pct = ctx_check.get("pct", 0.0) or 0.0
+        if _repeats >= loop_breaker.LOOP_BREAKER_N:
+            if _ctx_pct >= loop_breaker.LOOP_BREAKER_MIN_CTX_PCT:
+                log(f"loop-breaker: {_repeats} turni identici fp={fp} mode={mode} "
+                    f"ctx={_ctx_pct:.1%} — interrotto")
+                loop_breaker.reset(fp)
+                return _err_response(loop_breaker.message(mode, _repeats), status=400)
+            log(f"loop-breaker: {_repeats} turni identici fp={fp} mode={mode} "
+                f"ctx={_ctx_pct:.1%} < {loop_breaker.LOOP_BREAKER_MIN_CTX_PCT:.0%} "
+                f"— inoltro comunque (probabile polling, non impantanamento)")
+    except Exception as _e:
+        log(f"loop-breaker EXC {_e} fp={fp}")
+
+    try:
         if ctx_check["action"] in ("error", "compact", "warn", "warn2"):
             log(f"ctx: {ctx_check['action'].upper()} fp={fp} mode={mode} pct={ctx_check['pct']:.1%}")
         # ALERT PRE-COMPRESSIONE: avvisa l'utente (3 canali) a 80% (warn) e 88% (warn2),
@@ -812,7 +826,8 @@ async def handle(request):
             # Inoltro diretto ad Anthropic per modalità miste
             if not request.path.endswith("/v1/messages"):
                 up = await forward_anthropic(request, body, session)
-                return await relay(up, extra_headers={"x-ai-verified": f"tunnel-{mode}-anthropic"},
+                return await relay(up, chat_fp_for_rewrite=fp,
+                                   extra_headers={"x-ai-verified": f"tunnel-{mode}-anthropic"},
                                    final_override="claude-direct")
             # Per /v1/messages, applica il retry certificato SDK
             try:
@@ -827,20 +842,22 @@ async def handle(request):
                 debug_catalog.record_event(severity="error", category="anthropic",
                                             kind="rate_limit_429_exhausted", code=429,
                                             snippet=f"retry-after={up.headers.get('retry-after','?')}")
-                return await relay(up, extra_headers={"x-ai-verified": f"tunnel-{mode}-anthropic-ratelimit"})
+                return await relay(up, chat_fp_for_rewrite=fp,
+                                   extra_headers={"x-ai-verified": f"tunnel-{mode}-anthropic-ratelimit"})
             log(f"tunnel {mode} anthropic -> {up.status} {request.path}")
             # final_override esplicito: senza, `_final` veniva dedotto dall'indice di
             # remap (che per le miste risponde col modello dell'ACT anche quando ha
             # eseguito Anthropic) e la guardia response-side si asteneva sul provider
             # sbagliato. Qui l'esecutore e' noto con certezza: e' Anthropic diretto.
-            return await relay(up, extra_headers={"x-ai-verified": f"tunnel-{mode}-anthropic"},
+            return await relay(up, chat_fp_for_rewrite=fp,
+                               extra_headers={"x-ai-verified": f"tunnel-{mode}-anthropic"},
                                final_override="claude-direct")
         # Altrimenti: mode == "anthropic" → cadi nel ramo "ANTHROPIC PURA" sotto
 
     elif _provider == "minimax":
         if not request.path.endswith("/v1/messages"):
             up = await forward_minimax(request, body, session, model_override=_model_override)
-            return await relay(up, final_override=_model_override)
+            return await relay(up, chat_fp_for_rewrite=fp, final_override=_model_override)
         try:
             _orig = json.loads(body)
             _inject_task_mode_for_images(_orig)
@@ -868,7 +885,8 @@ async def handle(request):
             up = await _glm_mod.forward_glm(request, _glm_body, session,
                                             _req_model or _glm_model, log_fn=log,
                                             passthrough=True, upstream_model=_glm_model)
-            return await relay(up, extra_headers={"x-ai-verified": f"tunnel-{mode}-glm({_glm_model})"}, final_override=f"glm:{_glm_model}")
+            return await relay(up, chat_fp_for_rewrite=fp,
+                               extra_headers={"x-ai-verified": f"tunnel-{mode}-glm({_glm_model})"}, final_override=f"glm:{_glm_model}")
         except Exception as e:
             log(f"tunnel {mode} GLM EXC: {e} -> 502")
             debug_catalog.record_event(severity="error", category="glm", kind="forward_exception", snippet=str(e))
@@ -890,7 +908,8 @@ async def handle(request):
             up = await _qwen_mod.forward_qwen(request, _qwen_body, session,
                                               _req_model or _qwen_model, log_fn=log,
                                               passthrough=True, upstream_model=_qwen_model)
-            return await relay(up, extra_headers={"x-ai-verified": f"tunnel-{mode}-qwen({_qwen_model})"}, final_override=f"qwen:{_qwen_model}")
+            return await relay(up, chat_fp_for_rewrite=fp,
+                               extra_headers={"x-ai-verified": f"tunnel-{mode}-qwen({_qwen_model})"}, final_override=f"qwen:{_qwen_model}")
         except Exception as e:
             log(f"tunnel {mode} QWEN EXC: {e} -> 502")
             debug_catalog.record_event(severity="error", category="qwen", kind="forward_exception", snippet=str(e))
@@ -979,7 +998,8 @@ async def handle(request):
                         return getattr(self._orig, name)
                 up = _FixedResponse(up, response_body)
 
-            return await relay(up, extra_headers={"x-ai-verified": f"tunnel-{mode}-local({_local_model})"}, final_override=f"local:{_local_model}")
+            return await relay(up, chat_fp_for_rewrite=fp,
+                               extra_headers={"x-ai-verified": f"tunnel-{mode}-local({_local_model})"}, final_override=f"local:{_local_model}")
         except Exception as e:
             log(f"tunnel {mode} LOCAL EXC: {e} -> 502")
             debug_catalog.record_event(severity="error", category="local", kind="forward_exception", snippet=str(e))
@@ -990,7 +1010,7 @@ async def handle(request):
     if mode == "anthropic":
         if not request.path.endswith("/v1/messages"):
             up = await forward_anthropic(request, body, session)
-            return await relay(up)
+            return await relay(up, chat_fp_for_rewrite=fp)
         # Retry 429/5xx certificato SDK ufficiale (exponential backoff + retry-after).
         try:
             up, exhausted = await _anthropic_forward_with_retry(request, body, session, relay)
@@ -1008,9 +1028,11 @@ async def handle(request):
             debug_catalog.record_event(severity="error", category="anthropic",
                                         kind="rate_limit_429_exhausted", code=429,
                                         snippet=f"retry-after={up.headers.get('retry-after','?')}")
-            return await relay(up, extra_headers={"x-ai-verified": "anthropic-ratelimit-exhausted"})
+            return await relay(up, chat_fp_for_rewrite=fp,
+                               extra_headers={"x-ai-verified": "anthropic-ratelimit-exhausted"})
         log(f"anthropic (pure) -> {up.status} {request.path}")
-        return await relay(up, extra_headers={"x-ai-verified": "anthropic-pure"})
+        return await relay(up, chat_fp_for_rewrite=fp,
+                           extra_headers={"x-ai-verified": "anthropic-pure"})
 
     # Fallback di sicurezza: ogni percorso sopra ritorna (il tunnel per
     # minimax/glm, il ramo ANTHROPIC PURA per mode=anthropic). Se si arriva
