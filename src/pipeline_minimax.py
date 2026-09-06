@@ -93,7 +93,7 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
                                                model_override=model_override)
                 if up_pre.status < 400:
                     log(f"minimax PRE shrunk OK {up_pre.status} fp={chat_fp}")
-                    return await relay(up_pre, extra_headers={"x-ai-verified": "minimax-m3-shrunk"}, final_override=_effective_minimax_model(orig, model_override))
+                    return await relay(up_pre, extra_headers={"x-ai-verified": "minimax-m3-shrunk"}, final_override=_effective_minimax_model(orig, model_override), chat_fp_for_rewrite=chat_fp)
                 try:
                     await up_pre.release()
                 except Exception:
@@ -146,7 +146,7 @@ async def _pipeline_minimax_orchestrate(request, body, session, orig: dict, rela
         return web.json_response({"type": "error", "error": {"type": "router_error",
                                   "message": str(e)}}, status=502)
     log(f"minimax passthrough {up.status} {request.path} fp={chat_fp}")
-    return await relay(up, extra_headers={"x-ai-verified": f"minimax-direct({MINIMAX_MODEL.lower()})"}, final_override=_effective_minimax_model(orig, model_override))
+    return await relay(up, extra_headers={"x-ai-verified": f"minimax-direct({MINIMAX_MODEL.lower()})"}, final_override=_effective_minimax_model(orig, model_override), chat_fp_for_rewrite=chat_fp)
 
 
 async def _try_shrink_body(orig: dict, target_bytes: int):
