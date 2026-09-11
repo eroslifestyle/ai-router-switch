@@ -76,3 +76,7 @@ logs/*.jsonl.*
 # Audit locale: contiene una copia della config globale ~/.claude (settings.json,
 # CLAUDE.md, hook personali, indirizzi di rete interni). Il repo e' PUBBLICO: resta fuori.
 sviluppo/audit/2026-08-30-fix-gerarchia-routing-esterno/
+
+# Benchmark consumo: dettagli dell'infrastruttura personale (path, hook, MCP,
+# configurazione, dati di traffico individuali). Repo PUBBLICO: resta fuori.
+sviluppo/audit/2026-09-06-benchmark-consumo/
