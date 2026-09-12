@@ -102,7 +102,7 @@ def render_page(data, selected):
         parts.append(f"<div class='hookerr'>&#9888; {len(hook_errors)} errori hook, vedi orchestration.jsonl</div>")
 
     parts.append(f"<h2>Tool calls ({sess.get('n_tool_calls', 0)})</h2>")
-    parts.append("<table><tr><th>tool</th><th>count</th><th>min/p50/p90/p99/max (ms)</th></tr>")
+    parts.append("<table><tr><th>tool</th><th>count</th><th>durata ms: minimo / tipico / lento(10%) / molto lento(1%) / peggiore</th></tr>")
     for tool in sorted(by_tool, key=lambda t: -by_tool[t].get("count", 0)):
         s = by_tool[tool]
         parts.append(f"<tr><td>{escape(tool)}</td><td>{s.get('count', 0)}</td><td class='num'>{escape(fmt_pct(s))}</td></tr>")
@@ -111,7 +111,7 @@ def render_page(data, selected):
     parts.append("</table>")
 
     parts.append(f"<h2>Proxy requests ({sess.get('n_proxy_requests', 0)}) per modalit&agrave;|modello</h2>")
-    parts.append("<table><tr><th>mode|model</th><th>count</th><th>ttfb ms (min/p50/p90/p99/max)</th><th>total ms</th><th>429/5xx (err%)</th></tr>")
+    parts.append("<table><tr><th>mode|model</th><th>count</th><th>tempo alla prima risposta ms: minimo/tipico/lento(10%)/molto lento(1%)/peggiore</th><th>tempo totale ms: stesso ordine</th><th>errori 429/5xx (%)</th></tr>")
     for key in sorted(by_mode, key=lambda k: -by_mode[k].get("count", 0)):
         m = by_mode[key]
         err = m.get("errors", {})

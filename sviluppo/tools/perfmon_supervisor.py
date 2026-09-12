@@ -123,9 +123,12 @@ def build_prompt(latest: dict, baseline, air: dict, session_id: str) -> str:
     for tool, t in sel.get("by_tool_name", {}).items():
         lines.append(f"- {tool}: n={t['count']}, p50={t['p50']} p90={t['p90']} "
                      f"p99={t['p99']} max={t['max']}")
+    lines.append("Legenda: 'tipico' = valore mediano (meta' delle richieste piu' veloci di questo), "
+                 "'lento(10%)' e 'molto lento(1%)' = code statistiche (percentili p90/p99, quanto sono lente "
+                 "le richieste piu' lente), 'peggiore' = valore massimo osservato.")
     lines.append("Richieste proxy per mode|model (ms) — TABELLA, usa questi numeri esatti:")
-    lines.append("| mode|model | n | ttfb p50 | ttfb p90 | ttfb p99 | ttfb max | "
-                 "total p50 | total p90 | total p99 | total max | 429 | 5xx | err% |")
+    lines.append("| mode|model | n | ttfb tipico | ttfb lento(10%) | ttfb molto lento(1%) | ttfb peggiore | "
+                 "totale tipico | totale lento(10%) | totale molto lento(1%) | totale peggiore | 429 | 5xx | err% |")
     lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for key, v in sel.get("by_mode_model", {}).items():
         ttfb, total = v.get("ttfb_ms", {}), v.get("total_ms", {})
@@ -154,8 +157,8 @@ def build_prompt(latest: dict, baseline, air: dict, session_id: str) -> str:
         lines.append("\n## Baseline storica solo-proxy (top 8 per count, ms)")
         for row in compact_baseline_rows(baseline):
             lines.append(f"- {row['mode_model']}: n={row['count']}, "
-                         f"ttfb p50={row['ttfb_p50']} p99={row['ttfb_p99']}; "
-                         f"total p50={row['total_p50']} p99={row['total_p99']}; "
+                         f"ttfb tipico={row['ttfb_p50']} molto lento(1%)={row['ttfb_p99']}; "
+                         f"totale tipico={row['total_p50']} molto lento(1%)={row['total_p99']}; "
                          f"err%={row['error_rate_pct']}")
     else:
         lines.append("\n## Baseline storica\nbaseline storica non disponibile, "
