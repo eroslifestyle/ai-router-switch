@@ -31,6 +31,16 @@ _ANTHROPIC_CLIENT_TOOL_NAMES = {"websearch", "webfetch", "web_search", "web_fetc
 _QWEN_TOOL_PREFIXES = ("mcp__qwen__", "mcp__dashscope__", "mcp__websearch__")
 
 
+def _nome_tool(t: dict) -> str | None:
+    # Il tool-search beta referenzia i tool con `tool_reference` + chiave
+    # `tool_name` invece di `name`: leggo entrambe o il riferimento non viene
+    # riconosciuto come brandizzato e Anthropic risponde 400 "Tool reference
+    # not found in available tools".
+    if not isinstance(t, dict):
+        return None
+    return t.get("name") or t.get("tool_name")
+
+
 def is_anthropic_server_tool(t: dict) -> bool:
     """Server-tool Anthropic (web_search_20250305, computer_use, bash,
     code_execution, ...): eseguiti server-side su api.anthropic.com,
@@ -47,7 +57,7 @@ def is_anthropic_server_tool(t: dict) -> bool:
     qwen il tool nativo veniva strippato."""
     if not isinstance(t, dict):
         return False
-    name = (t.get("name") or "").lower()
+    name = (_nome_tool(t) or "").lower()
     if ("minimax" in name or "websearchprime" in name
             or name.startswith("mcp__zai__")
             or name.startswith(_QWEN_TOOL_PREFIXES) or "dashscope" in name):
@@ -59,15 +69,13 @@ def is_anthropic_server_tool(t: dict) -> bool:
 
 def is_minimax_branded_tool(t: dict) -> bool:
     """Tool nativo MiniMax (MCP mcp__MiniMax__web_search/understand_image)."""
-    return isinstance(t, dict) and "minimax" in (t.get("name") or "").lower()
+    return isinstance(t, dict) and "minimax" in (_nome_tool(t) or "").lower()
 
 
 def is_glm_branded_tool(t: dict) -> bool:
     """Tool nativo z.ai/GLM (es. MCP webSearchPrime), riconosciuto per nome
     indipendentemente dall'alias del server MCP scelto dall'utente."""
-    if not isinstance(t, dict):
-        return False
-    name = (t.get("name") or "").lower()
+    name = (_nome_tool(t) or "").lower()
     return "websearchprime" in name or name.startswith("mcp__zai__")
 
 
@@ -75,9 +83,7 @@ def is_qwen_branded_tool(t: dict) -> bool:
     """Tool nativo Qwen/Alibaba Model Studio: MCP WebSearch di Bailian e affini,
     riconosciuto per nome indipendentemente dall'alias del server MCP scelto
     dall'utente."""
-    if not isinstance(t, dict):
-        return False
-    name = (t.get("name") or "").lower()
+    name = (_nome_tool(t) or "").lower()
     return name.startswith(_QWEN_TOOL_PREFIXES) or "dashscope" in name
 
 
@@ -253,7 +259,10 @@ def demote_foreign_tool_use(data: dict, backend: str) -> int:
         if not isinstance(content, list):
             continue
         for i, blk in enumerate(content):
-            if not isinstance(blk, dict) or blk.get("type") != "tool_use":
+            # server_tool_use/mcp_tool_use: varianti dei tool server-side/MCP
+            # Anthropic, stesso 400 se il tool referenziato non e' piu' nei tools.
+            if (not isinstance(blk, dict)
+                    or blk.get("type") not in ("tool_use", "server_tool_use", "mcp_tool_use")):
                 continue
             brand = brand_of_tool_name(blk.get("name"))
             if brand is None or brand == backend:
@@ -293,7 +302,8 @@ def filter_tools_for_backend(body: bytes, backend: str) -> bytes:
         data = json.loads(body)
     except Exception:
         return body
-    demoted = demote_foreign_tool_use(data, backend) if b'"tool_use"' in body else 0
+    # "tool_use" senza virgolette: matcha anche server_tool_use/mcp_tool_use
+    demoted = demote_foreign_tool_use(data, backend) if b"tool_use" in body else 0
     tools = data.get("tools")
     if not isinstance(tools, list) or not tools:
         return json.dumps(data).encode() if demoted else body
