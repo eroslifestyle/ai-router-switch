@@ -111,14 +111,16 @@ def render_page(data, selected):
     parts.append("</table>")
 
     parts.append(f"<h2>Proxy requests ({sess.get('n_proxy_requests', 0)}) per modalit&agrave;|modello</h2>")
-    parts.append("<table><tr><th>mode|model</th><th>count</th><th>ttfb ms (min/p50/p90/p99/max)</th><th>total ms</th></tr>")
+    parts.append("<table><tr><th>mode|model</th><th>count</th><th>ttfb ms (min/p50/p90/p99/max)</th><th>total ms</th><th>429/5xx (err%)</th></tr>")
     for key in sorted(by_mode, key=lambda k: -by_mode[k].get("count", 0)):
         m = by_mode[key]
+        err = m.get("errors", {})
         parts.append(f"<tr><td>{escape(key)}</td><td>{m.get('count', 0)}</td>"
                      f"<td class='num'>{escape(fmt_pct(m.get('ttfb_ms')))}</td>"
-                     f"<td class='num'>{escape(fmt_pct(m.get('total_ms')))}</td></tr>")
+                     f"<td class='num'>{escape(fmt_pct(m.get('total_ms')))}</td>"
+                     f"<td class='num'>{err.get('n_429', 0)}/{err.get('n_5xx', 0)} ({err.get('error_rate_pct', 0.0)}%)</td></tr>")
     if not by_mode:
-        parts.append("<tr><td colspan='4' class='muted'>nessuna richiesta proxy</td></tr>")
+        parts.append("<tr><td colspan='5' class='muted'>nessuna richiesta proxy</td></tr>")
     parts.append("</table>")
 
     gaps = sess.get("idle_gaps", [])

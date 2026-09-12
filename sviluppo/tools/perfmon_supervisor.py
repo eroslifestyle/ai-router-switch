@@ -92,10 +92,12 @@ def compact_baseline_rows(baseline: dict, top: int = 8) -> list:
         if not val.get("count") or not ttfb.get("count"):
             continue
         total = val.get("total_ms", {})
+        errors = val.get("errors", {})
         rows.append({
             "mode_model": key, "count": val["count"],
             "ttfb_p50": ttfb.get("p50"), "ttfb_p99": ttfb.get("p99"),
             "total_p50": total.get("p50"), "total_p99": total.get("p99"),
+            "error_rate_pct": errors.get("error_rate_pct", 0.0),
         })
     rows.sort(key=lambda r: -r["count"])
     return rows[:top]
@@ -121,13 +123,18 @@ def build_prompt(latest: dict, baseline, air: dict, session_id: str) -> str:
     for tool, t in sel.get("by_tool_name", {}).items():
         lines.append(f"- {tool}: n={t['count']}, p50={t['p50']} p90={t['p90']} "
                      f"p99={t['p99']} max={t['max']}")
-    lines.append("Richieste proxy per mode|model (ms):")
+    lines.append("Richieste proxy per mode|model (ms) — TABELLA, usa questi numeri esatti:")
+    lines.append("| mode|model | n | ttfb p50 | ttfb p90 | ttfb p99 | ttfb max | "
+                 "total p50 | total p90 | total p99 | total max | 429 | 5xx | err% |")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for key, v in sel.get("by_mode_model", {}).items():
         ttfb, total = v.get("ttfb_ms", {}), v.get("total_ms", {})
-        lines.append(f"- {key}: n={v['count']}, ttfb p50={ttfb.get('p50')} "
-                     f"p90={ttfb.get('p90')} p99={ttfb.get('p99')} max={ttfb.get('max')}; "
-                     f"total p50={total.get('p50')} p90={total.get('p90')} "
-                     f"p99={total.get('p99')} max={total.get('max')}")
+        err = v.get("errors", {})
+        lines.append(f"| {key} | {v['count']} | {ttfb.get('p50')} | {ttfb.get('p90')} | "
+                     f"{ttfb.get('p99')} | {ttfb.get('max')} | {total.get('p50')} | "
+                     f"{total.get('p90')} | {total.get('p99')} | {total.get('max')} | "
+                     f"{err.get('n_429', 0)} | {err.get('n_5xx', 0)} | "
+                     f"{err.get('error_rate_pct', 0.0)} |")
     lines.append(f"conteggi totali: tool_calls={sel.get('n_tool_calls', 0)}, "
                  f"proxy_requests={sel.get('n_proxy_requests', 0)}")
     gaps = sel.get("idle_gaps", [])
@@ -148,7 +155,8 @@ def build_prompt(latest: dict, baseline, air: dict, session_id: str) -> str:
         for row in compact_baseline_rows(baseline):
             lines.append(f"- {row['mode_model']}: n={row['count']}, "
                          f"ttfb p50={row['ttfb_p50']} p99={row['ttfb_p99']}; "
-                         f"total p50={row['total_p50']} p99={row['total_p99']}")
+                         f"total p50={row['total_p50']} p99={row['total_p99']}; "
+                         f"err%={row['error_rate_pct']}")
     else:
         lines.append("\n## Baseline storica\nbaseline storica non disponibile, "
                      "eseguire prima `perfmon_correlate.py --backfill`.")
@@ -168,12 +176,16 @@ def build_prompt(latest: dict, baseline, air: dict, session_id: str) -> str:
         "3. Dichiara esplicitamente quando un dato e' una stima indiretta (i gap) "
         "e non una misura esatta.\n"
         "4. NON suggerire tagli o cambi di modalita' specifici: e' un report "
-        "generico, solo diagnosi.\n\n"
+        "generico, solo diagnosi.\n"
+        "5. USA ESATTAMENTE i numeri delle tabelle sopra. NON inventare esempi "
+        "generici (es. 'Bash: n=10, p50=1200ms') e NON citare un numero che non "
+        "compare in una tabella. Se una sezione non ha dati sufficienti, scrivi "
+        "'dati insufficienti per questa sezione' invece di inventare.\n\n"
         "Output in DUE parti, separate da una riga contenente solo " + JSON_MARKER + ":\n"
         "(a) prima parte: markdown leggibile con sezioni;\n"
         "(b) seconda parte: UN blocco JSON con la chiave 'findings', lista di oggetti "
-        '{"title", "severity": "low"|"medium"|"high", "category", "evidence", '
-        '"session_id_or_mode"}.\n'
+        '{"title": "...", "severity": "low"|"medium"|"high", "category": "...", '
+        '"evidence": "...", "session_id_or_mode": "..."}.\n'
         f"Se non hai finding, scrivi 'findings': [] dopo il marcatore {JSON_MARKER}."
     )
     return "\n".join(lines)

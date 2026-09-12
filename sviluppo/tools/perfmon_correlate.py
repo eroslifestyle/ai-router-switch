@@ -55,6 +55,19 @@ def _dist(values):
     }
 
 
+def _error_stats(items):
+    """Conta risposte 429 e 5xx sul totale (status HTTP gia' nel sidecar/proxy_requests)."""
+    statuses = [it.get("status") for it in items]
+    n_429 = sum(1 for s in statuses if s == 429)
+    n_5xx = sum(1 for s in statuses if isinstance(s, int) and 500 <= s < 600)
+    total = len(statuses)
+    return {
+        "n_429": n_429,
+        "n_5xx": n_5xx,
+        "error_rate_pct": round(100 * (n_429 + n_5xx) / total, 1) if total else 0.0,
+    }
+
+
 def _leggi_eventi():
     """Tutte le righe valide di orchestration.jsonl + numero righe scartate."""
     eventi, scartate = [], 0
@@ -173,6 +186,7 @@ def _by_mode_model(requests):
             "count": len(grp),
             "ttfb_ms": _dist([p.get("ttfb_ms") for p in grp]),
             "total_ms": _dist([p.get("total_ms") for p in grp]),
+            "errors": _error_stats(grp),
         }
     return dict(sorted(out.items()))
 
@@ -251,6 +265,7 @@ def _backfill_mode():
                 sum(r.get("cache_read") or 0 for r in grp) / len(grp), 1),
             "cache_creation_media": round(
                 sum(r.get("cache_creation") or 0 for r in grp) / len(grp), 1),
+            "errors": _error_stats(grp),
         }
     ts_validi = [r.get("ts") for r in righe if r.get("ts") is not None]
     baseline = {
