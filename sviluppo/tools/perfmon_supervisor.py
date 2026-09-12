@@ -24,7 +24,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 AGGREGATES_DIR = PROJECT_ROOT / ".claude" / "perfmon" / "aggregates"
 REPORTS_DIR = PROJECT_ROOT / ".claude" / "perfmon" / "reports"
-OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_URL = "http://localhost:11434/api/chat"
 OLLAMA_MODEL = "qwen2.5:7b-instruct"
 OLLAMA_TIMEOUT_SEC = 300
 AIRouter_TIMEOUT_SEC = 15
@@ -182,7 +182,10 @@ def build_prompt(latest: dict, baseline, air: dict, session_id: str) -> str:
 def call_ollama(prompt: str) -> str:
     payload = json.dumps({
         "model": OLLAMA_MODEL,
-        "prompt": prompt,
+        "messages": [
+            {"role": "system", "content": "Sei un supervisore che analizza telemetria di performance di un proxy AI e scrive report tecnici in italiano."},
+            {"role": "user", "content": prompt},
+        ],
         "stream": False,
         # ponytail: temperatura 0 — a default 0.8 il 7B degenera su prompt densi
         # di numeri; greedy e' deterministico e ha prodotto report corretti.
@@ -195,7 +198,7 @@ def call_ollama(prompt: str) -> str:
     try:
         with urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT_SEC) as resp:
             body = json.loads(resp.read().decode("utf-8"))
-        return body.get("response", "")
+        return body.get("message", {}).get("content", "")
     except (urllib.error.URLError, ConnectionRefusedError, TimeoutError, OSError) as exc:
         reason = getattr(exc, "reason", exc)
         print(
@@ -278,6 +281,13 @@ def main() -> int:
 
     response = call_ollama(prompt)
     markdown, findings, warn = split_response(response)
+    if len(markdown.strip()) < 100:
+        print(
+            "ERRORE: risposta del modello troppo corta o degenere, report non scritto. "
+            f"Contenuto: {markdown.strip()[:200]!r}",
+            file=sys.stderr,
+        )
+        return 1
     if warn:
         findings.append({
             "title": warn,
