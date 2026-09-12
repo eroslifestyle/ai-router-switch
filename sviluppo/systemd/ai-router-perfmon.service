@@ -1,0 +1,19 @@
+[Unit]
+Description=ai-router performance monitor (proxy + orchestrazione, solo lettura)
+# Sorgente: sviluppo/tools/perfmon_dashboard.py (Documentation= omessa: il
+# percorso del progetto contiene uno spazio e systemd rifiuta la URL).
+# Interroga :8787 e .claude/perfmon/ in sola lettura; non tocca mai il router.
+After=ai-router.service
+
+[Service]
+Type=simple
+WorkingDirectory=@PROJECT_ROOT@
+ExecStart=/usr/bin/python3 sviluppo/tools/perfmon_dashboard.py
+Environment=PERFMON_POLL_SEC=45
+Restart=on-failure
+RestartSec=10
+Nice=15
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=default.target

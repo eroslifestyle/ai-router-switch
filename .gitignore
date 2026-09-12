@@ -80,3 +80,6 @@ sviluppo/audit/2026-08-30-fix-gerarchia-routing-esterno/
 # Benchmark consumo: dettagli dell'infrastruttura personale (path, hook, MCP,
 # configurazione, dati di traffico individuali). Repo PUBBLICO: resta fuori.
 sviluppo/audit/2026-09-06-benchmark-consumo/
+
+# Performance monitor: dati di sessione personali, mai nel repo pubblico
+.claude/perfmon/
