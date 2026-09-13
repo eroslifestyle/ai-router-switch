@@ -240,7 +240,9 @@ def demote_foreign_tool_use(data: dict, backend: str) -> int:
     strip per-brand qui sopra produce. Succede per costruzione quando una chat
     cambia modalità a metà conversazione (es. da `ultra`/mix-am, dove l'ACT ha
     chiamato `mcp__MiniMax__web_search`, a `anthropic` puro): la definizione
-    sparisce dai `tools`, il riferimento resta nella history. Osservato in
+    sparisce dai `tools`, il riferimento resta nella history. Il blocco beta
+    tool-search `tool_reference` (nome del tool in `tool_name`, non in `name`)
+    ha lo stesso problema e viene trattato allo stesso modo. Osservato in
     produzione (BUG-CATALOG.md, relay_error_400 su anthropic, 2026-09-02):
     "Tool reference 'mcp__MiniMax__understand_image' not found in available tools".
 
@@ -262,16 +264,16 @@ def demote_foreign_tool_use(data: dict, backend: str) -> int:
             # server_tool_use/mcp_tool_use: varianti dei tool server-side/MCP
             # Anthropic, stesso 400 se il tool referenziato non e' piu' nei tools.
             if (not isinstance(blk, dict)
-                    or blk.get("type") not in ("tool_use", "server_tool_use", "mcp_tool_use")):
+                    or blk.get("type") not in ("tool_use", "server_tool_use", "mcp_tool_use", "tool_reference")):
                 continue
-            brand = brand_of_tool_name(blk.get("name"))
+            brand = brand_of_tool_name(blk.get("name") or blk.get("tool_name"))
             if brand is None or brand == backend:
                 continue
             tool_id = blk.get("id")
             if isinstance(tool_id, str):
                 demoted_ids.add(tool_id)
             content[i] = {"type": "text",
-                          "text": f"[tool_use {blk.get('name')}] "
+                          "text": f"[tool_use {blk.get('name') or blk.get('tool_name')}] "
                                   + json.dumps(blk.get("input"), ensure_ascii=False, default=str)[:2000]}
             converted += 1
     if demoted_ids:
@@ -302,8 +304,9 @@ def filter_tools_for_backend(body: bytes, backend: str) -> bytes:
         data = json.loads(body)
     except Exception:
         return body
-    # "tool_use" senza virgolette: matcha anche server_tool_use/mcp_tool_use
-    demoted = demote_foreign_tool_use(data, backend) if b"tool_use" in body else 0
+    # "tool_use" senza virgolette: matcha anche server_tool_use/mcp_tool_use;
+    # tool_reference (beta tool-search) non contiene "tool_use" e va guardato a parte.
+    demoted = demote_foreign_tool_use(data, backend) if (b"tool_use" in body or b"tool_reference" in body) else 0
     tools = data.get("tools")
     if not isinstance(tools, list) or not tools:
         return json.dumps(data).encode() if demoted else body

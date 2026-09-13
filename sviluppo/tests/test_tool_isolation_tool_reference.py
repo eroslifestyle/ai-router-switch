@@ -76,3 +76,15 @@ def test_mcp_tool_use_esterno_in_history_demotato():
     out = _data(filter_tools_for_backend(_body(tools, messages), 'anthropic'))
     blocks = out['messages'][0]['content']
     assert blocks[0]['type'] == 'text', blocks
+
+
+def test_tool_reference_in_history_demotato():
+    tools = [{'name': 'Bash', 'input_schema': {'type': 'object'}}]
+    messages = [{'role': 'user', 'content': [
+        {'type': 'tool_reference', 'tool_name': 'mcp__zai__web_search_prime'},
+    ]}]
+    out = _data(filter_tools_for_backend(_body(tools, messages), 'anthropic'))
+    blocks = out['messages'][0]['content']
+    # ponytail: il nome resta nel testo convertito (schema demote, contesto leggibile);
+    # il bug e' il blocco tool_reference residuo che fa rispondere 400 all'API.
+    assert blocks[0]['type'] == 'text', blocks
