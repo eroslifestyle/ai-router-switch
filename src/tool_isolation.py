@@ -248,34 +248,58 @@ def demote_foreign_tool_use(data: dict, backend: str) -> int:
 
     Si converte a testo invece di eliminare, stesso schema di
     `declassa_thinking_estranei`/`strip_server_tools_for_minimax`: il contesto
-    della chiamata resta leggibile e nessun `content` finisce vuoto (altro 400)."""
+    della chiamata resta leggibile e nessun `content` finisce vuoto (altro 400).
+
+    Il riferimento puo' essere ANNIDATO nel `content` di un altro blocco: la beta
+    tool-search mette i `tool_reference` dentro `tool_search_tool_result.content`,
+    dove la scansione di primo livello non arrivava (400 ancora vivo il 2026-09-14
+    dopo i fix 7ca825b/356e9da). La scansione e' quindi ricorsiva; li' lo schema
+    non ammette un blocco `text`, quindi il riferimento estraneo si RIMUOVE
+    invece di declassarlo."""
     messages = data.get("messages")
     if not isinstance(messages, list):
         return 0
     demoted_ids: set[str] = set()
     converted = 0
-    for msg in messages:
-        if not isinstance(msg, dict):
-            continue
-        content = msg.get("content")
-        if not isinstance(content, list):
-            continue
+
+    def scansiona(content: list, annidato: bool) -> None:
+        nonlocal converted
+        da_rimuovere: list[int] = []
         for i, blk in enumerate(content):
+            if not isinstance(blk, dict):
+                continue
             # server_tool_use/mcp_tool_use: varianti dei tool server-side/MCP
             # Anthropic, stesso 400 se il tool referenziato non e' piu' nei tools.
-            if (not isinstance(blk, dict)
-                    or blk.get("type") not in ("tool_use", "server_tool_use", "mcp_tool_use", "tool_reference")):
-                continue
-            brand = brand_of_tool_name(blk.get("name") or blk.get("tool_name"))
-            if brand is None or brand == backend:
-                continue
-            tool_id = blk.get("id")
-            if isinstance(tool_id, str):
-                demoted_ids.add(tool_id)
-            content[i] = {"type": "text",
-                          "text": f"[tool_use {blk.get('name') or blk.get('tool_name')}] "
-                                  + json.dumps(blk.get("input"), ensure_ascii=False, default=str)[:2000]}
-            converted += 1
+            if blk.get("type") in ("tool_use", "server_tool_use", "mcp_tool_use", "tool_reference"):
+                brand = brand_of_tool_name(blk.get("name") or blk.get("tool_name"))
+                if brand is not None and brand != backend:
+                    tool_id = blk.get("id")
+                    if isinstance(tool_id, str):
+                        demoted_ids.add(tool_id)
+                    if annidato:
+                        da_rimuovere.append(i)
+                    else:
+                        content[i] = {"type": "text",
+                                      "text": f"[tool_use {blk.get('name') or blk.get('tool_name')}] "
+                                              + json.dumps(blk.get("input"), ensure_ascii=False, default=str)[:2000]}
+                    converted += 1
+                    continue
+            # La beta tool-search annida i riferimenti in
+            # content={"type":"tool_search_tool_search_result","tool_references":[...]}:
+            # `content` e' un dict, non una lista (forma verificata contro l'API reale).
+            figli = blk.get("content")
+            if isinstance(figli, dict):
+                figli = figli.get("tool_references")
+            if isinstance(figli, list):
+                scansiona(figli, True)
+        # ponytail: se la lista annidata resta vuota la si lascia vuota: verificato
+        # contro l'API reale il 2026-09-14, tool_references=[] round-trippa HTTP 200.
+        for i in reversed(da_rimuovere):
+            del content[i]
+
+    for msg in messages:
+        if isinstance(msg, dict) and isinstance(msg.get("content"), list):
+            scansiona(msg["content"], False)
     if demoted_ids:
         for msg in messages:
             if not isinstance(msg, dict):

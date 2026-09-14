@@ -88,3 +88,28 @@ def test_tool_reference_in_history_demotato():
     # ponytail: il nome resta nel testo convertito (schema demote, contesto leggibile);
     # il bug e' il blocco tool_reference residuo che fa rispondere 400 all'API.
     assert blocks[0]['type'] == 'text', blocks
+
+
+def test_tool_reference_annidato_in_search_result_rimosso():
+    """Beta tool-search: il tool_reference vive dentro tool_search_tool_result.content."""
+    body = json.dumps({
+        "tools": [
+            {"name": "mcp__zai__web_search_prime", "input_schema": {}},
+            {"name": "Read", "input_schema": {}},
+        ],
+        "messages": [{"role": "assistant", "content": [
+            {"type": "server_tool_use", "id": "srvtoolu_1",
+             "name": "tool_search_tool_regex", "input": {"query": "zai"}},
+            {"type": "tool_search_tool_result", "tool_use_id": "srvtoolu_1", "content": {
+                "type": "tool_search_tool_search_result",
+                "tool_references": [
+                    {"type": "tool_reference", "tool_name": "mcp__zai__web_search_prime"},
+                    {"type": "tool_reference", "tool_name": "Read"},
+                ]}},
+        ]}],
+    }).encode()
+    out = filter_tools_for_backend(body, "anthropic")
+    assert b"mcp__zai__web_search_prime" not in out
+    dati = json.loads(out)
+    refs = dati["messages"][0]["content"][1]["content"]["tool_references"]
+    assert [r["tool_name"] for r in refs] == ["Read"]
