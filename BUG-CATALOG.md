@@ -2,11 +2,11 @@
 
 > Generato automaticamente da `scripts/generate_bug_report.py` a partire da `logs/BUG-CATALOG.jsonl`. Non modificare a mano — rilanciare lo script. Vedi `DEBUG-CATALOG-SPEC.md` per lo schema completo.
 
-**1611 tipi distinti di bug/blocco/errore** · **65162 occorrenze totali** su 15 modalita'.
+**1618 tipi distinti di bug/blocco/errore** · **65500 occorrenze totali** su 15 modalita'.
 
 ## Modalita': `anthropic`
 
-133 tipi distinti, 38558 occorrenze.
+136 tipi distinti, 38592 occorrenze.
 
 ### `rate_limit_429_exhausted` (429)
 
@@ -32,9 +32,9 @@
 
 - **Firma**: `4824157bfbb4600a`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 29
+- **Occorrenze**: 30
 - **Prima volta**: 2026-08-16T15:08:45+0200
-- **Ultima volta**: 2026-09-07T08:02:36+0200
+- **Ultima volta**: 2026-09-14T03:12:37+0200
 - **Modalita' coinvolte**: anthropic
 
 ### `relay_error_400` (400)
@@ -85,6 +85,16 @@
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","message":"Tool reference 'mcp__MiniMax__understand_image' not found in available tools"},"request_id":"req_011CeeJm3v7aB9okfVkpkNbB"}`
 
+### `relay_error_400` (400)
+
+- **Firma**: `920f4aa73fc5ed8a`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 6
+- **Prima volta**: 2026-09-13T09:30:40+0200
+- **Ultima volta**: 2026-09-14T03:35:49+0200
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","message":"Tool reference 'mcp__zai__web_search_prime' not found in available tools"},"request_id":"req_011Cf2USNpdZLbSKssN4u3qJ"}`
+
 ### `empty_response_anthropic` (200)
 
 - **Firma**: `34f0cbc6f148853a`
@@ -104,6 +114,16 @@
 - **Ultima volta**: 2026-09-05T22:26:58+0200
 - **Modalita' coinvolte**: anthropic
 - **Esempio**: `{"type":"error","error":{"type":"authentication_error","message":"OAuth access token has been revoked."},"request_id":null}`
+
+### `relay_error_400` (400)
+
+- **Firma**: `4d2316af6b5a2557`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 3
+- **Prima volta**: 2026-09-14T03:29:22+0200
+- **Ultima volta**: 2026-09-14T03:29:23+0200
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.1.tool_search_tool_result.content.RequestToolSearchToolResultError: Input does not match the expected shape."},"request_id":"req_011Cf2Twt7T1AtEqftC5VvwP"}`
 
 ### `relay_error_400` (400)
 
@@ -1218,11 +1238,11 @@
 
 - **Firma**: `7446f99926bbc6ef`
 - **Severita'**: info
-- **Occorrenze**: 28954
+- **Occorrenze**: 28976
 - **Prima volta**: 2026-07-26T17:54:14Z
-- **Ultima volta**: 2026-09-12T22:29:50+0200
+- **Ultima volta**: 2026-09-14T03:54:42+0200
 - **Modalita' coinvolte**: anthropic
-- **Esempio**: `stripped=['mcp__zai__web_search_prime'] kept=13/14`
+- **Esempio**: `stripped=['mcp__zai__web_search_prime'] kept=2/3`
 
 ### `tool_isolation_strip`
 
@@ -1238,9 +1258,9 @@
 
 - **Firma**: `77864e7a51a32f02`
 - **Severita'**: info
-- **Occorrenze**: 779
+- **Occorrenze**: 780
 - **Prima volta**: 2026-07-30T03:21:40+0200
-- **Ultima volta**: 2026-09-10T02:02:46+0200
+- **Ultima volta**: 2026-09-14T04:06:10+0200
 - **Modalita' coinvolte**: anthropic
 
 ### `tool_isolation_strip`
@@ -1313,6 +1333,16 @@
 
 ### `tool_isolation_strip`
 
+- **Firma**: `c90d504b9a0d26f7`
+- **Severita'**: info
+- **Occorrenze**: 1
+- **Prima volta**: 2026-09-13T09:41:07+0200
+- **Ultima volta**: 2026-09-13T09:41:07+0200
+- **Modalita' coinvolte**: anthropic
+- **Esempio**: `stripped=['?'] kept=1/2`
+
+### `tool_isolation_strip`
+
 - **Firma**: `379bc13a99c2fc04`
 - **Severita'**: info
 - **Occorrenze**: 1
@@ -1333,7 +1363,7 @@
 
 ## Modalita': `glm`
 
-62 tipi distinti, 6928 occorrenze.
+65 tipi distinti, 6959 occorrenze.
 
 ### `forward_exception`
 
@@ -1359,9 +1389,9 @@
 
 - **Firma**: `84d2e99403a775b7`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 38
+- **Occorrenze**: 42
 - **Prima volta**: 2026-07-30T08:12:22+0200
-- **Ultima volta**: 2026-09-11T23:01:31+0200
+- **Ultima volta**: 2026-09-13T15:30:23+0200
 - **Modalita' coinvolte**: glm
 - **Esempio**: `Cannot write to closing transport`
 
@@ -1445,6 +1475,16 @@
 - **Modalita' coinvolte**: glm
 - **Esempio**: `model=claude-sonnet-5`
 
+### `glm_timeout`
+
+- **Firma**: `9cf5b93d11eec955`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 3
+- **Prima volta**: 2026-08-25T03:38:09+0200
+- **Ultima volta**: 2026-09-14T03:57:24+0200
+- **Modalita' coinvolte**: glm
+- **Esempio**: `attempt=1 model=glm-4.7`
+
 ### `truncated_response_glm` (200)
 
 - **Firma**: `b96334e24e8044e8`
@@ -1503,16 +1543,6 @@
 - **Ultima volta**: 2026-09-06T13:01:36+0200
 - **Modalita' coinvolte**: glm
 - **Esempio**: `Timeout on reading data from socket`
-
-### `glm_timeout`
-
-- **Firma**: `9cf5b93d11eec955`
-- **Severita'**: 🔴 Errori
-- **Occorrenze**: 2
-- **Prima volta**: 2026-08-25T03:38:09+0200
-- **Ultima volta**: 2026-09-06T11:10:31+0200
-- **Modalita' coinvolte**: glm
-- **Esempio**: `attempt=1 model=glm-4.7`
 
 ### `glm_exhausted` (502)
 
@@ -1778,11 +1808,11 @@
 
 - **Firma**: `2cf1321f17c5adda`
 - **Severita'**: info
-- **Occorrenze**: 4739
+- **Occorrenze**: 4749
 - **Prima volta**: 2026-07-22T08:07:41Z
-- **Ultima volta**: 2026-09-12T21:24:22+0200
+- **Ultima volta**: 2026-09-14T03:19:24+0200
 - **Modalita' coinvolte**: glm
-- **Esempio**: `stripped=['WebFetch', 'WebSearch'] kept=8/10`
+- **Esempio**: `stripped=['WebFetch', 'WebSearch'] kept=9/11`
 
 ### `tool_isolation_strip`
 
@@ -1808,11 +1838,11 @@
 
 - **Firma**: `eaee38e94e6615c9`
 - **Severita'**: info
-- **Occorrenze**: 209
+- **Occorrenze**: 215
 - **Prima volta**: 2026-08-24T13:11:48+0200
-- **Ultima volta**: 2026-09-12T22:25:40+0200
+- **Ultima volta**: 2026-09-13T17:47:55+0200
 - **Modalita' coinvolte**: glm
-- **Esempio**: `stripped=['WebSearch'] kept=4/5`
+- **Esempio**: `stripped=['WebSearch'] kept=9/10`
 
 ### `tool_isolation_strip`
 
@@ -1828,11 +1858,21 @@
 
 - **Firma**: `99d9e772855cfb9c`
 - **Severita'**: info
-- **Occorrenze**: 18
+- **Occorrenze**: 20
 - **Prima volta**: 2026-09-06T15:17:12+0200
-- **Ultima volta**: 2026-09-12T02:26:22+0200
+- **Ultima volta**: 2026-09-13T08:49:50+0200
 - **Modalita' coinvolte**: glm
-- **Esempio**: `stripped=['WebFetch'] kept=5/6`
+- **Esempio**: `stripped=['WebFetch'] kept=9/10`
+
+### `heavy_mcp_strip`
+
+- **Firma**: `4a921a3098f34e0e`
+- **Severita'**: info
+- **Occorrenze**: 6
+- **Prima volta**: 2026-09-06T21:32:40+0200
+- **Ultima volta**: 2026-09-13T21:21:14+0200
+- **Modalita' coinvolte**: glm
+- **Esempio**: `stripped=['mcp__claude_ai_Google_Drive__copy_file', 'mcp__claude_ai_Google_Drive__create_file', 'mcp__claude_ai_Google_Drive__download_file_content', 'mcp__claude_ai_Google_Drive__get_file_metadata', 'mcp__claude_ai_Google_Drive__get_file_permissions'] kept=10/15`
 
 ### `tool_isolation_strip`
 
@@ -1854,15 +1894,25 @@
 - **Modalita' coinvolte**: glm
 - **Esempio**: `stripped=['web_search'] kept=1/2`
 
-### `heavy_mcp_strip`
+### `tool_isolation_strip`
 
-- **Firma**: `4a921a3098f34e0e`
+- **Firma**: `65a868a717c65369`
 - **Severita'**: info
 - **Occorrenze**: 4
-- **Prima volta**: 2026-09-06T21:32:40+0200
-- **Ultima volta**: 2026-09-12T14:46:49+0200
+- **Prima volta**: 2026-08-20T14:13:06+0200
+- **Ultima volta**: 2026-09-14T03:54:37+0200
 - **Modalita' coinvolte**: glm
-- **Esempio**: `stripped=['mcp__claude_ai_Google_Drive__copy_file', 'mcp__claude_ai_Google_Drive__create_file', 'mcp__claude_ai_Google_Drive__download_file_content', 'mcp__claude_ai_Google_Drive__get_file_metadata', 'mcp__claude_ai_Google_Drive__get_file_permissions', 'mcp__claude_ai_Google_Drive__read_file_content`
+- **Esempio**: `stripped=['tool_search_tool_regex'] kept=2/3`
+
+### `heavy_mcp_strip`
+
+- **Firma**: `b56c1e9d67e7ce68`
+- **Severita'**: info
+- **Occorrenze**: 4
+- **Prima volta**: 2026-09-11T22:14:48+0200
+- **Ultima volta**: 2026-09-13T10:49:47+0200
+- **Modalita' coinvolte**: glm
+- **Esempio**: `stripped=['mcp__claude_ai_Gmail__apply_sensitive_message_label', 'mcp__claude_ai_Gmail__apply_sensitive_thread_label', 'mcp__claude_ai_Gmail__create_draft', 'mcp__claude_ai_Gmail__create_label', 'mcp__claude_ai_Gmail__get_draft', 'mcp__claude_ai_Gmail__get_message', 'mcp__claude_ai_Gmail__get_thread`
 
 ### `ctx_gate` (ok)
 
@@ -1875,16 +1925,6 @@
 
 ### `tool_isolation_strip`
 
-- **Firma**: `65a868a717c65369`
-- **Severita'**: info
-- **Occorrenze**: 3
-- **Prima volta**: 2026-08-20T14:13:06+0200
-- **Ultima volta**: 2026-09-11T20:48:45+0200
-- **Modalita' coinvolte**: glm
-- **Esempio**: `stripped=['tool_search_tool_regex'] kept=2/3`
-
-### `tool_isolation_strip`
-
 - **Firma**: `b7762417a9e2c003`
 - **Severita'**: info
 - **Occorrenze**: 3
@@ -1892,16 +1932,6 @@
 - **Ultima volta**: 2026-08-16T17:17:51+0200
 - **Modalita' coinvolte**: glm
 - **Esempio**: `stripped=['mcp__minimax__strumento_0', 'mcp__minimax__strumento_1', 'mcp__minimax__strumento_2', 'mcp__minimax__strumento_3', 'mcp__minimax__strumento_4', 'mcp__minimax__strumento_5'] kept=30/36`
-
-### `heavy_mcp_strip`
-
-- **Firma**: `b56c1e9d67e7ce68`
-- **Severita'**: info
-- **Occorrenze**: 2
-- **Prima volta**: 2026-09-11T22:14:48+0200
-- **Ultima volta**: 2026-09-11T22:14:50+0200
-- **Modalita' coinvolte**: glm
-- **Esempio**: `stripped=['mcp__claude_ai_Gmail__apply_sensitive_message_label', 'mcp__claude_ai_Gmail__apply_sensitive_thread_label', 'mcp__claude_ai_Gmail__create_draft', 'mcp__claude_ai_Gmail__create_label', 'mcp__claude_ai_Gmail__get_draft', 'mcp__claude_ai_Gmail__get_message', 'mcp__claude_ai_Gmail__get_thread`
 
 ### `tool_isolation_strip`
 
@@ -1921,6 +1951,36 @@
 - **Prima volta**: 2026-08-16T16:27:13+0200
 - **Ultima volta**: 2026-09-06T10:20:34+0200
 - **Modalita' coinvolte**: glm
+
+### `heavy_mcp_strip`
+
+- **Firma**: `9872076a1311d07e`
+- **Severita'**: info
+- **Occorrenze**: 1
+- **Prima volta**: 2026-09-13T21:21:49+0200
+- **Ultima volta**: 2026-09-13T21:21:49+0200
+- **Modalita' coinvolte**: glm
+- **Esempio**: `stripped=['mcp__claude_ai_Google_Drive__list_recent_files', 'mcp__claude_ai_Google_Drive__search_files'] kept=13/15`
+
+### `heavy_mcp_strip`
+
+- **Firma**: `58600564c8daf8cc`
+- **Severita'**: info
+- **Occorrenze**: 1
+- **Prima volta**: 2026-09-13T11:48:54+0200
+- **Ultima volta**: 2026-09-13T11:48:54+0200
+- **Modalita' coinvolte**: glm
+- **Esempio**: `stripped=['mcp__claude_ai_Google_Drive__copy_file', 'mcp__claude_ai_Google_Drive__read_file_content'] kept=13/15`
+
+### `heavy_mcp_strip`
+
+- **Firma**: `9a018fba42feb557`
+- **Severita'**: info
+- **Occorrenze**: 1
+- **Prima volta**: 2026-09-13T11:48:23+0200
+- **Ultima volta**: 2026-09-13T11:48:23+0200
+- **Modalita' coinvolte**: glm
+- **Esempio**: `stripped=['mcp__claude_ai_Gmail__apply_sensitive_message_label', 'mcp__claude_ai_Gmail__create_label', 'mcp__claude_ai_Google_Drive__copy_file', 'mcp__claude_ai_Google_Drive__create_file', 'mcp__claude_ai_Google_Drive__download_file_content', 'mcp__claude_ai_Google_Drive__get_file_metadata', 'mcp__c`
 
 ### `tool_isolation_strip`
 
@@ -2692,45 +2752,45 @@
 
 ## Modalita': `mix-ag-2`
 
-14 tipi distinti, 966 occorrenze.
+14 tipi distinti, 1233 occorrenze.
 
 ### `ctx_gate` (error)
 
 - **Firma**: `946b2125ec4bc163`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 67
+- **Occorrenze**: 78
 - **Prima volta**: 2026-09-06T16:36:06+0200
-- **Ultima volta**: 2026-09-11T07:16:51+0200
+- **Ultima volta**: 2026-09-14T00:26:27+0200
 - **Modalita' coinvolte**: mix-ag-2
 
 ### `relay_error_400` (400)
 
 - **Firma**: `bfe96028112084b2`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 28
+- **Occorrenze**: 44
 - **Prima volta**: 2026-08-24T13:10:56+0200
-- **Ultima volta**: 2026-09-12T21:24:23+0200
+- **Ultima volta**: 2026-09-14T03:19:25+0200
 - **Modalita' coinvolte**: mix-ag-2
-- **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","code":"1210","message":"[1210][Invalid API parameter, please check the documentation.][20260913032422aea84b3788374a22]"},"request_id":"20260913032422aea84b3788374a22"}`
+- **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","code":"1210","message":"[1210][Invalid API parameter, please check the documentation.][2026091409192544377fd8c05649bf]"},"request_id":"2026091409192544377fd8c05649bf"}`
 
 ### `truncated_response_mix-ag-2` (200)
 
 - **Firma**: `118d8bed45cd945a`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 27
+- **Occorrenze**: 30
 - **Prima volta**: 2026-08-24T11:44:20+0200
-- **Ultima volta**: 2026-09-12T20:51:18+0200
+- **Ultima volta**: 2026-09-14T04:05:01+0200
 - **Modalita' coinvolte**: mix-ag-2
 
 ### `relay_error_400` (400)
 
 - **Firma**: `bc357ca3d7ee3c32`
 - **Severita'**: 🔴 Errori
-- **Occorrenze**: 6
+- **Occorrenze**: 18
 - **Prima volta**: 2026-09-12T21:25:01+0200
-- **Ultima volta**: 2026-09-12T22:29:58+0200
+- **Ultima volta**: 2026-09-14T03:07:59+0200
 - **Modalita' coinvolte**: mix-ag-2
-- **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","message":"Tool reference 'mcp__zai__web_search_prime' not found in available tools"},"request_id":"req_011CezBJjdoyqeKVzGheD2GB"}`
+- **Esempio**: `{"type":"error","error":{"type":"invalid_request_error","message":"Tool reference 'mcp__zai__web_search_prime' not found in available tools"},"request_id":"req_011Cf2SKF8M4pZw4c1M2zyyz"}`
 
 ### `empty_response_mix-ag-2` (200)
 
@@ -2795,41 +2855,51 @@
 
 - **Firma**: `68afc110e48c670e`
 - **Severita'**: 🟡 Blocchi
-- **Occorrenze**: 118
+- **Occorrenze**: 179
 - **Prima volta**: 2026-09-06T15:54:07+0200
-- **Ultima volta**: 2026-09-12T15:27:37+0200
+- **Ultima volta**: 2026-09-14T00:23:54+0200
 - **Modalita' coinvolte**: mix-ag-2
 
 ### `ctx_gate` (ok)
 
 - **Firma**: `0aa889b241e4c4b5`
 - **Severita'**: info
-- **Occorrenze**: 702
+- **Occorrenze**: 859
 - **Prima volta**: 2026-08-24T13:07:42+0200
-- **Ultima volta**: 2026-09-12T22:29:54+0200
+- **Ultima volta**: 2026-09-14T04:06:01+0200
 - **Modalita' coinvolte**: mix-ag-2
 
 ### `ctx_gate` (warn)
 
 - **Firma**: `014bb81c5ec69347`
 - **Severita'**: info
-- **Occorrenze**: 7
+- **Occorrenze**: 13
 - **Prima volta**: 2026-09-06T15:51:33+0200
-- **Ultima volta**: 2026-09-12T17:10:27+0200
+- **Ultima volta**: 2026-09-14T02:12:31+0200
 - **Modalita' coinvolte**: mix-ag-2
 
 ### `ctx_gate` (warn2)
 
 - **Firma**: `25487bfb44d68d58`
 - **Severita'**: info
-- **Occorrenze**: 2
+- **Occorrenze**: 3
 - **Prima volta**: 2026-09-06T19:28:23+0200
-- **Ultima volta**: 2026-09-06T22:58:11+0200
+- **Ultima volta**: 2026-09-13T01:56:10+0200
 - **Modalita' coinvolte**: mix-ag-2
 
 ## Modalita': `mix-al`
 
-3 tipi distinti, 3 occorrenze.
+4 tipi distinti, 9 occorrenze.
+
+### `relay_error_500` (500)
+
+- **Firma**: `f11043e9df47a581`
+- **Severita'**: 🔴 Errori
+- **Occorrenze**: 6
+- **Prima volta**: 2026-09-13T08:14:46+0200
+- **Ultima volta**: 2026-09-13T15:25:10+0200
+- **Modalita' coinvolte**: mix-al
+- **Esempio**: `{"error":{"message":"litellm.InternalServerError: InternalServerError: OpenAIException - Cannot connect to host 172.18.0.1:8083 ssl:<ssl.SSLContext object at 0x72f151d0a530> [Connect call failed ('172.18.0.1', 8083)]No fallback model group found for original model_group=code-max. Fallbacks=[{'fast-m`
 
 ### `relay_error_500` (500)
 
