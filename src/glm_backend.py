@@ -497,6 +497,36 @@ def clamp_glm_max_tokens(body: bytes, log_fn=None, model: str | None = None) -> 
     return body
 
 
+def strip_thinking_for_model(body: bytes, req_model: str | None, log_fn=None) -> bytes:
+    """Toglie il campo top-level `thinking` se il modello RICHIESTO non lo
+    supporta. z.ai onora quel campo: glm-4.7 con thinking adattivo ereditato
+    da Haiku emette un blocco thinking e impiega ~16 s invece di ~6 s
+    (25.692 richieste nate come Haiku, 73% con thinking, 89 ore in 30 giorni).
+    Rimuoverlo replica cio' che Claude Code fa sui provider terzi (omette
+    `thinking`) e cio' che il path Anthropic gia' fa per Haiku. NON si usa
+    `{"type":"disabled"}`: glm-5.3 risponde errore su disabled, l'omissione e'
+    sicura su tutti. Rollback: AIROUTER_GLM_KEEP_THINKING=1.
+    """
+    if os.environ.get("AIROUTER_GLM_KEEP_THINKING") == "1":
+        return body
+    try:
+        from anthropic_capabilities import unsupported_fields
+    except Exception:
+        return body
+    if req_model and "thinking" not in unsupported_fields(req_model):
+        return body
+    try:
+        d = json.loads(body)
+    except Exception:
+        return body
+    if not isinstance(d, dict) or "thinking" not in d:
+        return body
+    d.pop("thinking")
+    if log_fn:
+        log_fn(f"GLM strip thinking: {req_model} non supporta il campo, rimosso")
+    return json.dumps(d).encode()
+
+
 def set_body_model(body: bytes, model: str) -> bytes:
     """Riscrive il campo 'model' nel body JSON della richiesta in uscita verso
     z.ai. Necessario perché z.ai onora il campo 'model' della request per

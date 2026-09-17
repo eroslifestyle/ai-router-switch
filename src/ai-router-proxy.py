@@ -882,6 +882,7 @@ async def handle(request):
             # il modello scelto qui e usa il proprio default (vedi docstring di
             # set_body_model). forward_glm non riscrive il body: lo fa il caller.
             _glm_body = strip_thinking_blocks(body)
+            _glm_body = _glm_mod.strip_thinking_for_model(_glm_body, _req_model, log_fn=log)
             _glm_body = _glm_mod.set_body_model(_glm_body, _glm_model)
             up = await _glm_mod.forward_glm(request, _glm_body, session,
                                             _req_model or _glm_model, log_fn=log,
