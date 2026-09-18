@@ -44,6 +44,7 @@ from context_rewrite import rewrite_for_context
 from context_alert import notify_context_threshold
 from sse_utils import _sse_events_from_message, _send_sse_message
 from anthropic_body import strip_thinking_blocks
+from anthropic_capabilities import strip_thinking_for_model
 # A livello di modulo di proposito: importarla dentro handle() renderebbe il nome
 # LOCALE all'intera funzione e il primo uso, che sta piu' in alto, solleverebbe
 # UnboundLocalError. E' gia' successo con get_safe_input_limit (vedi il commento
@@ -882,7 +883,7 @@ async def handle(request):
             # il modello scelto qui e usa il proprio default (vedi docstring di
             # set_body_model). forward_glm non riscrive il body: lo fa il caller.
             _glm_body = strip_thinking_blocks(body)
-            _glm_body = _glm_mod.strip_thinking_for_model(_glm_body, _req_model, log_fn=log)
+            _glm_body = _glm_mod.strip_thinking_for_model(_glm_body, _req_model, log_fn=log, backend="GLM")
             _glm_body = _glm_mod.set_body_model(_glm_body, _glm_model)
             up = await _glm_mod.forward_glm(request, _glm_body, session,
                                             _req_model or _glm_model, log_fn=log,
@@ -906,6 +907,7 @@ async def handle(request):
             # L'upstream Model Studio onora il campo "model" del BODY (come z.ai):
             # senza set_body_model userebbe il proprio default ignorando la rotta.
             _qwen_body = strip_thinking_blocks(body)
+            _qwen_body = strip_thinking_for_model(_qwen_body, _req_model, log_fn=log, backend="qwen")
             _qwen_body = _qwen_mod.set_body_model(_qwen_body, _qwen_model)
             up = await _qwen_mod.forward_qwen(request, _qwen_body, session,
                                               _req_model or _qwen_model, log_fn=log,
@@ -943,6 +945,7 @@ async def handle(request):
                 _local_body = _local_mod.strip_images_with_note(_local_body)
                 _local_body = _local_mod.inject_system_hint(_local_body)
             _local_body = strip_thinking_blocks(_local_body)
+            _local_body = strip_thinking_for_model(_local_body, _req_model, log_fn=log, backend="local")
             _local_body = _local_mod.set_body_model(_local_body, _local_model)
 
             # Trace completo per debug provider local

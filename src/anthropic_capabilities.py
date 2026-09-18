@@ -1,6 +1,7 @@
 """Anthropic model capability detection and request sanitization."""
 
 import json
+import os
 import re
 from typing import Any
 
@@ -199,6 +200,39 @@ def strip_for_model(
         cleaned = {k: v for k, v in body.items() if k not in fields}
         return json.dumps(cleaned).encode()
     return body_bytes
+
+
+def strip_thinking_for_model(body: bytes, req_model: str | None, log_fn=None, backend: str = "") -> bytes:
+    """Toglie il campo top-level `thinking` se il modello RICHIESTO non lo
+    supporta. Vale per qualunque backend terzo a cui il proxy dirotti un body
+    costruito per un modello Anthropic: quei backend onorano il campo anche se
+    il modello richiesto non lo supporta. Caso misurato su z.ai: glm-4.7 con
+    thinking adattivo ereditato da Haiku emette un blocco thinking e impiega
+    ~16 s invece di ~6 s (25.692 richieste nate come Haiku, 73% con thinking,
+    89 ore in 30 giorni). Rimuoverlo replica cio' che Claude Code fa sui
+    provider terzi (omette `thinking`) e cio' che il path Anthropic gia' fa
+    per Haiku. Si preferisce l'omissione perche' e' la forma che il client usa
+    nativamente verso i provider terzi; `{"type":"disabled"}` e' accettato da
+    z.ai (probe 2026-09-17: 200 su glm-5.3, glm-5-turbo, glm-4.7, glm-4.6V)
+    ma non spegne il thinking nativo del modello sui prompt lunghi, quindi non
+    offre alcun vantaggio.
+    Rollback: AIROUTER_KEEP_THINKING=1 (o legacy AIROUTER_GLM_KEEP_THINKING=1).
+    """
+    if os.environ.get("AIROUTER_KEEP_THINKING") == "1" or os.environ.get("AIROUTER_GLM_KEEP_THINKING") == "1":
+        return body
+    if req_model and "thinking" not in unsupported_fields(req_model):
+        return body
+    try:
+        d = json.loads(body)
+    except Exception:
+        return body
+    if not isinstance(d, dict) or "thinking" not in d:
+        return body
+    d.pop("thinking")
+    if log_fn:
+        tag = f"{backend} strip thinking" if backend else "strip thinking"
+        log_fn(f"{tag}: {req_model} non supporta il campo, rimosso")
+    return json.dumps(d).encode()
 
 
 def prepare_body(

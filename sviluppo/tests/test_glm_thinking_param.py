@@ -3,6 +3,7 @@ sys.path.insert(0, 'src')
 import json
 
 from glm_backend import strip_thinking_for_model
+from anthropic_capabilities import strip_thinking_for_model as _strip_ac
 
 HAIKU = "claude-haiku-4-5-20251001"
 
@@ -43,3 +44,17 @@ def test_env_keep_thinking_invariato(monkeypatch):
     monkeypatch.setenv("AIROUTER_GLM_KEEP_THINKING", "1")
     body = body_with({"type": "adaptive"})
     assert strip_thinking_for_model(body, HAIKU) == body
+
+
+def test_env_keep_thinking_nuova_invariato(monkeypatch):
+    monkeypatch.setenv("AIROUTER_KEEP_THINKING", "1")
+    body = body_with({"type": "adaptive"})
+    assert strip_thinking_for_model(body, HAIKU) == body
+
+
+def test_import_da_anthropic_capabilities():
+    body = body_with({"type": "adaptive"})
+    d = json.loads(_strip_ac(body, HAIKU))
+    assert "thinking" not in d, f"Atteso thinking assente, ottenuto: {d.get('thinking')}"
+    body_opus = body.replace(HAIKU.encode(), b"claude-opus-5")
+    assert _strip_ac(body_opus, "claude-opus-5") == body_opus
