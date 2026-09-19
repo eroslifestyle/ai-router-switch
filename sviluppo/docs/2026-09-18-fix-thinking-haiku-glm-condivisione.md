@@ -48,7 +48,7 @@ Rimuovere il campo — **non** metterlo a `{"type":"disabled"}` — quando il mo
 ```python
 def strip_thinking_for_model(body: bytes, req_model: str | None, log_fn=None) -> bytes:
     """Toglie il campo top-level `thinking` se il modello RICHIESTO non lo supporta."""
-    if os.environ.get("AIROUTER_GLM_KEEP_THINKING") == "1":   # rollback senza deploy
+    if os.environ.get("AIROUTER_KEEP_THINKING") == "1":   # rollback senza deploy
         return body
     try:
         from anthropic_capabilities import unsupported_fields
@@ -67,6 +67,8 @@ def strip_thinking_for_model(body: bytes, req_model: str | None, log_fn=None) ->
         log_fn(f"GLM strip thinking: {req_model} non supporta il campo, rimosso")
     return json.dumps(d).encode()
 ```
+
+Nel nostro repo la funzione vive ora in `anthropic_capabilities.py` accanto a `unsupported_fields`, ed è chiamata da tutti i rami che dirottano un body Anthropic verso un provider terzo (GLM, qwen, backend locale). I backend che già rimuovevano il campo per conto proprio — MiniMax via la sua lista di campi non supportati, e il path Anthropic via `prepare_body` — non sono stati toccati. Conviene verificare, prima di aggiungere uno strip, se il proprio backend non lo stia già facendo altrove: da noi era il caso per due dei cinque.
 
 Tre dettagli che contano più del codice:
 
@@ -90,29 +92,29 @@ Se le si passa il modello upstream (un nome GLM) la condizione non scatta mai e 
 
 Stesso filtro nelle due finestre: richieste nate come Haiku, atterrate su `glm-4.7`, `status == 200`. PRE = 24 h prima del deploy; POST = dal deploy in poi.
 
-| metrica | PRE (N=854) | POST (N=752) | delta |
+| metrica | PRE (N=854) | POST (N=949) | delta |
 |---|---|---|---|
-| quota risposte con thinking | 50,5% | 40,7% | −9,8 punti |
-| total_ms medio | 16.812 | 11.551 | **−31%** |
-| mediana | 9.115 | 7.407 | −19% |
+| quota risposte con thinking | 50,5% | 41,6% | −8,9 punti |
+| total_ms medio | 16.812 | 11.170 | **−34%** |
+| mediana | 9.115 | 7.287 | −20% |
 | richieste oltre 120 s | 9 (1,1%) | **0** | azzerata |
-| output_tokens medi | 658 | 419 | −36% |
+| output_tokens medi | 658 | 404 | −39% |
 
 Spezzato per sottoinsieme, dove si vede il meccanismo vero:
 
 | | PRE (ms / token) | POST (ms / token) |
 |---|---|---|
-| risposte **con** thinking | 24.345 / 979 | 16.060 / 561 |
-| risposte **senza** thinking | 9.136 / 331 | 8.456 / 322 |
+| risposte **con** thinking | 24.345 / 978 | 15.207 / 517 |
+| risposte **senza** thinking | 9.136 / 331 | 8.291 / 323 |
 
-Le risposte senza thinking non si muovono. Scomponendo i −5.261 ms di media:
+Le risposte senza thinking non si muovono. Scomponendo i −5.642 ms di media:
 
-- **~28%** del guadagno viene dall'aver ridotto il *numero* di richieste che pensano (50,5% → 40,7%);
-- **~72%** viene dall'aver **accorciato quelle che pensano comunque** (24,3 s → 16,1 s, 979 → 561 token).
+- **~24%** del guadagno viene dall'aver ridotto il *numero* di richieste che pensano (50,5% → 41,6%);
+- **~76%** viene dall'aver **accorciato quelle che pensano comunque** (24,3 s → 15,2 s, 978 → 517 token).
 
 Con `adaptive` ereditato, 2 risposte su 3 erano *solo thinking fino a `max_tokens`*: è quella la coda oltre i 120 secondi, ed è la voce che il fix cancella. Descrivere il fix come «GLM penserà di meno» racconta la parte sbagliata del risultato.
 
-Il dato è stabile su campioni diversi: il fast-check su 1 ora dava 11.519 ms di media, il campione da 752 richieste dà 11.551.
+Il dato è stabile su tre campioni crescenti: 11.519 ms di media sul fast-check da 1 ora, 11.551 su un campione intermedio da 752 richieste, 11.170 sulla finestra piena da 949.
 
 ---
 
@@ -135,7 +137,7 @@ Conseguenza pratica: **non inseguire un fix v2 via campo `thinking`**. L'abbiamo
 
 **Il calo di `output_tokens` non è un confondente, e si dimostra.** Il sospetto legittimo è che il POST sia più veloce perché i task erano più facili. Se fosse così, il calo si vedrebbe anche nel sottoinsieme senza thinking — dove invece l'output resta a ~325 token in entrambe le finestre. È thinking non più generato.
 
-**Contate le ore che hanno davvero traffico**, non l'ampiezza della finestra. Il nostro campione POST copriva 9,4 ore di orologio ma solo 3 ore con richieste reali. Spezzate sempre il campione per ora prima di dichiarare un risultato.
+**Contate le ore che hanno davvero traffico**, non l'ampiezza della finestra. Sulla finestra piena di 24 ore del campione POST, solo 6 avevano richieste reali. Spezzate sempre il campione per ora prima di dichiarare un risultato.
 
 ---
 
@@ -163,7 +165,7 @@ GATE — la condizione necessaria è che un client Claude Code invii richieste c
 
 FIX — rimuovere il campo (non metterlo a "disabled") quando il modello RICHIESTO DAL CLIENT non supporta il thinking, chiamando lo strip PRIMA di riscrivere il campo "model" del body e passandogli il modello richiesto, non quello upstream: se gli passi il modello upstream la condizione non scatta mai e il fix è un no-op silenzioso. Prevedi un interruttore di rollback senza deploy e un test che copra entrambi i rami (campo rimosso per il modello di esecuzione, campo intatto per il modello di ragionamento).
 
-RISULTATI ATTESI, dai loro numeri (richieste Haiku → glm-4.7, status 200; PRE 24 h N=854, POST N=752): quota risposte con thinking 50,5% → 40,7%; total_ms medio 16.812 → 11.551 (−31%); mediana 9.115 → 7.407; richieste oltre 120 s da 9 a ZERO; output_tokens medi 658 → 419. Per sottoinsieme: con thinking 24.345 ms/979 token → 16.060/561; senza thinking 9.136/331 → 8.456/322, cioè praticamente fermo. Il ~72% del guadagno viene dall'accorciamento delle risposte che pensano comunque, non dall'averne ridotto il numero: sparivano le risposte di solo thinking che saturavano max_tokens.
+RISULTATI ATTESI, dai loro numeri (richieste Haiku → glm-4.7, status 200; PRE 24 h N=854, POST N=949): quota risposte con thinking 50,5% → 41,6%; total_ms medio 16.812 → 11.170 (−34%); mediana 9.115 → 7.287; richieste oltre 120 s da 9 a ZERO; output_tokens medi 658 → 404. Per sottoinsieme: con thinking 24.345 ms/978 token → 15.207/517; senza thinking 9.136/331 → 8.291/323, cioè praticamente fermo. Il ~76% del guadagno viene dall'accorciamento delle risposte che pensano comunque, non dall'averne ridotto il numero: sparivano le risposte di solo thinking che saturavano max_tokens.
 
 NON ASPETTARTI che la quota di thinking vada a zero: il contatore conta i blocchi nella RISPOSTA, non il campo nella richiesta, e glm-4.7 pensa di suo sui prompt lunghi (3/3 con ~29 KB di contesto e 8 tool, sia a campo omesso sia con "disabled"). Il residuo ~40% è nativo. Non proporre un fix v2 via campo thinking: è già stato provato contro l'API.
 
