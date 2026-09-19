@@ -418,6 +418,12 @@ def glm_max_tokens_limit(model: str | None = None) -> int:
 GLM_SHRINK_TARGET_BYTES = int(os.environ.get(
     "AIROUTER_GLM_CONTEXT_SHRINK_TARGET", "600000"))
 
+# Override dedicato all'esecutore ACT (glm-4.7/glm-5-turbo, 200k token): stringe
+# solo il modello a finestra piccola, lasciando intatto il budget di glm-5.3
+# (1M), che l'unico override globale sopra avrebbe invece compresso per tutti.
+GLM_ACT_SHRINK_TARGET_BYTES = os.environ.get("AIROUTER_GLM_ACT_CONTEXT_SHRINK_TARGET")
+_GLM_ACT_MODELS = {"glm-4.7", "glm-5-turbo"}
+
 
 def glm_shrink_target_for(model: str | None) -> int:
     """Byte oltre i quali comprimere il contesto, per il modello GLM risolto.
@@ -440,9 +446,15 @@ def glm_shrink_target_for(model: str | None) -> int:
 
     ``AIROUTER_GLM_CONTEXT_SHRINK_TARGET`` resta un override esplicito: se e'
     impostato nell'ambiente vince su tutto, com'era prima.
+    ``AIROUTER_GLM_ACT_CONTEXT_SHRINK_TARGET`` stringe solo glm-4.7/glm-5-turbo:
+    esiste perche' la finestra piccola dell'esecutore satura mentre glm-5.3 (il
+    THINK) ha ancora margine, causando risposte troncate a `max_tokens` e il
+    loop-breaker su turni identici (vedi audit sessione 2026-09-19).
     """
     if os.environ.get("AIROUTER_GLM_CONTEXT_SHRINK_TARGET"):
         return GLM_SHRINK_TARGET_BYTES
+    if GLM_ACT_SHRINK_TARGET_BYTES and model in _GLM_ACT_MODELS:
+        return int(GLM_ACT_SHRINK_TARGET_BYTES)
     try:
         from model_context_map import get_safe_input_limit
         from token_counter import bytes_per_token
