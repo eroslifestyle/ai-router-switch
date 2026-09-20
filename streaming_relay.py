@@ -164,6 +164,7 @@ class StreamingRelay:
                 upstream_status=upstream.status,
                 upstream_raw=_raw,
                 upstream_encoding=_enc,
+                sent_body=self.body,  # primi 8KB del payload inviato, mascherato in router_debug (solo 4xx)
                 orig=self.orig, mode=self.mode,
                 category=_category_for_mode(self.mode),
                 note=f"extra_headers={list((extra_headers or {}).keys())} upstream_headers={_diag_headers} url={getattr(upstream, 'url', '')}",

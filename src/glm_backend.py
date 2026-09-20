@@ -480,6 +480,32 @@ def glm_shrink_target_for(model: str | None) -> int:
 GLM_MIN_MAX_TOKENS = int(os.environ.get("AIROUTER_GLM_MIN_MAX_TOKENS", "4096"))
 
 
+def normalize_glm_system(body: bytes, log_fn=None) -> bytes:
+    """Normalizza il campo `system` alla forma accettata da z.ai.
+
+    z.ai rifiuta con 400 [1210] un `system` passato come dict (sonda
+    2026-09-20: dict -> 400 [1210], stringa e lista di blocchi -> 200).
+    Claude Code invia una lista di blocchi o una stringa; un dict non e'
+    mai stato prodotto dal proxy (tutte le scritture di `system` producono
+    str o list), quindi questo e' un difensivo a costo nullo: logga
+    WARNING solo quando corregge davvero.
+    """
+    try:
+        d = json.loads(body)
+    except Exception:
+        return body
+    sysv = d.get("system")
+    if not isinstance(sysv, dict):
+        return body
+    # ponytail: dict -> blocco text unico; basta a coprire il caso 1210
+    d["system"] = [{"type": "text",
+                    "text": json.dumps(sysv, ensure_ascii=False)}]
+    if log_fn:
+        log_fn("WARNING GLM normalize system dict -> lista di blocchi "
+               "(payload rifiutato da z.ai con 400 [1210])")
+    return json.dumps(d).encode()
+
+
 def clamp_glm_max_tokens(body: bytes, log_fn=None, model: str | None = None) -> bytes:
     """Riporta max_tokens dentro [GLM_MIN_MAX_TOKENS, glm_max_tokens_limit(model)].
 
@@ -493,8 +519,33 @@ def clamp_glm_max_tokens(body: bytes, log_fn=None, model: str | None = None) -> 
     except Exception:
         return body
     mt = d.get("max_tokens")
-    if not isinstance(mt, int):
-        return body
+    # FIX 400 [1210] (2026-09-20): float e stringhe passavano il vecchio
+    # `isinstance(mt, int)` e arrivavano a z.ai tali e quali -> 400 [1210].
+    # Ora ogni valore non-intero valido viene forzato a int con WARNING.
+    changed = False
+    if isinstance(mt, bool):
+        mt = None
+    elif isinstance(mt, float):
+        _mt_int = int(mt)
+        log_fn and log_fn(f"WARNING GLM normalize max_tokens float {mt} -> {_mt_int}")
+        mt = _mt_int
+        changed = True
+    elif isinstance(mt, str):
+        try:
+            _mt_int = int(float(mt))
+            log_fn and log_fn(f"WARNING GLM normalize max_tokens string {mt!r} -> {_mt_int}")
+            mt = _mt_int
+            changed = True
+        except ValueError:
+            mt = None
+    if mt is None:
+        log_fn and log_fn(f"WARNING GLM normalize max_tokens assente/non numerico "
+                          f"({d.get('max_tokens')!r}) -> {glm_max_tokens_limit(model or d.get('model'))}")
+        mt = glm_max_tokens_limit(model or d.get("model"))
+        d["max_tokens"] = mt
+        changed = True
+    else:
+        d["max_tokens"] = mt
     limite = glm_max_tokens_limit(model or d.get("model"))
     if mt > limite:
         d["max_tokens"] = limite
@@ -506,6 +557,8 @@ def clamp_glm_max_tokens(body: bytes, log_fn=None, model: str | None = None) -> 
         if log_fn:
             log_fn(f"GLM max_tokens innalzato {mt} -> {GLM_MIN_MAX_TOKENS} "
                    f"(sotto il minimo il budget si esaurisce nel thinking)")
+        return json.dumps(d).encode()
+    if changed:
         return json.dumps(d).encode()
     return body
 
@@ -566,6 +619,79 @@ def _glm_is_empty(decompressed: bytes) -> bool:
     return int(toks[-1]) == 0
 
 
+_THINKING_BLOCK_TYPES = ("thinking", "redacted_thinking")
+
+
+def sanitize_glm_messages(body: bytes, log_fn=None) -> bytes:
+    """Sanitizza `messages` del body verso z.ai (400 [1210] difensivo).
+
+    Percorre i content-block di ogni messaggio e:
+    - elimina i blocchi `thinking`/`redacted_thinking` (signature Anthropic);
+    - elimina il campo `signature` residuo da qualunque blocco;
+    - rimuove i messaggi rimasti con content vuoto (lista/stringa vuota);
+    - fonde messaggi consecutivi con lo stesso ruolo (concatenando i blocchi).
+
+    Tollerante ai malformati (content stringa o lista, blocchi senza `type`,
+    body non-JSON): non solleva MAI — un'eccezione qui bloccherebbe ogni
+    richiesta del router. Sul traffico sonda z.ai (2026-09-20) i blocchi
+    thinking passano da soli: questa funzione copre le cause candidate in
+    attesa che il body catturato sui 4xx dimostri quella reale.
+    """
+    try:
+        d = json.loads(body)
+        if not isinstance(d, dict):
+            return body
+        msgs = d.get("messages")
+        if not isinstance(msgs, list):
+            return body
+        changed = False
+        cleaned: list = []
+        for msg in msgs:
+            if not isinstance(msg, dict):
+                cleaned.append(msg)
+                continue
+            c = msg.get("content")
+            if isinstance(c, list):
+                new_blocks = []
+                for b in c:
+                    if isinstance(b, dict):
+                        if b.get("type") in _THINKING_BLOCK_TYPES:
+                            changed = True
+                            continue
+                        if "signature" in b:
+                            b = {k: v for k, v in b.items() if k != "signature"}
+                            changed = True
+                    new_blocks.append(b)
+                msg["content"] = new_blocks
+            # messaggio vuoto dopo la pulizia -> rimuovi
+            if msg.get("content") in ([], "") or msg.get("content") is None:
+                changed = True
+                continue
+            # fusione consecutivi stesso ruolo
+            if (cleaned and isinstance(cleaned[-1], dict)
+                    and cleaned[-1].get("role") == msg.get("role")):
+                prev = cleaned[-1]
+                pc, mc = prev.get("content"), msg.get("content")
+                if isinstance(pc, str) or isinstance(mc, str):
+                    prev["content"] = (pc if isinstance(pc, str) else json.dumps(pc)) + \
+                                      (mc if isinstance(mc, str) else json.dumps(mc))
+                elif isinstance(pc, list) and isinstance(mc, list):
+                    prev["content"] = pc + mc
+                else:
+                    prev["content"] = mc
+                changed = True
+                continue
+            cleaned.append(msg)
+        if changed:
+            d["messages"] = cleaned
+            if log_fn:
+                log_fn(f"GLM messages sanitizzati: {len(msgs)} -> {len(cleaned)}")
+            return json.dumps(d).encode()
+        return body
+    except Exception:
+        return body
+
+
 async def forward_glm(request, body: bytes, session, model: str,
                       log_fn=print, passthrough: bool = False,
                       upstream_model: str = ""):
@@ -600,6 +726,14 @@ async def forward_glm(request, body: bytes, session, model: str,
     # ISOLAMENTO TOOL (2026-07-19): choke-point unico, vedi tool_isolation.py.
     body = tool_isolation.filter_tools_for_backend(body, "glm")
     body = tool_isolation.strip_heavy_mcp_for_glm(body)
+
+    # SANITIZZAZIONE MESSAGES (2026-09-20): thinking/signature/content-vuoti/
+    # ruoli consecutivi verso z.ai — vedi sanitize_glm_messages.
+    body = sanitize_glm_messages(body, log_fn=log_fn)
+
+    # NORMALIZZAZIONE DIFENSIVA (2026-09-20): system dict e max_tokens float/
+    # stringa sono le uniche forme che riproducono il 400 [1210] di z.ai.
+    body = normalize_glm_system(body, log_fn=log_fn)
 
     # CLAMP max_tokens (2026-07-22): z.ai rifiuta i valori oltre il tetto del modello
     # con 400 [1210]. Choke-point unico → copre pure glm + mix-ag + mix-gm

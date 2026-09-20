@@ -298,12 +298,28 @@ class DebugLogger:
         except Exception as e:
             self._debug_err(f"_write_last_request failed: {e}")
 
+    # ── Masking ───────────────────────────────────────────────────────────────
+    @staticmethod
+    def _mask_secrets(text: str) -> str:
+        """Maschera API key/token nel body inviato (mai segreti nei log)."""
+        import re as _re
+        try:
+            text = _re.sub(r'(?i)(authorization\s*:\s*bearer\s+)\S+', r'\1***', text)
+            text = _re.sub(r'(?i)(x-api-key\s*:\s*)\S+', r'\1***', text)
+            text = _re.sub(r'(?i)(api[_-]?key"\s*:\s*")[^"]+', r'\1***', text)
+            # qualunque stringa che sembri una chiave lunga esadecimale/base64
+            text = _re.sub(r'\b[0-9a-f]{32,}\b', '***', text)
+            return text
+        except Exception:
+            return text
+
     # ── Main capture ─────────────────────────────────────────────────────────
     def capture(self, *, kind: str, request=None, fp: str = "",
                 client_model: str = "", upstream_model: str = "",
                 status: int | None = None, stage: str = "",
                 upstream_status: int | None = None, upstream_raw: bytes = b"",
                 upstream_encoding: str = "", sent_bytes: int = 0,
+                sent_body: bytes = b"",
                 orig: dict | None = None, sent_analysis: dict | None = None,
                 note: str = "", mode: str = None, severity: str = "error",
                 category: str = None, synthetic: bool = False,
@@ -334,6 +350,9 @@ class DebugLogger:
                 "upstream_status": upstream_status,
                 "upstream_error": err_text[:2000],
                 "sent_bytes": sent_bytes,
+                "sent_body": (self._mask_secrets(
+                    sent_body[:8192].decode("utf-8", errors="replace"))
+                    if status is not None and 400 <= status < 500 else ""),
                 "sent_analysis": sent_analysis, "flags": flags, "note": note,
             }
 
