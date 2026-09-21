@@ -88,17 +88,24 @@ def is_qwen_branded_tool(t: dict) -> bool:
 
 
 # Prefissi/nomi dei connettori claude.ai orientati a produttivita' personale
-# (Gmail/Calendar/Drive/Canva): pesano da soli decine di migliaia di token di
-# schema per richiesta (misurato 2026-08-22: 40K/req di soli tool MCP su GLM,
-# 48% del contesto processato) e non servono al ruolo ACT/coding che GLM copre
-# nel router. A differenza dei tool brandizzati di un provider AI, questi non
-# sono MAI necessari a GLM per eseguire codice; il filtro e' quindi opt-out
-# (env AIROUTER_GLM_MCP_FILTER=0) e non tocca gli altri backend.
+# (Gmail/Calendar/Drive/Canva) e di mcp-video (~230 tool): pesano da soli
+# decine di migliaia di token di schema per richiesta (misurato 2026-08-22:
+# 40K/req di soli tool MCP su GLM, 48% del contesto processato) e non servono
+# al ruolo ACT/coding che GLM copre nel router. A differenza dei tool
+# brandizzati di un provider AI, questi non sono MAI necessari a GLM per
+# eseguire codice; il filtro e' quindi opt-out (env AIROUTER_GLM_MCP_FILTER=0)
+# e non tocca gli altri backend.
+# mcp-video non era in questa lista: con l'MCP caricato, ogni richiesta GLM
+# (es. mix-ag-2) portava ~230 schemi di tool video non pertinenti, che da soli
+# saturavano la cattura debug di 8KB prima di arrivare a system/max_tokens e
+# che z.ai rifiutava con 400 [1210] senza indicare il campo colpevole
+# (request_id 20260922032302f7fefc4ff1644ef9, sessione 2026-09-21).
 _HEAVY_PRODUCTIVITY_MCP_PREFIXES = (
     "mcp__claude_ai_gmail__",
     "mcp__claude_ai_google_calendar__",
     "mcp__claude_ai_google_drive__",
     "mcp__claude_ai_canva__",
+    "mcp__mcp-video__",
 )
 
 
