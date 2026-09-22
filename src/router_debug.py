@@ -313,6 +313,46 @@ class DebugLogger:
         except Exception:
             return text
 
+    @staticmethod
+    def _request_shape(orig: dict | None) -> dict:
+        """Shape strutturata del body richiesto, PRIMA del troncamento.
+
+        Da sent_body troncato a 8KB non si arriva mai a tools/max_tokens quando
+        lo system prompt dei subagent supera il cap (400 [1210] del 21-22/09/2026
+        diagnosticati alla cieca per questo). Piccolo per costruzione (~centinaia
+        di byte): nessun contenuto, solo forme e lunghezze.
+        """
+        try:
+            if not isinstance(orig, dict):
+                return {}
+            tools = orig.get("tools") or []
+            names = [t.get("name", "") for t in tools if isinstance(t, dict)][:15]
+            system = orig.get("system")
+            if isinstance(system, str):
+                system_chars = len(system)
+            elif isinstance(system, list):
+                system_chars = sum(len(b.get("text", "")) for b in system
+                                   if isinstance(b, dict))
+            else:
+                system_chars = 0
+            shape = {
+                "model": orig.get("model", ""),
+                "max_tokens": orig.get("max_tokens"),
+                "system_chars": system_chars,
+                "messages_count": len(orig.get("messages", [])),
+                "tools_count": len(tools),
+                "tools_bytes": len(json.dumps(tools, ensure_ascii=False)),
+                "tool_names_sample": names,
+                "has_thinking": bool(orig.get("thinking")),
+                "top_level_keys": sorted(orig.keys()),
+            }
+            tc = orig.get("tool_choice")
+            if isinstance(tc, dict) and tc.get("type"):
+                shape["tool_choice_type"] = tc["type"]
+            return shape
+        except Exception:
+            return {}  # la diagnostica non deve mai far fallire la cattura
+
     # ── Main capture ─────────────────────────────────────────────────────────
     def capture(self, *, kind: str, request=None, fp: str = "",
                 client_model: str = "", upstream_model: str = "",
@@ -338,6 +378,7 @@ class DebugLogger:
                 category = _category_for_mode(mode)
 
             err_text = self._decompress(upstream_raw, upstream_encoding)
+            shape = self._request_shape(orig)
             flags = self._orig_flags(orig)
             ts = self._ts()
 
@@ -354,6 +395,7 @@ class DebugLogger:
                     sent_body[:8192].decode("utf-8", errors="replace"))
                     if status is not None and 400 <= status < 500 else ""),
                 "sent_analysis": sent_analysis, "flags": flags, "note": note,
+                "request_shape": shape,
             }
 
             self.errors.append(record)
