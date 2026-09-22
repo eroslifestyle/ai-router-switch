@@ -192,3 +192,46 @@ def test_strip_heavy_mcp_preserva_cache_control():
     result = json.loads(out).get('tools', [])
     assert len(result) == 1, f"Expected 1 tool, got {len(result)}"
     assert result[0].get('cache_control') == {'type': 'ephemeral'},         f"cache_control should transfer to remaining tool, got {result[0]}"
+
+
+def _tools_over_threshold(extra_schema: str) -> list:
+    """Un MCP fittizio pesante + tool core, oltre GLM_TOOLS_MAX_BYTES."""
+    return [
+        {'name': 'Bash', 'description': 'shell', 'input_schema': {'type': 'object'}},
+        {'name': 'mcp__nuovo-server__tool1', 'description': extra_schema,
+         'input_schema': {'type': 'object'}},
+        {'name': 'mcp__zai__web_search', 'description': 'z', 'input_schema': {'type': 'object'}},
+    ]
+
+
+def test_strip_tools_by_size_fallback_applicato():
+    """Payload sopra soglia: i MCP non-denylist vengono rimossi, core e zai restano."""
+    import os
+    import tool_isolation
+    from tool_isolation import strip_heavy_mcp_for_glm
+    # Soglia artificialmente bassa per il test (evita payload da 200KB)
+    orig_max = os.environ.get('AIROUTER_GLM_TOOLS_MAX_BYTES')
+    os.environ['AIROUTER_GLM_TOOLS_MAX_BYTES'] = '100'
+    try:
+        body = json.dumps({'model': 'glm-4.7',
+                           'tools': _tools_over_threshold('x' * 500),
+                           'messages': []}).encode()
+        out = strip_heavy_mcp_for_glm(body)
+        result = json.loads(out).get('tools', [])
+        names = [t['name'] for t in result]
+        assert names == ['Bash', 'mcp__zai__web_search'], f"Unexpected kept tools: {names}"
+    finally:
+        if orig_max is None:
+            os.environ.pop('AIROUTER_GLM_TOOLS_MAX_BYTES', None)
+        else:
+            os.environ['AIROUTER_GLM_TOOLS_MAX_BYTES'] = orig_max
+
+
+def test_strip_tools_by_size_sotto_soglia_invariato():
+    """Payload sotto soglia: nessuna modifica, anche con MCP non in denylist."""
+    from tool_isolation import strip_heavy_mcp_for_glm
+    body = json.dumps({'model': 'glm-4.7',
+                       'tools': _tools_over_threshold('small'),
+                       'messages': []}).encode()
+    out = strip_heavy_mcp_for_glm(body)
+    assert out == body, "Body under threshold should be unchanged"

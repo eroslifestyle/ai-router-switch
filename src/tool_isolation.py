@@ -369,9 +369,84 @@ def filter_tools_for_backend(body: bytes, backend: str) -> bytes:
 
 
 
+# Fallback per-DIMENSIONE (2026-09-22, root-cause del pattern whack-a-mole dei
+# 400 [1210]): tre volte il fix e' stato "aggiungi il prefisso alla denylist"
+# (Gmail/Canva 2026-08-22, mcp-video 2026-09-21) perche' il payload dei tools
+# superava un limite di z.ai. Il limite e' di DIMENSIONE, non di nomi: qui
+# sotto una soglia di byte, se l'array tools resta troppo grande dopo lo strip
+# per-prefisso si tengono solo i tool core (senza prefisso mcp__) piu'
+# mcp__zai__ (nativo GLM). Soglia: mcp-video da solo (~230 schemi, ~400KB di
+# JSON) causa il 400; i soli tool core di Claude Code stanno sotto ~40KB.
+# 200.000 byte = margine 5x sopra il caso sano, 2x sotto il caso rotto.
+# Override: AIROUTER_GLM_TOOLS_MAX_BYTES.
+GLM_TOOLS_MAX_BYTES = int(os.environ.get("AIROUTER_GLM_TOOLS_MAX_BYTES", "200000"))
+
+
+def _mcp_prefix_of(name: str) -> str | None:
+    """Prefisso server di un tool MCP ('mcp__<server>__'), None se non MCP."""
+    if not name.startswith("mcp__"):
+        return None
+    parts = name.split("__")
+    return "__".join(parts[:2]) + "__" if len(parts) >= 3 else name
+
+
+def strip_tools_by_size_for_glm(body: bytes) -> bytes:
+    """Fallback per-size dopo lo strip per-prefisso: se i `tools` residui
+    superano GLM_TOOLS_MAX_BYTES, rimuove TUTTI i tool MCP di terze parti
+    (qualsiasi `mcp__<server>__` tranne `mcp__zai__`), qualunque sia il nome
+    del server. Logga `heavy_mcp_strip_bysize` con i prefissi distinti rimossi.
+    Riusa demote_foreign_tool_use per gli eventuali riferimenti orfani brandizzati.
+    Override: AIROUTER_GLM_MCP_FILTER=0 disattiva anche questo livello."""
+    if os.environ.get("AIROUTER_GLM_MCP_FILTER", "1") == "0":
+        return body
+    try:
+        data = json.loads(body)
+    except Exception:
+        return body
+    tools = data.get("tools")
+    if not isinstance(tools, list) or not tools:
+        return body
+    size = len(json.dumps(tools))
+    # Soglia letta a runtime: il default e' la costante, l'env override vale subito
+    # (leggere solo a import-time renderebbe il test e l'override env inefficaci).
+    threshold = int(os.environ.get("AIROUTER_GLM_TOOLS_MAX_BYTES", GLM_TOOLS_MAX_BYTES))
+    if size <= threshold:
+        return body
+    kept = [
+        t for t in tools
+        if isinstance(t, dict) and (
+            not (t.get("name") or "").startswith("mcp__")
+            or (t.get("name") or "").startswith("mcp__zai__")
+        )
+    ]
+    if len(kept) == len(tools):
+        return body  # tutti core: il peso non viene dai tool, non toccare
+    removed_prefixes = sorted({
+        p for p in (_mcp_prefix_of(t.get("name") or "") for t in tools if t not in kept)
+        if p
+    })
+    debug_catalog.record_event(
+        severity="info", category="glm", kind="heavy_mcp_strip_bysize",
+        snippet=(f"bytes={size}->{len(json.dumps(kept))} "
+                 f"removed={len(tools) - len(kept)} kept={len(kept)}/{len(tools)} "
+                 f"prefixes={removed_prefixes[:10]}"),
+    )
+    if kept:
+        preserva_cache_control(tools, kept)
+        data["tools"] = kept
+    else:
+        data.pop("tools", None)
+        data.pop("tool_choice", None)
+    sanitize_tool_choice(data)
+    sanitize_defer_loading(data)
+    demote_foreign_tool_use(data, "glm")
+    return json.dumps(data).encode()
+
+
 def strip_heavy_mcp_for_glm(body: bytes) -> bytes:
     """Rimuove dai `tools` i connettori pesanti di produttivita' personale
-    quando il backend e' GLM. Choke-point separato da filter_tools_for_backend
+    quando il backend e' GLM, poi applica il fallback per-DIMENSIONE
+    (strip_tools_by_size_for_glm). Choke-point separato da filter_tools_for_backend
     (che isola solo per BRAND di provider AI, non per peso/pertinenza): questi
     tool non sono brandizzati di nessun provider AI, quindi filter_tools_for_backend
     non li tocca mai. Override: AIROUTER_GLM_MCP_FILTER=0 disattiva il filtro."""
@@ -386,7 +461,9 @@ def strip_heavy_mcp_for_glm(body: bytes) -> bytes:
         return body
     kept = [t for t in tools if not is_heavy_productivity_mcp_tool(t)]
     if len(kept) == len(tools):
-        return body
+        # Nulla rimosso dalla denylist: resta il fallback per-dimensione
+        # (e' il caso del 400 [1210] del 2026-09-22, server MCP nuovo non in lista).
+        return strip_tools_by_size_for_glm(body)
     stripped_names = [t.get("name", "?") for t in tools if t not in kept]
     debug_catalog.record_event(
         severity="info", category="glm", kind="heavy_mcp_strip",
@@ -400,7 +477,9 @@ def strip_heavy_mcp_for_glm(body: bytes) -> bytes:
         data.pop("tool_choice", None)
     sanitize_tool_choice(data)
     sanitize_defer_loading(data)
-    return json.dumps(data).encode()
+    # Secondo livello di difesa: se anche dopo lo strip per-prefisso i tools
+    # superano la soglia di byte, fallback generico per-dimensione.
+    return strip_tools_by_size_for_glm(json.dumps(data).encode())
 
 _TOOL_USE_NAME_AFTER = re.compile(r'"type"\s*:\s*"tool_use"\s*,\s*(?:[^{}]*?,\s*)??"name"\s*:\s*"([^"]+)"')
 _TOOL_USE_NAME_BEFORE = re.compile(r'"name"\s*:\s*"([^"]+)"\s*,\s*(?:[^{}]*?,\s*)??"type"\s*:\s*"tool_use"')
