@@ -114,6 +114,69 @@ def test_blocchi_parallelismo():
     assert pc._blocchi_parallelismo(_sess(), 4000.0) is None
 
 
+def test_chiusura_orfani_subagent_stop():
+    # orfano con stop successivo -> chiuso (stima) al PRIMO stop DOPO il start,
+    # senza mutare end_ts/duration_ms osservati
+    now = 1_000_000.0
+    s = _sess(
+        tool_calls={"t1": {"tool_name": "Agent", "agent_id": "a1",
+                           "start_ts": now - 600}},
+        stops=[{"event": "subagent_stop", "agent_id": "a1", "ts": now - 590},
+               {"event": "subagent_stop", "agent_id": "a1", "ts": now - 580}],
+    )
+    n, fb = pc._chiudi_orfani_stimati(s)
+    assert n == 1 and fb == 0
+    tc = s["tool_calls"]["t1"]
+    assert tc["closed_by"] == "subagent_stop"
+    assert tc["end_ts_stimato"] == now - 590  # primo stop successivo
+    assert tc["duration_ms_stimata"] == 10_000.0
+    assert "end_ts" not in tc and "duration_ms" not in tc  # osservati intatti
+
+    # stop di un agente DIVERSO -> non chiude
+    s1 = _sess(
+        tool_calls={"t1": {"tool_name": "Agent", "agent_id": "a1",
+                           "start_ts": now - 600}},
+        stops=[{"event": "subagent_stop", "agent_id": "altro", "ts": now - 590}],
+    )
+    assert pc._chiudi_orfani_stimati(s1) == (0, 0)
+    assert s1["tool_calls"]["t1"].get("end_ts_stimato") is None
+
+    # orfano SENZA agent_id: fallback stop di sessione, contato a parte
+    s2 = _sess(
+        tool_calls={"t1": {"tool_name": "Bash", "start_ts": now - 600}},
+        stops=[{"event": "subagent_stop", "agent_id": "a1", "ts": now - 590}],
+    )
+    assert pc._chiudi_orfani_stimati(s2) == (1, 1)
+    assert s2["tool_calls"]["t1"]["closed_by"] == "subagent_stop"
+
+    # orfano senza stop successivo -> resta orfano
+    s3 = _sess(
+        tool_calls={"t1": {"tool_name": "Bash", "start_ts": now - 600}},
+        stops=[{"event": "subagent_stop", "agent_id": "a1", "ts": now - 700}],
+    )
+    assert pc._chiudi_orfani_stimati(s3) == (0, 0)
+    assert s3["tool_calls"]["t1"].get("end_ts") is None
+    assert s3["tool_calls"]["t1"].get("end_ts_stimato") is None
+
+    # stop precedente al tool_start -> non chiude
+    s4 = _sess(
+        tool_calls={"t1": {"tool_name": "Bash", "agent_id": "a1",
+                           "start_ts": now - 100}},
+        stops=[{"event": "subagent_stop", "agent_id": "a1", "ts": now - 200}],
+    )
+    assert pc._chiudi_orfani_stimati(s4) == (0, 0)
+    assert s4["tool_calls"]["t1"].get("end_ts") is None
+
+    # tool gia' chiuso normalmente -> intoccato
+    s5 = _sess(
+        tool_calls={"t1": {"tool_name": "Read", "start_ts": now - 50,
+                           "end_ts": now - 40}},
+        stops=[{"event": "subagent_stop", "agent_id": "a1", "ts": now - 30}],
+    )
+    assert pc._chiudi_orfani_stimati(s5) == (0, 0)
+    assert "closed_by" not in s5["tool_calls"]["t1"]
+
+
 if __name__ == "__main__":
     test_percentile()
     test_fantasma_subagent_chiuso()
@@ -121,4 +184,5 @@ if __name__ == "__main__":
     test_attributione_inferenza()
     test_max_idle_gaps_lista_non_statistiche()
     test_blocchi_parallelismo()
-    print("OK: 6/6 test passati")
+    test_chiusura_orfani_subagent_stop()
+    print("OK: 7/7 test passati")

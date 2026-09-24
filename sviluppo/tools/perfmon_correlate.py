@@ -158,6 +158,42 @@ def _aggiungi_proxy(sessions, righe_proxy):
         })
 
 
+def _chiudi_orfani_stimati(s):
+    """Chiusura implicita (STIMA, non muta end_ts/duration_ms osservati): un
+    tool_start senza tool_end con un subagent_stop successivo e' finito (il
+    PostToolUse si e' perso). Se il tool ha agent_id vale solo lo stop di
+    QUELL'agente; per i tool senza agent_id ricade sul primo stop di sessione
+    (contato a parte). Scrive end_ts_stimato/duration_ms_stimata/closed_by."""
+    stop_ts_sessione = sorted(
+        ev.get("ts") for ev in s["subagent_stops"] if ev.get("ts") is not None
+    )
+    stop_per_agente = {}
+    for ev in s["subagent_stops"]:
+        aid, ts = ev.get("agent_id"), ev.get("ts")
+        if aid and ts is not None:
+            stop_per_agente.setdefault(aid, []).append(ts)
+    for tss in stop_per_agente.values():
+        tss.sort()
+    chiusi = chiusi_fallback = 0
+    for tc in s["tool_calls"].values():
+        if tc.get("end_ts") is not None or tc.get("start_ts") is None:
+            continue
+        aid = tc.get("agent_id")
+        if aid:
+            stop = next((t for t in stop_per_agente.get(aid, [])
+                         if t > tc["start_ts"]), None)
+        else:
+            stop = next((t for t in stop_ts_sessione if t > tc["start_ts"]), None)
+            chiusi_fallback += 1 if stop is not None else 0
+        if stop is None:
+            continue
+        tc["end_ts_stimato"] = stop
+        tc["duration_ms_stimata"] = round((stop - tc["start_ts"]) * 1000.0, 1)
+        tc["closed_by"] = "subagent_stop"
+        chiusi += 1
+    return chiusi, chiusi_fallback
+
+
 def _idle_gaps(s):
     """Span SOLO dai tool_call (i proxy_requests vengono dal sidecar a 24h e
     mescolano finestre incompatibili: causavano gap di ore in sessioni di minuti)."""
@@ -280,6 +316,7 @@ def _default_mode():
     now = time.time()
     running_now, stale_calls = [], []
     orphans = {}
+    orfani_stimati = orfani_fallback = 0
     out_sessions = {}
     all_gaps_ms, tot_inf, tot_user, tot_nspieg = [], 0.0, 0.0, 0.0
     calls = []
@@ -292,6 +329,10 @@ def _default_mode():
             aid = ev.get("agent_id")
             if aid:
                 stop_ts[aid] = max(stop_ts.get(aid, 0), ev.get("ts") or 0)
+        # chiusure STIMATE dei fantasmi: campi *_stimato, non toccano i gap
+        n_chiusi_stima, n_chiusi_fb = _chiudi_orfani_stimati(s)
+        orfani_stimati += n_chiusi_stima
+        orfani_fallback += n_chiusi_fb
         gaps = _idle_gaps(s)
         for g in gaps:
             all_gaps_ms.append(g["gap_ms"])
@@ -311,6 +352,8 @@ def _default_mode():
             "by_tool_name": _by_tool_name(s),
             "by_mode_model": _by_mode_model(proxy),
             "n_tool_calls": len(s["tool_calls"]),
+            "n_orfani_chiusi_stima": n_chiusi_stima,
+            "n_orfani_chiusi_fallback_sessione": n_chiusi_fb,
             "parallelismo": par_sess,
             "n_proxy_requests": len(proxy),
             "idle_gaps": gaps[-MAX_IDLE_GAPS:],
@@ -370,7 +413,9 @@ def _default_mode():
         "window": {"from_ts": ts_min, "to_ts": ts_max},
         "running_now": running_now,
         "stale_calls": stale_calls,
-        "orphans": {"by_tool": orphans, "total": sum(orphans.values())},
+        "orphans": {"by_tool": orphans, "total": sum(orphans.values()),
+                    "closed_by_subagent_stop": orfani_stimati,
+                    "closed_by_fallback_sessione": orfani_fallback},
         "calls_schema": CALLS_SCHEMA,
         "parallelismo": par_glob,
         "calls": calls,
