@@ -30,6 +30,9 @@ MAX_IDLE_GAPS = 50
 RUNNING_STALE_SEC = 900
 IDLE_USER_SEC = 120
 MAX_CALLS = 3000
+# due tool_start entro 150ms = stesso turno del modello (tool-call in parallelo)
+BLOCK_WINDOW_MS = 150
+SOGLIA_PARALLELISMO = 1.2
 
 CALLS_SCHEMA = ["ts", "tool", "dur_ms", "agent_type", "session8", "status"]
 
@@ -202,6 +205,37 @@ def _idle_attribution(s):
     return tot_gap_ms, tot_inf, tot_user, tot_nspieg
 
 
+def _blocchi_parallelismo(s, p50_gap_ms):
+    """Raggruppa i tool_start consecutivi entro BLOCK_WINDOW_MS in blocchi paralleli."""
+    starts = sorted(tc["start_ts"] for tc in s["tool_calls"].values()
+                    if tc.get("start_ts") is not None)
+    if not starts:
+        return None
+    taglie = []
+    n = 1
+    for prev, cur in zip(starts, starts[1:]):
+        if (cur - prev) * 1000.0 < BLOCK_WINDOW_MS:
+            n += 1
+        else:
+            taglie.append(n)
+            n = 1
+    taglie.append(n)
+    nb = len(taglie)
+    singoli = sum(1 for t in taglie if t == 1)
+    ist = {}
+    for t in taglie:
+        ist[str(t)] = ist.get(str(t), 0) + 1
+    return {
+        "blocchi": nb,
+        "tool": len(starts),
+        "media_tool_per_blocco": round(len(starts) / nb, 2),
+        "blocchi_singoli": singoli,
+        "pct_singoli": round(100 * singoli / nb, 1),
+        "istogramma": dict(sorted(ist.items(), key=lambda kv: int(kv[0]))),
+        "risparmio_stimato_ms": round(singoli / 2 * (p50_gap_ms or 0)),
+    }
+
+
 def _by_tool_name(s):
     out = {}
     for tc in s["tool_calls"].values():
@@ -261,6 +295,8 @@ def _default_mode():
         gaps = _idle_gaps(s)
         for g in gaps:
             all_gaps_ms.append(g["gap_ms"])
+        p50_gap_sess = _percentile(sorted(g["gap_ms"] for g in gaps), 50)
+        par_sess = _blocchi_parallelismo(s, p50_gap_sess)
         g_tot, g_inf, g_user, g_nsp = _idle_attribution(s)
         tot_inf += g_inf
         tot_user += g_user
@@ -275,6 +311,7 @@ def _default_mode():
             "by_tool_name": _by_tool_name(s),
             "by_mode_model": _by_mode_model(proxy),
             "n_tool_calls": len(s["tool_calls"]),
+            "parallelismo": par_sess,
             "n_proxy_requests": len(proxy),
             "idle_gaps": gaps[-MAX_IDLE_GAPS:],
             "idle_gaps_note": IDLE_GAPS_NOTE,
@@ -321,6 +358,11 @@ def _default_mode():
     stale_calls.sort(key=lambda r: -r["elapsed_sec"])
     calls.sort(key=lambda row: row[0])
     calls = calls[-MAX_CALLS:]
+    p50_gap_g = _percentile(sorted(all_gaps_ms), 50)
+    par_glob = _blocchi_parallelismo(
+        {"tool_calls": {f"g{i}": {"start_ts": c[0]} for i, c in enumerate(calls)}},
+        p50_gap_g,
+    )
 
     aggregato = {
         "generated_at": now,
@@ -330,6 +372,7 @@ def _default_mode():
         "stale_calls": stale_calls,
         "orphans": {"by_tool": orphans, "total": sum(orphans.values())},
         "calls_schema": CALLS_SCHEMA,
+        "parallelismo": par_glob,
         "calls": calls,
         "by_tool_global": {k: _dist(v) for k, v in sorted(by_tool_g.items())},
         "by_agent_global": {k: _dist(v) for k, v in sorted(by_agent_g.items())},

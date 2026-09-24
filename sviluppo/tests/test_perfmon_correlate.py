@@ -95,10 +95,30 @@ def test_max_idle_gaps_lista_non_statistiche():
     assert sum(g["gap_ms"] for g in gaps) > sum(g["gap_ms"] for g in export)
 
 
+def test_blocchi_parallelismo():
+    # 3 tool_start entro 150ms (un blocco da 3) + 1 isolato (blocco da 1)
+    base = 1_000_000.0
+    s = _sess(tool_calls={
+        "a": {"tool_name": "Read", "start_ts": base},
+        "b": {"tool_name": "Edit", "start_ts": base + 0.05},
+        "c": {"tool_name": "Bash", "start_ts": base + 0.12},
+        "d": {"tool_name": "Read", "start_ts": base + 10.0},
+    })
+    par = pc._blocchi_parallelismo(s, p50_gap_ms=4000.0)
+    assert par["blocchi"] == 2, par
+    assert par["istogramma"] == {"3": 1, "1": 1}, par
+    assert par["media_tool_per_blocco"] == 2.0, par
+    # 1 blocco singolo -> 0.5 round-trip eliminati * p50 gap
+    assert par["risparmio_stimato_ms"] == 2000.0, par
+    # nessun tool -> nessun blocco
+    assert pc._blocchi_parallelismo(_sess(), 4000.0) is None
+
+
 if __name__ == "__main__":
     test_percentile()
     test_fantasma_subagent_chiuso()
     test_sessione_proxy_only_idle_vuoto()
     test_attributione_inferenza()
     test_max_idle_gaps_lista_non_statistiche()
-    print("OK: 5/5 test passati")
+    test_blocchi_parallelismo()
+    print("OK: 6/6 test passati")
