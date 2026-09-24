@@ -24,6 +24,37 @@ DEBUG_REPAIR_TRACE = _LOGS_DIR / "debug-repair-trace.json"
 _HEALTH_FILE = _LOGS_DIR / ".router_health.json"
 _DEBUG_ERR_LOG = _LOGS_DIR / "debug-system-errors.log"
 
+# Cap del sent_body nei record 4xx. 8192 era troppo piccolo: nei 400 [1210]
+# del 21-22/09/2026 non arrivavamo mai al campo rifiutato. Default 32KB,
+# configurabile via env; clamp antisano per evitare righe jsonl da megabyte.
+# Costo: righe piu' grandi SOLO sui 4xx (i 2xx non scrivono sent_body).
+_SENT_BODY_DEFAULT_BYTES = 32768
+_SENT_BODY_MIN_BYTES = 1024
+_SENT_BODY_MAX_BYTES = 262144
+
+def _sent_body_cap() -> int:
+    """Cap sent_body da env AIROUTER_DEBUG_SENT_BODY_BYTES, con clamp e fallback."""
+    try:
+        raw = os.environ.get("AIROUTER_DEBUG_SENT_BODY_BYTES", "")
+        val = int(raw)
+    except (ValueError, TypeError):
+        return _SENT_BODY_DEFAULT_BYTES
+    return max(_SENT_BODY_MIN_BYTES, min(_SENT_BODY_MAX_BYTES, val))
+
+# Tipi di content block noti all'API Anthropic. Un tipo fuori da questa lista
+# in un body e' la firma tipica del 400 "Input tag '<x>' does not match any of
+# the expected tags" (47 casi 16-24/09/2026: tool_addition). NON e' un errore
+# in se': di solito e' il client che usa una feature beta. Quando l'API aggiunge
+# tipi, va ampliata QUI (fonte: docs.anthropic.com, tipi visti nei body reali).
+KNOWN_CONTENT_BLOCK_TYPES = frozenset({
+    "text", "image", "document", "thinking", "redacted_thinking",
+    "tool_use", "tool_result", "server_tool_use", "web_search_tool_result",
+    "mcp_tool_use", "mcp_tool_result", "tool_reference",
+    "tool_search_tool_result", "tool_search_tool_search_result",
+    "search_result", "container_upload", "code_execution_tool_result",
+    "bash_code_execution_tool_result", "text_editor_code_execution_tool_result",
+})
+
 # Retrocompat: re-export nomi che router_utils usava
 _DEBUG_LAST_SENT = DEBUG_LAST_SENT  # noqa: F401
 _DEBUG_REPAIR_TRACE = DEBUG_REPAIR_TRACE  # noqa: F401
@@ -307,6 +338,11 @@ class DebugLogger:
             text = _re.sub(r'(?i)(authorization\s*:\s*bearer\s+)\S+', r'\1***', text)
             text = _re.sub(r'(?i)(x-api-key\s*:\s*)\S+', r'\1***', text)
             text = _re.sub(r'(?i)(api[_-]?key"\s*:\s*")[^"]+', r'\1***', text)
+            # chiavi Anthropic esplicite e qualunque prefisso sk- lungo
+            text = _re.sub(r'sk-ant-[A-Za-z0-9_\-]+', '***', text)
+            text = _re.sub(r'\bsk-[A-Za-z0-9_\-]{16,}\b', '***', text)
+            # Bearer generico fuori dall'header authorization
+            text = _re.sub(r'(?i)\bbearer\s+[A-Za-z0-9._\-]{8,}', 'bearer ***', text)
             # qualunque stringa che sembri una chiave lunga esadecimale/base64
             text = _re.sub(r'\b[0-9a-f]{32,}\b', '***', text)
             return text
@@ -346,6 +382,34 @@ class DebugLogger:
                 "has_thinking": bool(orig.get("thinking")),
                 "top_level_keys": sorted(orig.keys()),
             }
+            # Tipi dei content block: la firma dei 400 "Input tag ... does not
+            # match" sta QUA, non nel body troncato. Solo forme e conteggi.
+            block_counts: dict = {}
+            last_role = ""
+            last_block = ""
+            for msg in orig.get("messages", []):
+                if not isinstance(msg, dict):
+                    continue
+                content = msg.get("content")
+                if isinstance(content, str):
+                    block_counts["text"] = block_counts.get("text", 0) + 1
+                elif isinstance(content, list):
+                    for blk in content:
+                        btype = blk.get("type", "") if isinstance(blk, dict) else ""
+                        if btype:
+                            block_counts[btype] = block_counts.get(btype, 0) + 1
+                    if content:
+                        last = content[-1]
+                        last_block = last.get("type", "") if isinstance(last, dict) else ""
+                last_role = msg.get("role", "")
+            shape["content_block_types"] = block_counts
+            shape["unknown_block_types"] = sorted(
+                t for t in block_counts if t not in KNOWN_CONTENT_BLOCK_TYPES)
+            system = orig.get("system")
+            shape["system_blocks"] = len(system) if isinstance(system, list) else 0
+            shape["last_message_role"] = last_role
+            shape["last_block_type"] = last_block
+            shape["stream"] = bool(orig.get("stream"))
             tc = orig.get("tool_choice")
             if isinstance(tc, dict) and tc.get("type"):
                 shape["tool_choice_type"] = tc["type"]
@@ -382,6 +446,27 @@ class DebugLogger:
             flags = self._orig_flags(orig)
             ts = self._ts()
 
+            # Header anthropic-beta del client: mancava nei 400 tool_addition
+            # del 16-24/09/2026 e ha costato 9 giorni di diagnosi.
+            beta = ""
+            client_headers: dict = {}
+            if request is not None:
+                try:
+                    beta = request.headers.get("anthropic-beta", "") or ""
+                except Exception:
+                    beta = ""
+                # Solo header identificativi del client, MAI authorization/
+                # x-api-key/cookie. Best-effort: serve a sapere QUALE client
+                # genera una richiesta malformata (oggi solo il fingerprint).
+                for _hk in ("user-agent", "x-app", "anthropic-version",
+                            "x-claude-code-session-id"):
+                    try:
+                        _hv = request.headers.get(_hk)
+                        if _hv:
+                            client_headers[_hk] = _hv
+                    except Exception:
+                        pass
+
             record = {
                 "ts": ts, "kind": kind, "fp": fp, "mode": mode,
                 "category": category,
@@ -392,10 +477,12 @@ class DebugLogger:
                 "upstream_error": err_text[:2000],
                 "sent_bytes": sent_bytes,
                 "sent_body": (self._mask_secrets(
-                    sent_body[:8192].decode("utf-8", errors="replace"))
+                    sent_body[:_sent_body_cap()].decode("utf-8", errors="replace"))
                     if status is not None and 400 <= status < 500 else ""),
                 "sent_analysis": sent_analysis, "flags": flags, "note": note,
                 "request_shape": shape,
+                "beta": beta,
+                "client_headers": client_headers,
             }
 
             self.errors.append(record)

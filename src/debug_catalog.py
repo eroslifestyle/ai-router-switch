@@ -38,6 +38,18 @@ SNIPPET_MAX_CHARS = 300
 # inquinando proprio la metrica degli errori che servono a osservare.
 VALID_SEVERITIES = ("bug", "block", "error", "info")
 
+# Marker di disconnessione del CLIENT (non errori del router). "Cannot write
+# to closing transport" e simili: e' il client che chiude lo stream
+# (verificato: client_closing=True nei log). Erano severity=error nel catalogo
+# (glm 50, local 26, qwen 2) e gonfiavano le statistiche nascondendo gli errori
+# veri. E' un EFFETTO, non una causa: se questi eventi crescono, va guardato
+# il TTFB, non l'upstream.
+CLIENT_DISCONNECT_MARKERS = (
+    "Cannot write to closing transport", "ClientConnectionResetError",
+    "ConnectionResetError", "Connection reset by peer",
+    "CancelledError", "Response payload is not completed",
+)
+
 _catalog_cache = {"data": None, "ts": 0}
 _CACHE_TTL_SEC = 5
 
@@ -127,6 +139,13 @@ def record_event(*, severity: str, category: str, kind: str, chat_fp: str = "",
     """
     if severity not in VALID_SEVERITIES:
         severity = "error"
+    # Riclassificazione disconnessioni client (perche': commento su
+    # CLIENT_DISCONNECT_MARKERS, a livello modulo).
+    if kind == "forward_exception" and severity == "error":
+        _haystack = (snippet or "") + " " + str(detail or "")
+        if any(_m in _haystack for _m in CLIENT_DISCONNECT_MARKERS):
+            kind = "client_disconnect"
+            severity = "info"
     # Offset esplicito, non "Z": il formato precedente stampava l'ora LOCALE con
     # il suffisso che significa UTC (2 h di scarto in CEST), e chi leggeva il
     # catalogo confrontava orari falsi. Si usa %z invece di convertire in UTC per

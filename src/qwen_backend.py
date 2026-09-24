@@ -17,6 +17,7 @@ I servizi nativi non-Anthropic (immagini, video, TTS, ASR, musica, embeddings,
 rerank) vivono in `qwen_generative.py`.
 """
 import asyncio
+import hashlib
 import json
 import os
 import random
@@ -147,6 +148,42 @@ async def get_qwen_key() -> str:
     return await secrets_provider.get_secret_async(
         "qwen.api_key", extra_env=("QWEN_API_KEY", "DASHSCOPE_API_KEY"),
     )
+
+
+# Cooldown anti-retry-storm su 401/403: la credenziale rifiutata e' permanente,
+# ritentare non risolve nulla e rischia un ban lato provider (2026-09-24).
+QWEN_AUTH_COOLDOWN_SEC = 60
+_qwen_auth_reject: dict[str, float] = {}  # hash chiave -> timestamp del rifiuto
+
+
+def _key_fingerprint(key: str) -> str:
+    # Hash della chiave per confrontarla senza mai manipolarne il valore.
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+def qwen_key_source_hint(key: str) -> str:
+    """Nome della sorgente PIU PROBABILE della chiave (nessun valore in log).
+
+    secrets_provider non espone quale sorgente ha vinto (ponytail: no API nuova),
+    quindi si deduce solo dai nomi env effettivamente impostati; se nessuna env
+    c'e', la chiave viene dalla catena .env/script/keyring.
+    """
+    found = [v for v in ("QWEN_API_KEY", "DASHSCOPE_API_KEY") if os.environ.get(v)]
+    if found:
+        return f"env {found[0]}"
+    return "catena secrets_provider (.env/script/keyring)"
+
+
+def qwen_auth_is_cooling_down(key: str, now: float) -> bool:
+    """True se questa chiave e' stata rifiutata da meno di QWEN_AUTH_COOLDOWN_SEC."""
+    ts = _qwen_auth_reject.get(_key_fingerprint(key))
+    return ts is not None and (now - ts) < QWEN_AUTH_COOLDOWN_SEC
+
+
+def qwen_auth_mark_rejected(key: str, now: float) -> None:
+    """Marca la chiave come rifiutata; scade da sola (cooldown) o al cambio chiave."""
+    _qwen_auth_reject.clear()  # una sola entry attiva: la chiave corrente
+    _qwen_auth_reject[_key_fingerprint(key)] = now
 
 
 async def get_qwen_workspace() -> str:
@@ -456,6 +493,12 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
 
     url = (await qwen_upstream()) + request.path_qs
 
+    # Cooldown anti-retry-storm: un 401/403 e' permanente, non si risolve ritentando.
+    if qwen_auth_is_cooling_down(key, time.time()):
+        log_fn("[qwen] credenziale in cooldown: rifiuto immediato senza contattare l'upstream")
+        return _err(401, "invalid_api_key",
+                    "qwen: credenziale rifiutata dall'upstream (cooldown attivo)")
+
     for attempt in range(2):
         resp = None
         try:
@@ -523,6 +566,26 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
                 return _err(429, "rate_limit_error",
                             f"qwen rate limit persistente dopo 2 tentativi (model={lim_model})",
                             headers={"Retry-After": _retry_after} if _retry_after else None)
+
+            if resp.status in (401, 403):
+                # Credenziale rifiutata: log azionabile (niente frammenti di chiave)
+                # + cooldown, cosi' il burst del client non martella l'upstream.
+                qwen_auth_mark_rejected(key, time.time())
+                log_fn(
+                    f"[qwen] {resp.status} dall'upstream: credenziale rifiutata "
+                    f"(sorgente: {qwen_key_source_hint(key)}) — rinnova il segreto "
+                    f"qwen.api_key (keyring ai-router-switch) e riavvia il servizio. "
+                    f"Cooldown {QWEN_AUTH_COOLDOWN_SEC}s attivo."
+                )
+                debug_catalog.record_event(severity="block", category="qwen",
+                                           kind="qwen_auth_rejected", code=resp.status,
+                                           snippet=f"status={resp.status}")
+                if passthrough:
+                    return _err(resp.status, "invalid_api_key",
+                                "qwen: credenziale rifiutata dall'upstream")
+                return _err(resp.status, "invalid_api_key",
+                            "qwen: credenziale rifiutata dall'upstream — "
+                            "rinnova qwen.api_key e riavvia il servizio")
 
             if resp.status >= 500 and attempt == 0:
                 debug_catalog.record_event(
