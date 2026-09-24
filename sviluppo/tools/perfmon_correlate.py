@@ -11,6 +11,7 @@ ponytail: riuso deliberato delle funzioni "private" di airouter_info (stessa
 cartella tools/) per non duplicare ~100 righe di gestione rotazioni sidecar.
 """
 import json
+import math
 import os
 import sys
 import time
@@ -26,6 +27,11 @@ import airouter_info  # noqa: E402  (riuso lettura sidecar con rotazioni)
 
 RUNNING_THRESHOLD_SEC = 5
 MAX_IDLE_GAPS = 50
+RUNNING_STALE_SEC = 900
+IDLE_USER_SEC = 120
+MAX_CALLS = 3000
+
+CALLS_SCHEMA = ["ts", "tool", "dur_ms", "agent_type", "session8", "status"]
 
 IDLE_GAPS_NOTE = (
     "stima indiretta della latenza fra eventi (handoff fra modelli diversi O "
@@ -36,10 +42,13 @@ IDLE_GAPS_NOTE = (
 
 
 def _percentile(values_sorted, p):
+    """Nearest-rank: ceil(p/100*n)-1, clampato."""
     if not values_sorted:
         return None
-    idx = min(len(values_sorted) - 1, int(p / 100 * len(values_sorted)))
-    return values_sorted[idx]
+    if p <= 0:
+        return values_sorted[0]
+    idx = math.ceil(p / 100 * len(values_sorted)) - 1
+    return values_sorted[max(0, min(len(values_sorted) - 1, idx))]
 
 
 def _dist(values):
@@ -147,14 +156,13 @@ def _aggiungi_proxy(sessions, righe_proxy):
 
 
 def _idle_gaps(s):
-    spans = []
-    for tc in s["tool_calls"].values():
-        spans.append((tc.get("start_ts"), tc.get("end_ts")))
-    for pr in s.get("proxy_requests", []):
-        total = pr.get("total_ms")
-        end = pr["ts"] + total / 1000.0 if (pr.get("ts") is not None and total is not None) else None
-        spans.append((pr.get("ts"), end))
+    """Span SOLO dai tool_call (i proxy_requests vengono dal sidecar a 24h e
+    mescolano finestre incompatibili: causavano gap di ore in sessioni di minuti)."""
+    spans = [(tc.get("start_ts"), tc.get("end_ts"))
+             for tc in s["tool_calls"].values()]
     spans = [sp for sp in spans if sp[0] is not None]
+    if not spans:
+        return []
     spans.sort(key=lambda sp: sp[0])
     gaps = []
     for (_, e1), (s2, _e2) in zip(spans, spans[1:]):
@@ -163,7 +171,35 @@ def _idle_gaps(s):
         gap_ms = (s2 - e1) * 1000.0
         if gap_ms > 0:
             gaps.append({"from_ts": e1, "to_ts": s2, "gap_ms": round(gap_ms, 1)})
-    return gaps[-MAX_IDLE_GAPS:]
+    return gaps
+
+
+def _idle_attribution(s):
+    """Sovrappone ogni gap con gli intervalli di inferenza delle proxy_requests
+    della STESSA sessione: gap = [t0,t1], inferenza = [pr.ts, pr.ts + total_ms/1000]."""
+    gaps = _idle_gaps(s)
+    inferenze = []
+    for pr in s.get("proxy_requests", []):
+        ts, total = pr.get("ts"), pr.get("total_ms")
+        if ts is not None and total is not None:
+            inferenze.append((ts, ts + total / 1000.0))
+    tot_gap_ms = tot_inf = tot_user = tot_nspieg = 0.0
+    for g in gaps:
+        t0, t1, g_ms = g["from_ts"], g["to_ts"], g["gap_ms"]
+        inf_ms = 0.0
+        for i0, i1 in inferenze:
+            ov = min(t1, i1) - max(t0, i0)
+            if ov > 0:
+                inf_ms += ov * 1000.0
+        inf_ms = min(inf_ms, g_ms)  # sovrappizioni multiple non superano il gap
+        resto = g_ms - inf_ms
+        tot_gap_ms += g_ms
+        tot_inf += inf_ms
+        if resto > IDLE_USER_SEC * 1000:
+            tot_user += resto
+        else:
+            tot_nspieg += resto
+    return tot_gap_ms, tot_inf, tot_user, tot_nspieg
 
 
 def _by_tool_name(s):
@@ -208,42 +244,109 @@ def _default_mode():
     _aggiungi_proxy(sessions, righe_proxy)
 
     now = time.time()
-    running_now = []
+    running_now, stale_calls = [], []
+    orphans = {}
     out_sessions = {}
+    all_gaps_ms, tot_inf, tot_user, tot_nspieg = [], 0.0, 0.0, 0.0
+    calls = []
+    by_tool_g, by_agent_g = {}, {}
+    ts_min, ts_max = None, None
     for sid, s in sessions.items():
-        for tuid, tc in s["tool_calls"].items():
-            if tc.get("start_ts") is not None and tc.get("end_ts") is None \
-                    and now - tc["start_ts"] > RUNNING_THRESHOLD_SEC:
-                running_now.append({
-                    "session_id": sid,
-                    "tool_use_id": tuid,
-                    "tool_name": tc.get("tool_name"),
-                    "agent_type": tc.get("agent_type"),
-                    "elapsed_sec": round(now - tc["start_ts"], 1),
-                })
-        running_now.sort(key=lambda r: -r["elapsed_sec"])
+        # agent_id chiusi: subagent_stop successivo al tool_start => fantasmi
+        stop_ts = {}
+        for ev in s["subagent_stops"]:
+            aid = ev.get("agent_id")
+            if aid:
+                stop_ts[aid] = max(stop_ts.get(aid, 0), ev.get("ts") or 0)
+        gaps = _idle_gaps(s)
+        for g in gaps:
+            all_gaps_ms.append(g["gap_ms"])
+        g_tot, g_inf, g_user, g_nsp = _idle_attribution(s)
+        tot_inf += g_inf
+        tot_user += g_user
+        tot_nspieg += g_nsp
+        for ev in s["tool_calls"].values():
+            if ev.get("ts") is not None:
+                lo = ev["ts"] if ts_min is None else min(ts_min, ev["ts"])
+                ts_min = lo
+                ts_max = ev["ts"] if ts_max is None else max(ts_max, ev["ts"])
         proxy = s.get("proxy_requests", [])
         out_sessions[sid] = {
             "by_tool_name": _by_tool_name(s),
             "by_mode_model": _by_mode_model(proxy),
             "n_tool_calls": len(s["tool_calls"]),
             "n_proxy_requests": len(proxy),
-            "idle_gaps": _idle_gaps(s),
+            "idle_gaps": gaps[-MAX_IDLE_GAPS:],
             "idle_gaps_note": IDLE_GAPS_NOTE,
             "hook_errors": s["hook_errors"],
             "subagent_stops": s["subagent_stops"],
         }
+        for tuid, tc in s["tool_calls"].items():
+            # orfani: tool-call senza tool_end (bias di sopravvivenza nelle stats)
+            if tc.get("end_ts") is None and tc.get("start_ts") is not None:
+                name = tc.get("tool_name") or "?"
+                orphans[name] = orphans.get(name, 0) + 1
+            if tc.get("end_ts") is None or tc.get("duration_ms") is None:
+                continue
+            # calls grezze per filtri UI + dist globali
+            atype = tc.get("agent_type") or "main"
+            calls.append([tc["start_ts"], tc.get("tool_name"), tc.get("duration_ms"),
+                          atype, sid[:8], tc.get("status")])
+            by_tool_g.setdefault(tc.get("tool_name"), []).append(tc["duration_ms"])
+            by_agent_g.setdefault(atype, []).append(tc["duration_ms"])
+            ts_max = tc["end_ts"] if (tc["end_ts"] or 0) > (ts_max or 0) else ts_max
+        for tuid, tc in s["tool_calls"].items():
+            if tc.get("start_ts") is None or tc.get("end_ts") is not None:
+                continue
+            elapsed = now - tc["start_ts"]
+            if elapsed <= RUNNING_THRESHOLD_SEC:
+                continue
+            rec = {
+                "session_id": sid,
+                "tool_use_id": tuid,
+                "tool_name": tc.get("tool_name"),
+                "agent_type": tc.get("agent_type"),
+                "elapsed_sec": round(elapsed, 1),
+            }
+            aid = tc.get("agent_id")
+            if aid and aid in stop_ts and stop_ts[aid] > tc["start_ts"]:
+                rec["motivo"] = "subagent_chiuso"
+                stale_calls.append(rec)
+            elif elapsed > RUNNING_STALE_SEC:
+                rec["motivo"] = "troppo_vecchio"
+                stale_calls.append(rec)
+            else:
+                running_now.append(rec)
     running_now.sort(key=lambda r: -r["elapsed_sec"])
+    stale_calls.sort(key=lambda r: -r["elapsed_sec"])
+    calls.sort(key=lambda row: row[0])
+    calls = calls[-MAX_CALLS:]
 
     aggregato = {
         "generated_at": now,
+        "schema": 2,
+        "window": {"from_ts": ts_min, "to_ts": ts_max},
         "running_now": running_now,
+        "stale_calls": stale_calls,
+        "orphans": {"by_tool": orphans, "total": sum(orphans.values())},
+        "calls_schema": CALLS_SCHEMA,
+        "calls": calls,
+        "by_tool_global": {k: _dist(v) for k, v in sorted(by_tool_g.items())},
+        "by_agent_global": {k: _dist(v) for k, v in sorted(by_agent_g.items())},
+        "idle": {
+            "dist": _dist(all_gaps_ms),
+            "somma_ms": round(sum(all_gaps_ms), 1),
+            "inferenza_ms": round(tot_inf, 1),
+            "attesa_utente_ms": round(tot_user, 1),
+            "non_spiegato_ms": round(tot_nspieg, 1),
+        },
         "eventi_scartati": scartate,
         "sessions": out_sessions,
     }
     _scrivi_atomico(AGG_DIR / "latest.json", aggregato)
     print(f"latest.json: {len(out_sessions)} sessioni, "
-          f"{len(running_now)} running_now, {scartate} eventi scartati")
+          f"{len(running_now)} running_now, {len(stale_calls)} stale, "
+          f"{aggregato['orphans']['total']} orfani, {scartate} eventi scartati")
 
 
 def _backfill_mode():
