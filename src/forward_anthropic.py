@@ -183,6 +183,33 @@ class _noop_cm:
         return False
 
 
+def _merge_beta(headers: dict, *flags: str) -> str:
+    """Aggiunge flag a `anthropic-beta` PRESERVANDO quelli del client.
+
+    Sovrascrivere l'header cancellava i beta del CLI: senza il flag dei
+    deferred tools l'API rifiuta i content block `tool_addition` con un 400
+    "Input tag ... does not match any of the expected tags" (47 casi
+    2026-09-16/24). Case-insensitive: il client puo' mandare `Anthropic-Beta`.
+    Ritorna il valore finale, per la diagnostica.
+    """
+    existing = ""
+    for k in list(headers):
+        if k.lower() == "anthropic-beta":
+            existing = headers.pop(k) or ""
+    # Dedup preservando l'ordine: prima i token del client, poi i nostri.
+    seen: set = set()
+    tokens = []
+    for tok in (existing + "," + ",".join(flags)).split(","):
+        tok = tok.strip()
+        if tok and tok.lower() not in seen:
+            seen.add(tok.lower())
+            tokens.append(tok)
+    merged = ",".join(tokens)
+    if merged:
+        headers["anthropic-beta"] = merged
+    return merged
+
+
 async def forward_anthropic(request, body, session):
     """Chiama api.anthropic.com con OAuth subscription Bearer."""
     from router_utils import _repair_message_sequence
@@ -192,13 +219,13 @@ async def forward_anthropic(request, body, session):
     auth = headers.get("Authorization", "") or headers.get("authorization", "")
 
     if auth.startswith("Bearer sk-ant-oat"):
-        headers["anthropic-beta"] = "oauth-2025-04-20"
+        _merge_beta(headers, "oauth-2025-04-20")
     else:
         _reload_oauth_token()
         tok = os.environ.get("ANTHROPIC_OAUTH_TOKEN", "")
         if tok:
             headers["Authorization"] = f"Bearer {tok}"
-            headers["anthropic-beta"] = "oauth-2025-04-20"
+            _merge_beta(headers, "oauth-2025-04-20")
         elif auth:
             pass
 
@@ -227,6 +254,7 @@ async def forward_anthropic(request, body, session):
     # supportano output_config.effort (misurato: -40% di token in uscita) e
     # thinking, i vecchi rispondono 400. In piu' garantisce il marker Claude
     # Code sui modelli che senza di esso rispondono 429 (opus/sonnet).
+    _caps = {}  # il log del 400 vive fuori dal ramo /v1/messages
     if "/v1/messages" in request.path:
         # inject_marker=False: MISURATO il 2026-08-07, iniettare il marker sul
         # traffico del CLI cambia il system prompt e INVALIDA il prompt caching.
@@ -248,12 +276,7 @@ async def forward_anthropic(request, body, session):
         if _allow_cm and _caps.get("has_context_management"):
             # Senza questo beta header l'API risponde 400 "Extra inputs are not
             # permitted": e' la ragione per cui strippare era la scorciatoia.
-            _beta = headers.get("anthropic-beta") or headers.get("Anthropic-Beta") or ""
-            if anthropic_capabilities.BETA_CONTEXT_MANAGEMENT not in _beta:
-                headers.pop("Anthropic-Beta", None)
-                headers["anthropic-beta"] = (
-                    f"{_beta},{anthropic_capabilities.BETA_CONTEXT_MANAGEMENT}"
-                    if _beta else anthropic_capabilities.BETA_CONTEXT_MANAGEMENT)
+            _merge_beta(headers, anthropic_capabilities.BETA_CONTEXT_MANAGEMENT)
         if _caps["stripped"] or _caps["marker_added"]:
             log(f"[caps] {_caps['model']}: stripped={_caps['stripped']} "
                 f"marker_added={_caps['marker_added']}")
@@ -352,7 +375,12 @@ async def forward_anthropic(request, body, session):
             except Exception:
                 raw_err = b""
             await up.release()
-            log(f"[forward_anthropic] 400 body: {_readable_err(raw_err)[:300]}")
+            # 800 char: sotto i 300 si tagliava l'elenco dei tag attesi, cioe'
+            # l'informazione utile per i 400 tipo "Input tag ... does not match".
+            # Beta e modello nella stessa riga: diagnosticare al primo colpo.
+            log(f"[forward_anthropic] 400 body: {_readable_err(raw_err)[:800]} "
+                f"| beta={headers.get('anthropic-beta', '')} "
+                f"model={_caps.get('model', '')}")
             # I marker vivevano qui in una copia che non conteneva "too long",
             # quindi l'errore più frequente di Anthropic, "prompt is too long:
             # N tokens > M maximum", non veniva riconosciuto e il retry senza
@@ -448,13 +476,14 @@ async def forward_anthropic_direct(request, body, session):
     tok = os.environ.get("ANTHROPIC_OAUTH_TOKEN", "")
     if tok:
         headers["Authorization"] = f"Bearer {tok}"
-        headers["anthropic-beta"] = "oauth-2025-04-20"
+        _merge_beta(headers, "oauth-2025-04-20")
     headers.setdefault("anthropic-version", "2023-06-01")
 
     # Whitelist PER MODELLO al posto dello strip cieco: i modelli recenti
     # supportano output_config.effort (misurato: -40% di token in uscita) e
     # thinking, i vecchi rispondono 400. In piu' garantisce il marker Claude
     # Code sui modelli che senza di esso rispondono 429 (opus/sonnet).
+    _caps = {}  # il log del 400 vive fuori dal ramo /v1/messages
     if "/v1/messages" in request.path:
         # inject_marker=False: MISURATO il 2026-08-07, iniettare il marker sul
         # traffico del CLI cambia il system prompt e INVALIDA il prompt caching.
@@ -476,12 +505,7 @@ async def forward_anthropic_direct(request, body, session):
         if _allow_cm and _caps.get("has_context_management"):
             # Senza questo beta header l'API risponde 400 "Extra inputs are not
             # permitted": e' la ragione per cui strippare era la scorciatoia.
-            _beta = headers.get("anthropic-beta") or headers.get("Anthropic-Beta") or ""
-            if anthropic_capabilities.BETA_CONTEXT_MANAGEMENT not in _beta:
-                headers.pop("Anthropic-Beta", None)
-                headers["anthropic-beta"] = (
-                    f"{_beta},{anthropic_capabilities.BETA_CONTEXT_MANAGEMENT}"
-                    if _beta else anthropic_capabilities.BETA_CONTEXT_MANAGEMENT)
+            _merge_beta(headers, anthropic_capabilities.BETA_CONTEXT_MANAGEMENT)
         if _caps["stripped"] or _caps["marker_added"]:
             log(f"[caps] {_caps['model']}: stripped={_caps['stripped']} "
                 f"marker_added={_caps['marker_added']}")

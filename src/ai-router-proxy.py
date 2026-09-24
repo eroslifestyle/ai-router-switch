@@ -724,10 +724,21 @@ async def handle(request):
             pass
 
     session = request.app["session"]
-    orig = None
+
+    # Body parsato PRIMA del relay: `orig` popolato serve a _request_shape di
+    # router_debug — senza, request_shape è sempre {} in debug-events.jsonl e
+    # i 400 si diagnosticano alla cieca (fix 2026-09-24). Il blocco usa solo
+    # `body` e `json`; nessuna delle righe spostate lo ridefinisce.
+    try:
+        _body_dict = json.loads(body)
+        _req_model = (_body_dict.get("model") or "").strip()
+    except Exception:
+        _body_dict, _req_model = None, ""
 
     _relay = StreamingRelay(
-        request=request, body=body, mode=mode, orig=orig,
+        request=request, body=body, mode=mode,
+        # fix 2026-09-24: orig = body parsato; era None e request_shape restava vuoto.
+        orig=_body_dict,
         request_orig_model=_request_orig_model,
         hop_headers=HOP_HEADERS,
         minimax_model=MINIMAX_MODEL,
@@ -745,12 +756,6 @@ async def handle(request):
     # Nuovo dispatch basato su role_routing.resolve_route(): determina il provider
     # e il model_override per la richiesta, poi la inoltra al provider appropriato.
     # Questo blocco ritorna SEMPRE e rende irraggiungibile il codice sottostante.
-    try:
-        _body_dict = json.loads(body)
-        _req_model = (_body_dict.get("model") or "").strip()
-    except Exception:
-        _body_dict, _req_model = None, ""
-
     from role_routing import resolve_effective_route
     try:
         _max_output_for_dispatch = _body_dict.get("max_tokens") if _body_dict else None

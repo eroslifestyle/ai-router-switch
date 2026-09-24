@@ -141,6 +141,12 @@ class StreamingRelay:
         # Per gli errori il body è piccolo e non streaming — lo logghiamo e poi
         # lo mandiamo diretto senza passare dal loop iter_any() (che consumerebbe
         # il body già letto). Il 200 OK prosegue normalmente nel loop streaming.
+        # fix 2026-09-24: memorizza il modello upstream REALE (da final_override,
+        # senza prefisso provider) per la diagnostica: senza, upstream_model era ""
+        # in tutti i record e non si sapeva quale modello reale aveva fallito.
+        self.upstream_model = (final_override.split(":", 1)[1]
+                               if isinstance(final_override, str) and ":" in final_override
+                               else (final_override or ""))
         if upstream.status >= 400 and upstream.status not in {429}:
             try:
                 _raw = await upstream.read()
@@ -160,6 +166,7 @@ class StreamingRelay:
                 kind=f"relay_error_{upstream.status}",
                 request=self.request, fp=chat_fp_for_rewrite,
                 client_model=orig_model or "",
+                upstream_model=getattr(self, "upstream_model", ""),
                 status=upstream.status, stage="relay",
                 upstream_status=upstream.status,
                 upstream_raw=_raw,
