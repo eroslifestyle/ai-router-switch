@@ -19,6 +19,7 @@ Uso:
     airouter-info scritture                       Write vs Edit per modalita'
     airouter-info salute                          router, porte, modalita' attiva
     airouter-info orfani                          simboli src/ mai referenziati
+    airouter-info errori [--giorni N] [--kind K]  classi di errore + profilo request_shape
 """
 import argparse
 import json
@@ -35,6 +36,9 @@ SIDECAR = CONFIG / "logs" / "router-usage.jsonl"
 LOG_ROUTER = CONFIG / "logs" / "ai-router.log"
 LOG_HOOK = CONFIG / "m3" / "hierarchy-violations.jsonl"
 REPO = Path(__file__).resolve().parents[2]
+# router_debug.py scrive in <repo>/logs/, NON in ~/.claude/logs/ (verificato 2026-09-24)
+DEBUG_EVENTS = Path(os.environ.get("AIROUTER_INFO_DEBUG_EVENTS",
+                                   REPO / "logs" / "debug-events.jsonl"))
 
 # Prezzi relativi Anthropic-style: scrivere cache costa 1.25x l'input, leggerla 0.1x.
 PESO_CACHE_WRITE, PESO_CACHE_READ = 1.25, 0.1
@@ -43,6 +47,7 @@ FONTI = {
     "sidecar": (SIDECAR, "una riga per richiesta inoltrata: token, cache, modalita', provider"),
     "log router": (LOG_ROUTER, "righe 'cache:' con i breakpoint, conversioni role=system, shrink"),
     "log hook": (LOG_HOOK, "ogni Edit/Write/Bash osservato: tool, file, esito, motivo"),
+    "eventi debug": (DEBUG_EVENTS, "errori registrati dal router con request_shape della richiesta"),
 }
 
 
@@ -554,6 +559,136 @@ def cmd_orfani(args):
     print("  come qualcos'altro nel repo (close, run, acquire) risulta vivo comunque.")
 
 
+def cmd_errori(args):
+    """Quali errori prendiamo e cosa avevano in comune le richieste che li hanno causati."""
+    if not DEBUG_EVENTS.exists():
+        print("eventi debug assenti:", DEBUG_EVENTS)
+        return
+    taglio = 0.0
+    if getattr(args, "ore", None):
+        taglio = (dt.datetime.now() - dt.timedelta(hours=args.ore)).timestamp()
+    elif args.giorni:
+        taglio = (dt.datetime.now() - dt.timedelta(days=args.giorni)).timestamp()
+    classi = defaultdict(lambda: {"n": 0, "prima": None, "ultima": None, "rec": []})
+    n_letti = n_scartati = n_senza_shape = n_beta_vuota_400 = 0
+    unknown = Counter()
+    tools_sample = Counter()
+
+    def _to_ts(v):
+        """Timestamp numerico da record: accetta float o ISO string (i record
+        reali di debug-events.jsonl usano ISO '2026-09-24T23:59:01')."""
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            try:
+                return dt.datetime.fromisoformat(v).timestamp()
+            except ValueError:
+                return 0.0
+        return 0.0
+
+    def _ts(v):
+        if not v:
+            return "?"
+        if isinstance(v, (int, float)):
+            return dt.datetime.fromtimestamp(v).strftime("%m-%d %H:%M")
+        return str(v)[:16].replace("T", " ")
+
+    with DEBUG_EVENTS.open(encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                d = json.loads(line)
+            except Exception:
+                n_scartati += 1
+                continue
+            if not isinstance(d, dict):
+                n_scartati += 1
+                continue
+            n_letti += 1
+            ts = _to_ts(d.get("ts"))
+            if taglio and ts < taglio:
+                n_letti -= 1
+                continue
+            if args.mode and d.get("mode") != args.mode:
+                n_letti -= 1
+                continue
+            kind = str(d.get("kind") or "?")
+            if args.kind and args.kind not in kind:
+                n_letti -= 1
+                continue
+            # ponytail: chiave di classe grezza ma basta per «che errori prendiamo»
+            chiave = (kind, str(d.get("status") or d.get("upstream_status") or "?"),
+                      str(d.get("mode") or "?"), str(d.get("upstream_model") or "?"))
+            c = classi[chiave]
+            c["n"] += 1
+            if c["prima"] is None or ts < c["prima"]:
+                c["prima"] = ts
+            if c["ultima"] is None or ts > c["ultima"]:
+                c["ultima"] = ts
+            c["rec"].append(d)
+            shape = d.get("request_shape")
+            if not isinstance(shape, dict) or not shape:
+                n_senza_shape += 1
+            else:
+                ubs = shape.get("unknown_block_types")
+                if isinstance(ubs, list):
+                    for u in ubs:
+                        unknown[str(u)] += 1
+                for t in (shape.get("tool_names_sample") or []):
+                    tools_sample[str(t)] += 1
+            status = d.get("status") or d.get("upstream_status")
+            if status == 400 and d.get("beta") in (None, "") \
+                    and "anthropic" in str(d.get("upstream_model") or ""):
+                n_beta_vuota_400 += 1
+
+    print(f"classi di errore — {_finestra(args)} "
+          f"({n_letti} record su {DEBUG_EVENTS.name}, {n_scartati} righe non parsabili scartate)")
+    out = []
+    for chiave, c in sorted(classi.items(), key=lambda kv: -kv[1]["n"]):
+        out.append([chiave[0], chiave[1], chiave[2], chiave[3], f"{c['n']:,}",
+                    _ts(c["prima"]), _ts(c["ultima"])])
+    _tab(["kind", "status", "mode", "upstream_model", "n", "prima", "ultima"], out)
+
+    # Profilo request_shape per le prime 3 classi
+    print("\nprofilo delle richieste (prime 3 classi) — solo record con request_shape:")
+    for chiave, c in sorted(classi.items(), key=lambda kv: -kv[1]["n"])[:3]:
+        shapes = [d.get("request_shape") for d in c["rec"]
+                  if isinstance(d.get("request_shape"), dict) and d.get("request_shape")]
+        if not shapes:
+            print(f"  {chiave[0]} {chiave[1]} {chiave[2]} {chiave[3]}: nessun request_shape "
+                  f"(record piu' vecchi del campo, {c['n']} record senza misura)")
+            continue
+        def med(k):
+            vals = sorted(s[k] for s in shapes if isinstance(s.get(k), (int, float)))
+            return f"{vals[len(vals)//2]:,.0f}" if vals else "assente"
+        print(f"  {chiave[0]} {chiave[1]} {chiave[2]} {chiave[3]} — mediana su {len(shapes)} rec: "
+              f"tools={med('tools_count')} tools_bytes={med('tools_bytes')} "
+              f"system_chars={med('system_chars')} msgs={med('messages_count')}")
+    top_tools = tools_sample.most_common(5)
+    if top_tools:
+        print(f"  tool piu' frequenti nei sample: {', '.join(t for t, _ in top_tools)}")
+
+    # ALLARMI — solo se ci sono
+    allarmi = []
+    if unknown:
+        det = ", ".join(f"{u} x{n}" for u, n in unknown.most_common(5))
+        allarmi.append(f"unknown_block_types presenti (firma dei 400 'Input tag'): {det}")
+    if n_beta_vuota_400:
+        allarmi.append(f"{n_beta_vuota_400} errori 400 verso anthropic con header anthropic-beta VUOTO")
+    if n_senza_shape:
+        allarmi.append(f"{n_senza_shape}/{n_letti} record SENZA request_shape "
+                       f"(record vecchi o 'orig' non popolato da qualche percorso)")
+    if allarmi:
+        print("\n⚠ ALLARMI:")
+        for a in allarmi:
+            print(f"  ⚠ {a}")
+    print("\n  nota: i record scritti prima del 2026-09-24 non hanno request_shape/beta — "
+          "«assente» non e' «misurato 0».")
+    print("  sent_body non viene mai stampato (puo' contenere contenuti): vedi solo le medie qui sopra.")
+
+
 def main():
     ap = argparse.ArgumentParser(prog="airouter-info", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -561,13 +696,15 @@ def main():
     sub = ap.add_subparsers(dest="cmd")
     for nome, fn in (("cache", cmd_cache), ("costo", cmd_costo), ("tool", cmd_tool),
                      ("sprechi", cmd_sprechi), ("scritture", cmd_scritture),
-                     ("salute", cmd_salute), ("orfani", cmd_orfani)):
+                     ("salute", cmd_salute), ("orfani", cmd_orfani), ("errori", cmd_errori)):
         p = sub.add_parser(nome, help=(fn.__doc__ or "").strip().splitlines()[0])
         p.set_defaults(fn=fn)
-        if nome in ("cache", "costo", "sprechi", "tool"):
+        if nome in ("cache", "costo", "sprechi", "tool", "errori"):
             p.add_argument("--giorni", type=int, default=None, help="finestra in giorni")
             p.add_argument("--ore", type=int, default=None, help="finestra in ore (vince su --giorni)")
             p.add_argument("--mode", default=None, help="filtra per modalita' del router")
+        if nome == "errori":
+            p.add_argument("--kind", default=None, help="filtra per kind contenente questa stringa")
     args = ap.parse_args()
     if args.fonti:
         for nome, (path, descr) in FONTI.items():
