@@ -74,8 +74,11 @@ def test_minimo_sotto_il_massimo(glm):
 
 
 def test_campo_assente_o_non_intero(glm):
-    for corpo in (b'{}', b'{"max_tokens": null}', b'{"max_tokens": "molti"}', b'non-json'):
-        assert glm.clamp_glm_max_tokens(corpo) is corpo
+    # Dal 9de16dc un max_tokens assente o non numerico viene riempito col tetto
+    # prudente invece di arrivare a z.ai cosi' com'e'; solo il non-JSON passa intatto.
+    assert glm.clamp_glm_max_tokens(b'non-json') == b'non-json'
+    for corpo in (b'{}', b'{"max_tokens": null}', b'{"max_tokens": "molti"}'):
+        assert json.loads(glm.clamp_glm_max_tokens(corpo))["max_tokens"] == glm.GLM_MAX_TOKENS_LIMIT
 
 
 def test_zero_e_negativi_finiscono_nel_minimo(glm):
