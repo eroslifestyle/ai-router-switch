@@ -140,6 +140,40 @@ def test_system_senza_tool_addition_resta_promosso():
     assert all(m["role"] != "system" for m in out)
 
 
+def test_system_con_output_config_non_viene_promosso():
+    """Il 400 upstream del 2026-09-25: output_config (campi per-turno) e'
+    ammesso SOLO su role=system. Se questa condizione manca, il messaggio
+    diventa role=user e l'API risponde 400 «output_config is only permitted
+    on role 'system' messages».
+    """
+    body = {"messages": [
+        {"role": "user", "content": "ciao"},
+        {"role": "assistant", "content": "ok"},
+        {"role": "system", "content": [{"type": "text", "text": "reminder"}],
+         "output_config": {"effort": "low"}},
+    ]}
+    n = promote_system_messages(body)
+
+    assert n == 0, f"il messaggio con output_config non va promosso: {n}"
+    assert body["messages"][2]["role"] == "system"
+
+
+def test_repair_preserva_system_con_output_config():
+    """_repair_message_sequence non deve scartare il system con output_config,
+    ne' perdere la chiave."""
+    body = {"messages": [
+        {"role": "user", "content": "ciao"},
+        {"role": "system", "content": [{"type": "text", "text": "reminder"}],
+         "output_config": {"effort": "low"}},
+        {"role": "assistant", "content": "ok"},
+    ]}
+    out = _repair_message_sequence(body["messages"])
+
+    preservati = [m for m in out if m.get("role") == "system"]
+    assert len(preservati) == 1, out
+    assert preservati[0].get("output_config") == {"effort": "low"}, out
+
+
 if __name__ == "__main__":
     for nome, fn in sorted(globals().items()):
         if nome.startswith("test_") and callable(fn):
