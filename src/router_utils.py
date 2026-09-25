@@ -745,6 +745,28 @@ def log_router_usage(chat_id: str, orig: str, final: str, usage: dict,
         pass
 
 
+_TOOL_MUTATION_TYPES = ("tool_addition", "tool_removal")
+
+
+def _has_tool_mutation_blocks(msg) -> bool:
+    """Vero se il messaggio porta blocchi tool_addition/tool_removal.
+
+    L'API li ammette SOLO dentro messaggi role="system" (verbatim upstream:
+    «'tool_addition'/'tool_removal' blocks are only permitted within
+    `role: "system"` messages»). Sia convertirli in role="user" sia scartare
+    il messaggio che li porta rompe la richiesta: il primo con un 400, il
+    secondo in silenzio, facendo sparire i tool che il client sta aggiungendo
+    a meta' conversazione.
+    """
+    if not isinstance(msg, dict):
+        return False
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return False
+    return any(isinstance(b, dict) and b.get("type") in _TOOL_MUTATION_TYPES
+               for b in content)
+
+
 # ── Message sequence repair ────────────────────────────────────────────────────
 def _repair_message_sequence(messages: list) -> list:
     if not messages:
@@ -758,7 +780,10 @@ def _repair_message_sequence(messages: list) -> list:
     # comportamento. La correzione vera — promuovere il contenuto nel campo
     # `system` invece di buttarlo — è una voce aperta nel TODO, perché
     # cambierebbe cosa viene inviato all'upstream.
-    _scartati = [m for m in messages if isinstance(m, dict) and m.get("role") == "system"]
+    _scartati = [m for m in messages if isinstance(m, dict) and m.get("role") == "system"
+                 and not _has_tool_mutation_blocks(m)]
+    _preservati = [m for m in messages if isinstance(m, dict) and m.get("role") == "system"
+                   and _has_tool_mutation_blocks(m)]
     if _scartati:
         try:
             _persi = sum(len(str(m.get("content", ""))) for m in _scartati)
@@ -766,7 +791,14 @@ def _repair_message_sequence(messages: list) -> list:
                 f"({_persi} caratteri di contenuto persi, non promossi nel campo system)")
         except Exception:
             pass
-    msgs = [dict(m) for m in messages if m.get("role") != "system"]
+    if _preservati:
+        try:
+            log(f"repair: preservati {len(_preservati)} messaggi role=system "
+                f"con blocchi tool_addition/tool_removal (l'API li ammette solo li')")
+        except Exception:
+            pass
+    msgs = [dict(m) for m in messages
+            if m.get("role") != "system" or _has_tool_mutation_blocks(m)]
     changed = True
     while changed and msgs:
         changed = False
@@ -954,6 +986,13 @@ def promote_system_messages(body_dict: dict) -> int:
 
         for msg in messages:
             if not (isinstance(msg, dict) and msg.get('role') == 'system'):
+                continue
+
+            # I blocchi tool_addition/tool_removal l'API li ammette SOLO dentro
+            # role="system": promuovere a role="user" il messaggio che li porta
+            # fa rispondere 400. Resta dov'e', e _repair_message_sequence lo
+            # preserva invece di scartarlo.
+            if _has_tool_mutation_blocks(msg):
                 continue
 
             content = msg.get('content', '')

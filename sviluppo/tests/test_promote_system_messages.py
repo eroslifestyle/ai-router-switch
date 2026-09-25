@@ -100,6 +100,46 @@ def test_body_senza_messaggi_o_malformato():
     assert promote_system_messages({"messages": "non-una-lista"}) == 0
 
 
+def test_tool_addition_resta_in_un_messaggio_system():
+    """Il 400 upstream: i blocchi tool_addition sono ammessi SOLO in role=system.
+
+    Se questa guardia viene rimossa, il messaggio diventa role=user e l'API
+    risponde 400 'tool_addition blocks are only permitted within role: system'.
+    """
+    msg_tool = {"role": "system", "content": [
+        {"type": "text", "text": "aggiungo dei tool"},
+        {"type": "tool_addition", "tool": {"name": "Grep"}},
+    ]}
+    body = {"messages": [
+        {"role": "user", "content": "ciao"},
+        {"role": "assistant", "content": "ok"},
+        msg_tool,
+    ]}
+    n = promote_system_messages(body)
+
+    assert n == 0, f"il messaggio con tool_addition non va promosso: {n}"
+    assert body["messages"][2]["role"] == "system"
+
+    out = _repair_message_sequence(body["messages"])
+    tipi = [b.get("type") for m in out if isinstance(m.get("content"), list)
+            for b in m["content"] if isinstance(b, dict)]
+    assert "tool_addition" in tipi, f"il blocco e' stato scartato: {out}"
+    assert any(m.get("role") == "system" for m in out), f"role=system perso: {out}"
+
+
+def test_system_senza_tool_addition_resta_promosso():
+    """La guardia non deve allargarsi: un system di solo testo va ancora promosso
+    e scartato come prima, altrimenti il prefisso di cache cambia forma."""
+    body = {"messages": [
+        {"role": "user", "content": "ciao"},
+        {"role": "system", "content": [{"type": "text", "text": "reminder"}]},
+    ]}
+    assert promote_system_messages(body) == 1
+    assert body["messages"][1]["role"] == "user"
+    out = _repair_message_sequence(body["messages"])
+    assert all(m["role"] != "system" for m in out)
+
+
 if __name__ == "__main__":
     for nome, fn in sorted(globals().items()):
         if nome.startswith("test_") and callable(fn):
