@@ -12,9 +12,10 @@ from pathlib import Path
 
 from aiohttp import web
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_LOGS_DIR = _PROJECT_ROOT / "logs"
-_LOGS_DIR.mkdir(exist_ok=True)
+import paths
+
+_LOGS_DIR = paths.debug_logs_dir()
+_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 DEBUG_ERRORS_JSONL = _LOGS_DIR / "debug-errors.jsonl"
 DEBUG_EVENTS_JSONL = _LOGS_DIR / "debug-events.jsonl"
@@ -566,8 +567,6 @@ class DebugLogger:
                 status=400
             )
 
-        import paths
-
         # Ricerca nei log: scandisce ai-router.log cercando '[rid]'.
         # Il limite di 500 righe evita risposte enormi su richieste
         # con molti log (es. retry loop). Oltre il limite si interrompe.
@@ -635,7 +634,6 @@ class DebugLogger:
         # all'endpoint le statistiche che dava gia' prima.
         latenza = {"errore": "non disponibile"}
         try:
-            import paths
             import usage_stats
             finestra = int(request.query.get("finestra_s", usage_stats.DEFAULT_WINDOW_S))
             latenza = usage_stats.latenza_per_modalita(

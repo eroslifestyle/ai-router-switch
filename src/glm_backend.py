@@ -301,10 +301,10 @@ def is_glm_1210(raw: bytes) -> bool:
     return b'"1210"' in dati or b"[1210]" in dati
 
 
-def dump_glm_1210_body(body: bytes, raw_err: bytes, model: str, log_fn=None) -> "pathlib.Path | None":
+def dump_glm_1210_body(body: bytes, raw_err: bytes, model: str, log_fn=None) -> "Path | None":
     """Salva il body esatto inviato a z.ai che ha preso 1210, per diagnosi."""
     try:
-        cartella = paths.logs_dir() / "glm-1210-bodies"
+        cartella = paths.debug_logs_dir() / "glm-1210-bodies"
         cartella.mkdir(parents=True, exist_ok=True)
 
         nome_file = time.strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}-{random.randint(0, 99999):05d}.json"

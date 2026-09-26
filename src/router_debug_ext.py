@@ -7,9 +7,10 @@ from typing import Optional
 
 from aiohttp import web
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_LOGS_DIR = _PROJECT_ROOT / "logs"
-_LOGS_DIR.mkdir(exist_ok=True)
+import paths
+
+_LOGS_DIR = paths.debug_logs_dir()
+_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 DEBUG_TRACE_JSONL = _LOGS_DIR / "debug-trace.jsonl"
 MAX_TRACE_DEQUE = 50

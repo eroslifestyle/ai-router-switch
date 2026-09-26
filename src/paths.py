@@ -81,6 +81,20 @@ def logs_dir() -> Path:
     return config_home() / "logs"
 
 
+def debug_logs_dir() -> Path:
+    """Directory dei log diagnostici (debug-events, debug-errors, dump dei 1210).
+
+    Stanno nel repo, accanto al catalogo, e non in config_home come i log
+    applicativi: li leggono airouter-info e chi indaga. AIROUTER_LOGS_DIR li
+    sposta altrove, come per logs_dir(): senza, la suite scriveva record finti
+    (test_shape, "boom") nel debug-events.jsonl di produzione.
+    """
+    override = os.environ.get("AIROUTER_LOGS_DIR", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path(__file__).resolve().parent.parent / "logs"
+
+
 def secrets_dir() -> Path:
     """Directory per gli script e file dei secret."""
     return config_home() / "secrets"

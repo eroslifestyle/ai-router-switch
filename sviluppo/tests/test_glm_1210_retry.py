@@ -95,8 +95,8 @@ def test_dump_glm_1210_body_creates_file(tmp_path, monkeypatch):
     from glm_backend import dump_glm_1210_body
     import paths
 
-    # Monkeypatch paths.logs_dir() per usare la tmp_path
-    monkeypatch.setattr(paths, "logs_dir", lambda: tmp_path)
+    # Monkeypatch paths.debug_logs_dir() per usare la tmp_path
+    monkeypatch.setattr(paths, "debug_logs_dir", lambda: tmp_path)
 
     body = b'{"messages":[...]}'
     error = b'{"error":"[1210]"}'
@@ -120,7 +120,7 @@ def test_dump_glm_1210_body_rotation(tmp_path, monkeypatch):
     from glm_backend import dump_glm_1210_body, GLM_1210_DUMP_MAX
     import paths
 
-    monkeypatch.setattr(paths, "logs_dir", lambda: tmp_path)
+    monkeypatch.setattr(paths, "debug_logs_dir", lambda: tmp_path)
 
     body = b'body'
     error = b'error'
@@ -168,7 +168,7 @@ async def test_forward_glm_1210_retry_and_success(monkeypatch, tmp_path):
     import glm_backend
     import paths
 
-    monkeypatch.setattr(paths, "logs_dir", lambda: tmp_path)
+    monkeypatch.setattr(paths, "debug_logs_dir", lambda: tmp_path)
 
     async def _key():
         return "k"
@@ -213,7 +213,7 @@ async def test_forward_glm_1211_no_retry(monkeypatch, tmp_path):
     import glm_backend
     import paths
 
-    monkeypatch.setattr(paths, "logs_dir", lambda: tmp_path)
+    monkeypatch.setattr(paths, "debug_logs_dir", lambda: tmp_path)
 
     async def _key():
         return "k"
@@ -242,7 +242,7 @@ async def test_forward_glm_1210_both_attempts_fail(monkeypatch, tmp_path):
     import glm_backend
     import paths
 
-    monkeypatch.setattr(paths, "logs_dir", lambda: tmp_path)
+    monkeypatch.setattr(paths, "debug_logs_dir", lambda: tmp_path)
 
     async def _key():
         return "k"
