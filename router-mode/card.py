@@ -32,10 +32,10 @@ DESKTOP_NAME = "router-mode-panel"
 # +78: le card sono passate da 90 a 116 (3 righe di card in totale).
 # +124 (CARD_H 116 + SPACING 8): la sezione MULTI e' passata da 1x3 a 2x2
 # con l'arrivo di mix-al (2026-08-04).
-# La sezione SOLO ospita 5 modalita' su griglia 3x2 (2 righe). MULTI ospita 7
-# modalita' su griglia 3x3 (3 righe): +124 (CARD_H 116 + SPACING 8) per la
-# terza riga portata dalle varianti -2 (mix-am-2/mix-gm-2/mix-ag-2, 2026-08-09).
-WINDOW_W, WINDOW_H = 480, 980
+# La sezione SOLO ospita 5 modalita' su griglia 3x2 (2 righe). MULTI ospita 6
+# modalita' su griglia 3x2 (2 righe): -124 dopo che mix-ag-2 e' stata assorbita in mix-ag (2026-09-26).
+# Varianti -2 restano: mix-am-2/mix-gm-2 (delega forzata via hook).
+WINDOW_W, WINDOW_H = 480, 856
 TITLE_H = 38
 # 56 non bastava: il titolo da 24pt piu' il sottotitolo che va a capo sforavano
 # il riquadro, e il testo dell'esecutore usciva tagliato sotto il nome della
@@ -52,9 +52,8 @@ MODES = [
     {"id": "qwen", "icon": "🟣", "label": "Qwen", "exec": "3.7-max / coder-plus"},
     {"id": "mix-gm", "icon": "🟢🟠", "label": "MixGM", "exec": "GLM-5.2 THINK + MiniMax ACT"},
     {"id": "mix-gm-2", "icon": "🟢🟠⚡", "label": "MixGM-2", "exec": "MixGM + delega forzata (deny)"},
-    {"id": "mix-ag", "icon": "🔵🟢", "label": "MixAG", "exec": "Anthropic THINK + GLM ACT"},
+    {"id": "mix-ag", "icon": "🔵🟢", "label": "MixAG", "exec": "Anthropic THINK + GLM ACT (deny)"},
     {"id": "opr", "icon": "🌐", "label": "OPR", "exec": "Ox Alpha via OpenRouter"},
-    {"id": "mix-ag-2", "icon": "🔵🟢⚡", "label": "MixAG-2", "exec": "MixAG + delega forzata (deny)"},
     {"id": "mix-al", "icon": "🔵🖥", "label": "MixAL", "exec": "Anthropic THINK + LLM locale ACT"},
     {"id": "local", "icon": "🖥️", "label": "Local", "exec": "Tutto su LLM locale (code-max)"},
 ]
@@ -388,7 +387,7 @@ class Card(QWidget):
 
         multi_grid = QGridLayout()
         multi_grid.setSpacing(SPACING)
-        multi_ids = ["mix-am", "mix-am-2", "mix-gm", "mix-gm-2", "mix-ag", "mix-ag-2", "mix-al"]
+        multi_ids = ["mix-am", "mix-am-2", "mix-gm", "mix-gm-2", "mix-ag", "mix-al"]
         for i, mid in enumerate(multi_ids):
             m = next(x for x in MODES if x["id"] == mid)
             card = ModeCard(m, self._do_switch)

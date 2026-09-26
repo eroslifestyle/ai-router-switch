@@ -65,7 +65,6 @@ CONTRATTO_OSSERVATO = {
     "mix-gm": {"encoding": "identity", "id": "esadecimale"},
     "mix-gm-2": {"encoding": "identity", "id": "esadecimale"},  # routing identico a mix-gm
     "mix-ag": {"encoding": "gzip", "id": "msg_"},
-    "mix-ag-2": {"encoding": "gzip", "id": "msg_"},  # routing identico a mix-ag
     "qwen": {"encoding": "gzip", "id": "msg_"},
     "local": {"encoding": "identity", "id": "resp_"},
     # gpt: pura locale come `local`, stesso backend → stesso contratto osservato.

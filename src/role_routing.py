@@ -89,11 +89,6 @@ ROUTING_TABLE = {
     ("mix-am-2", ROLE_ACT): ("minimax", MINIMAX_ACT),
     ("mix-ag", ROLE_THINK): ("anthropic", None),
     ("mix-ag", ROLE_ACT): ("glm", GLM_ACT),
-    # mix-ag-2: routing identico a mix-ag. La differenza e' enforce_hierarchy
-    # (deny mode-specific). NB: in mix-ag-2 NON c'e' CLI di coding (glm-code non
-    # esiste) -> _CODE_EXECUTOR e' stringa vuota: la delega passa solo dai subagent.
-    ("mix-ag-2", ROLE_THINK): ("anthropic", None),
-    ("mix-ag-2", ROLE_ACT): ("glm", GLM_ACT),
     # ultra (14a modalita'): THINK/VERIFY su Anthropic per il contesto ampio (1M),
     # ACT su GLM-4.7 per esplorazione/analisi/leggere. Il codice NON passa dal router:
     # m3-code/m3x/m3-fanout saltano il proxy. E' il gap che mix-ag-2 non copre (là
@@ -139,14 +134,16 @@ _MODE_DEFAULT_PROVIDER = {
     "mix-ag": "glm",
     "mix-gm": "minimax",
     "mix-gm-2": "minimax",
-    "mix-ag-2": "glm",
     "ultra": "glm",
     "mix-al": "local",
     "local": "local",
     "gpt": "local",
 }
 
-VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-am-2", "mix-ag", "mix-ag-2", "mix-gm", "mix-gm-2", "mix-al", "local", "gpt", "ultra")
+VALID_MODES = ("anthropic", "minimax", "glm", "qwen", "mix-am", "mix-am-2", "mix-ag", "mix-gm", "mix-gm-2", "mix-al", "local", "gpt", "ultra")
+
+# Nomi assorbiti in un'altra modalità: accettati in ingresso, mai in VALID_MODES.
+MODE_ALIASES = {"mix-ag-2": "mix-ag"}
 
 # ponytail: stima semplice len(body)/4, nessun tokenizer vero
 CHARS_PER_TOKEN_ESTIMATE = 4
@@ -310,7 +307,7 @@ def resolve_route(mode: str, model_name: str | None) -> tuple[str, str | None]:
     """Resolve the routing for a given mode and model.
 
     Args:
-        mode: The active mode (must be one of VALID_MODES).
+        mode: The active mode (must be one of VALID_MODES or MODE_ALIASES).
         model_name: The model name from the client request (e.g., "claude-opus-5").
 
     Returns:
@@ -319,13 +316,14 @@ def resolve_route(mode: str, model_name: str | None) -> tuple[str, str | None]:
         - model_override: the model name to use (or None to keep the original)
 
     Raises:
-        ValueError: if mode is not in VALID_MODES.
+        ValueError: if mode is not in VALID_MODES or MODE_ALIASES.
 
     Note:
         A pure mode should never call a model from another provider (user rule 2026-08-01).
         If the resolved model is foreign to the provider, it will be replaced with the
         provider's native executor model.
     """
+    mode = MODE_ALIASES.get(mode, mode)
     if mode not in VALID_MODES:
         raise ValueError(
             f"Invalid mode: {mode!r}. Valid modes are: {', '.join(VALID_MODES)}"

@@ -114,11 +114,10 @@ set_mode(){
   # alias CLI → nome CANONICO (router_constants.VALID_MODES).
   case "$1" in
     mixgm|glm-minimax)    echo "mix-gm" ;;
-    mixag|anthropic-glm)   echo "mix-ag" ;;
+    mixag|anthropic-glm|mixag2|mix-ag-2)   echo "mix-ag" ;;
     mixam|mixed)           echo "mix-am" ;;
     mixam2)                echo "mix-am-2" ;;
     mixgm2)                echo "mix-gm-2" ;;
-    mixag2)                echo "mix-ag-2" ;;
     mixal)                 echo "mix-al" ;;
     *)                     echo "$1" ;;
   esac
@@ -163,7 +162,7 @@ update(){
 
 case "${1:-status}" in
   anthropic|minimax|mix-am|mix-ag|mix-gm|mix-al|glm|qwen|local|\
-  mixed|mixam|mixgm|mixag|mixal|glm-minimax|anthropic-glm|opr)
+  mixed|mixam|mixgm|mixag|mixag2|mixal|glm-minimax|anthropic-glm|opr)
     apply_mode "$1"
     ;;
   status) status ;;

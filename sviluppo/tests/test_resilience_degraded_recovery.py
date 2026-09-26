@@ -407,8 +407,7 @@ class TestPredicateGetFileMode:
             ("anthropic", True),    # Anthropic THINK+ACT
             ("mix-am", True),       # Anthropic THINK + MiniMax ACT
             ("mix-am-2", True),     # Variante delega aggressiva
-            ("mix-ag", True),       # Anthropic THINK + GLM ACT
-            ("mix-ag-2", True),     # Variante
+            ("mix-ag", True),       # Anthropic THINK + GLM ACT (delega forzata)
             ("mix-al", True),       # Anthropic THINK + LLM locale ACT
             ("minimax", False),     # NON usa Anthropic
             ("glm", False),         # NON usa Anthropic

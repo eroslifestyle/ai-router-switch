@@ -29,8 +29,8 @@ def test_mix_am_2_oversize_no_reroute():
     assert r is None, f"Atteso None, ottenuto {r}"
 
 
-def test_mix_ag_2_oversize_no_reroute():
-    r = reroute_if_oversized('mix-ag-2', 'glm', 'glm-4.7', 900_000)
+def test_mix_ag_oversize_no_reroute():
+    r = reroute_if_oversized('mix-ag', 'glm', 'glm-4.7', 900_000)
     assert r is None, f"Atteso None, ottenuto {r}"
 
 

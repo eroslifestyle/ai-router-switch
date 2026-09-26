@@ -23,7 +23,7 @@ def test_le_varianti_2_sono_incluse():
 
 def test_non_include_chi_non_esegue_su_minimax():
     minimax = modes_with_act_provider("minimax")
-    for m in ("anthropic", "glm", "qwen", "local", "mix-al", "mix-ag", "mix-ag-2"):
+    for m in ("anthropic", "glm", "qwen", "local", "mix-al", "mix-ag"):
         assert m not in minimax, m
 
 

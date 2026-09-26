@@ -42,12 +42,14 @@ def test_nomi_storici_normalizzati_al_canonico():
     Fino al 2026-08-04 i nomi storici mixed, glm-minimax e anthropic-glm
     finivano nel ramo help e non cambiavano nulla, mentre ai-mode da terminale
     li accettava gia: era un'incoerenza fra i due punti d'ingresso.
-    Ora vengono normalizzati al canonico.
+    Ora vengono normalizzati al canonico. Il 2026-09-26 mix-ag-2 è assorbita in mix-ag.
     """
     storici_map = {
         "mixed": "mix-am",
         "glm-minimax": "mix-gm",
         "anthropic-glm": "mix-ag",
+        "mix-ag-2": "mix-ag",
+        "mixag2": "mix-ag",
     }
     for storico, canonico in storici_map.items():
         result = parse_router_command(f"!router {storico}")

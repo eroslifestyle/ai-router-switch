@@ -205,7 +205,7 @@ def clear_chat_mode(fp: str):
 
 # ── Combined mode getter ────────────────────────────────────────────────────────
 _LEGACY_MODE_MAP = {"mixed": "mix-am",
-                    "glm-minimax": "mix-gm", "anthropic-glm": "mix-ag"}
+                    "glm-minimax": "mix-gm", "anthropic-glm": "mix-ag", "mix-ag-2": "mix-ag"}
 
 
 def get_mode(request=None, fp: str = None) -> str:
@@ -222,6 +222,7 @@ def get_mode(request=None, fp: str = None) -> str:
         if cm:
             log(f"chat {fp}: override '{cm}' non valido -> ignorato")
     mode = get_file_mode()
+    mode = _LEGACY_MODE_MAP.get(mode, mode)
     if mode not in VALID_MODES:
         log(f"mode '{mode}' non valido -> default 'mix-am'")
         mode = "mix-am"

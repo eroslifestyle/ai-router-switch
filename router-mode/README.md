@@ -5,7 +5,7 @@
 Standalone control panel for the AI Router (`:8787`) with 9 orchestration modes. Provides both CLI and GUI interfaces to switch modes and monitor router health in real-time.
 
 **Location**: `~/.claude/router-mode/`  
-**Modes**: anthropic · minimax · glm · qwen · mix-am · mix-am-2 · mix-gm · mix-gm-2 · mix-ag · mix-ag-2 · mix-al · local
+**Modes**: anthropic · minimax · glm · qwen · mix-am · mix-am-2 · mix-gm · mix-gm-2 · mix-ag · mix-al · local (13 canonical; `mix-ag-2` alias of `mix-ag`, absorbed 2026-09-26)
 **Proxy**: `:9988` (CORS bypass for browser fetch)
 
 ---
@@ -150,15 +150,14 @@ Planned: badge in GNOME topbar showing `MODE: mix-am` with quick-switch dropdown
 | **mix-am-2** | 🔷⚡ | Claude (THINK) | MiniMax M2.7 | same model as THINK | MixAM + delega forzata (deny su coding del THINK) |
 | **mix-gm** | 🟢🟠 | GLM 5.2 (THINK) | MiniMax M2.7 (ACT) | same model as THINK | Hybrid: GLM reasoning + MiniMax execution |
 | **mix-gm-2** | 🟢🟠⚡ | GLM 5.2 (THINK) | MiniMax M2.7 (ACT) | same model as THINK | MixGM + delega forzata (deny su coding del THINK) |
-| **mix-ag** | 🔵🟢 | Claude (THINK) | GLM 4.7 (ACT) | same model as THINK | Hybrid: Anthropic planning + GLM cost-efficiency |
-| **mix-ag-2** | 🔵🟢⚡ | Claude (THINK) | GLM 4.7 (ACT) | same model as THINK | MixAG + delega forzata (deny, solo subagent — glm-code non esiste) |
+| **mix-ag** | 🔵🟢 | Claude (THINK) | GLM 4.7 (ACT) | same model as THINK | Hybrid: Anthropic planning + GLM cost-efficiency (delega forzata) |
 | **mix-al** | 🔵🖥 | Claude (THINK) | code-max (local) | same model as THINK | Hybrid: Anthropic planning + local LLM exec |
 | **local** | 🖥️ | code-max | code-max | same model as THINK | Pure local LLM (llama.cpp), full isolation |
 
 The THINK model is always chosen manually by the user; it is never fixed in code and
 never escalates on its own. VERIFY has no separate route — it is performed by the same
 model that did the THINK. Only execution escalates, after 2 failures.
-Legacy names `mixed`/`glm-minimax`/`anthropic-glm` are aliases **only for the per-chat
+Legacy names `mixed`/`glm-minimax`/`anthropic-glm`/`mix-ag-2` are aliases **only for the per-chat
 override** (`_LEGACY_MODE_MAP`). `POST /admin/mode/{mode}` — the endpoint this panel uses —
 validates against `VALID_MODES` and **rejects them with 400**: that is why `routestats`
 kept its old ids for so long without anyone noticing that half its switches were broken.

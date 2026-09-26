@@ -24,21 +24,20 @@ Anthropic  MiniMax   GLM/z.ai   Qwen    local model
 | glm | glm-5.3 | glm-4.7 |
 | qwen | qwen3.8-max | qwen3-coder-plus |
 | mix-am | Claude | MiniMax |
-| mix-ag | Claude | GLM |
+| mix-ag | Claude | GLM (delega forzata) |
 | mix-gm | GLM | MiniMax |
 | mix-al | Claude | local model (code-max) |
 | local | local model | local model |
 | gpt | local model (code-max) | local model (code-max) |
 | ultra | Claude | GLM (MiniMax for code via CLI) |
 | mix-am-2 | Claude | MiniMax (deny enforcement) |
-| mix-ag-2 | Claude | GLM (deny enforcement) |
 | mix-gm-2 | GLM | MiniMax (deny enforcement) |
 
-Legacy aliases accepted: `mixed` = mix-am, `glm-minimax` = mix-gm, `anthropic-glm` = mix-ag, plus the short forms `mixam`, `mixag`, `mixgm`, `mixal`. The `-2` variants have identical routing but stricter delegation enforcement via hooks.
+Legacy aliases accepted: `mixed` = mix-am, `glm-minimax` = mix-gm, `anthropic-glm` = mix-ag, `mix-ag-2` = mix-ag (absorbed 2026-09-26), plus the short forms `mixam`, `mixag`, `mixgm`, `mixal`, `mixag2`. The `-2` variants (mix-am-2, mix-gm-2) have identical routing but stricter delegation enforcement via hooks.
 
 ## Ports (source: PORT_MODE in src/router_constants.py)
 
-8787 is dynamic and tracks the current mode. One fixed port per mode: 8771 anthropic, 8772 minimax, 8773 mix-am, 8774 mix-al, 8775 glm, 8776 mix-gm, 8777 mix-ag, 8778 qwen, 8779 local, 8781 mix-am-2, 8784 mix-gm-2, 8785 mix-ag-2, 8786 gpt, 8788 ultra.
+8787 is dynamic and tracks the current mode. One fixed port per mode: 8771 anthropic, 8772 minimax, 8773 mix-am, 8774 mix-al, 8775 glm, 8776 mix-gm, 8777 mix-ag, 8778 qwen, 8779 local, 8781 mix-am-2, 8784 mix-gm-2, 8786 gpt, 8788 ultra. (Port 8785 was of the legacy mix-ag-2, absorbed into mix-ag on 2026-09-26.)
 
 ## Switching the backend
 
