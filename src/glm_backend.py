@@ -20,6 +20,7 @@ import asyncio
 import gzip
 import json
 import os
+import pathlib
 import random
 import re
 import subprocess
@@ -284,6 +285,57 @@ def classify_429_glm(raw: bytes) -> str:
     if b"usage limit" in low or b"resets at" in low or b"5h" in low:
         return "quota_5h"
     return "rpm_tpm"
+
+
+GLM_1210_DUMP_MAX = 20  # file conservati; i più vecchi vengono cancellati
+
+
+def is_glm_1210(raw: bytes) -> bool:
+    """Vero se il corpo di un 400 z.ai porta il codice [1210] (anche gzip)."""
+    dati = raw
+    if raw.startswith(b"\x1f\x8b"):
+        try:
+            dati = gzip.decompress(raw)
+        except Exception:
+            dati = raw
+    return b'"1210"' in dati or b"[1210]" in dati
+
+
+def dump_glm_1210_body(body: bytes, raw_err: bytes, model: str, log_fn=None) -> "pathlib.Path | None":
+    """Salva il body esatto inviato a z.ai che ha preso 1210, per diagnosi."""
+    try:
+        cartella = paths.logs_dir() / "glm-1210-bodies"
+        cartella.mkdir(parents=True, exist_ok=True)
+
+        nome_file = time.strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}-{random.randint(0, 99999):05d}.json"
+        percorso = cartella / nome_file
+
+        ts_iso = time.strftime("%Y-%m-%dT%H:%M:%S")
+        contenuto = {
+            "ts": ts_iso,
+            "model": model,
+            "error": raw_err.decode("utf-8", "replace")[:2000],
+            "body": body.decode("utf-8", "replace")
+        }
+        with open(percorso, "w") as f:
+            json.dump(contenuto, f)
+
+        # Rotazione: tieni solo i GLM_1210_DUMP_MAX file più recenti
+        tutti = sorted(cartella.glob("*.json"), key=lambda p: p.name)
+        se_da_cancellare = tutti[:-GLM_1210_DUMP_MAX]
+        for p in se_da_cancellare:
+            try:
+                p.unlink()
+            except Exception:
+                pass
+
+        if log_fn:
+            log_fn(f"GLM 1210 body salvato: {percorso} ({len(body)}b)")
+        return percorso
+    except Exception as e:
+        if log_fn:
+            log_fn(f"GLM 1210 dump fallito: {type(e).__name__}")
+        return None
 
 
 # Rimosse il 2026-08-04: la sezione Tier classification, cioe classify_tier e heuristic_tier.
@@ -760,6 +812,7 @@ async def forward_glm(request, body: bytes, session, model: str,
     # difetto sbagliato. Definito qui e non nel try perche' gli except lo leggono.
     lim_model = upstream_model or model
 
+    _retried_1210 = False
     for attempt in range(2):
         resp = None
         try:
@@ -802,6 +855,11 @@ async def forward_glm(request, body: bytes, session, model: str,
             GLM_LIMITER.record(entry, est_tokens, resp.status < 400)
             if resp.status < 400:
                 GLM_LIMITER.on_success()
+                if _retried_1210:
+                    log_fn(f"GLM 1210 retry esito status={resp.status} model={lim_model}")
+                    debug_catalog.record_event(severity="error", category="glm",
+                                                kind="glm_1210_retry_outcome", code=resp.status,
+                                                snippet=f"model={lim_model} status={resp.status}")
 
             if resp.status == 429:
                 _retry_after = resp.headers.get("retry-after")
@@ -850,6 +908,28 @@ async def forward_glm(request, body: bytes, session, model: str,
                     resp.release()
                 await asyncio.sleep(0.5)
                 continue
+
+            if resp.status == 400 and attempt == 0:
+                _raw400 = b""
+                try:
+                    _raw400 = await resp.read()
+                finally:
+                    resp.release()
+                if is_glm_1210(_raw400):
+                    dump_glm_1210_body(body, _raw400, lim_model, log_fn)
+                    log_fn(f"GLM 1210 attempt 1 model={lim_model}: ritento una volta")
+                    debug_catalog.record_event(severity="error", category="glm",
+                                                kind="glm_1210_retry", code=400,
+                                                snippet=f"model={lim_model} bytes={len(body)}")
+                    _retried_1210 = True
+                    await asyncio.sleep(0.5)
+                    continue
+                # 400 di altro tipo: si inoltra identico, gia' letto
+                if passthrough:
+                    return buffered_upstream(resp.status, _raw400, headers=dict(resp.headers))
+                return aiohttp.web.Response(body=_raw400, status=resp.status,
+                                            headers={k: v for k, v in resp.headers.items()
+                                                     if k.lower() not in ("transfer-encoding", "connection", "keep-alive", "content-length")})
 
             # Passthrough: ritorna ClientResponse raw per relay streaming.
             # Connessione volutamente APERTA: la release avviene nel finally
