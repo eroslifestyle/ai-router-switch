@@ -1,5 +1,6 @@
 """Backend proxy per provider LLM locale via LiteLLM."""
 import asyncio
+import re
 import json
 import os
 import tempfile
@@ -486,3 +487,140 @@ async def forward_local(
     if passthrough:
         return synthetic_error(502, 'local_unavailable', err_msg)
     return web.Response(text=err_msg, status=502, content_type='application/json')
+
+
+# Slim del body per il provider local (2026-09-29): i modelli locali hanno la
+# finestra piu' stretta (code-max 131k), ma il body di Claude Code arriva a
+# ~44k token di cui gran parte in schemi di tool inutilizzati e liste
+# "Available agent types"/"skills available" dentro i system-reminder dei
+# messages. Allowlist di tool (default: i core di Claude Code), override
+# AIROUTER_LOCAL_TOOL_ALLOWLIST. Disattivabile con AIROUTER_LOCAL_SLIM=0.
+LOCAL_TOOL_ALLOWLIST_DEFAULT = "Bash,Read,Edit,Write,Grep,Glob,Agent,MultiEdit,ToolSearch"
+
+_SYSTEM_REMINDER_RE = re.compile(
+    r"<system-reminder[^>]*>.*?</system-reminder>", re.DOTALL)
+_SLIM_MARKERS = ("Available agent types", "The following skills are available")
+
+
+def _slim_system_reminders(text: str) -> tuple[str, int]:
+    """Toglie i system-reminder con liste agent/skills, conserva il resto."""
+    removed = 0
+
+    def _sost(m: "re.Match") -> str:
+        nonlocal removed
+        if any(marker in m.group(0) for marker in _SLIM_MARKERS):
+            removed += 1
+            return ""
+        return m.group(0)
+
+    return _SYSTEM_REMINDER_RE.sub(_sost, text), removed
+
+
+def _demote_removed_tool_refs(data: dict, allow: set) -> None:
+    """Invariante: dopo il taglio dei tool, nessun riferimento ai nomi rimossi
+    puo' sopravvivere nei messages (tool_use, tool_result abbinato, tool_reference
+    annidato in tool_search_tool_result — forma verificata contro l'API 2026-09-14).
+    Primo livello: declassa a text; annidato: rimuove. Stesso schema di
+    tool_isolation.demote_foreign_tool_use, ma per nome invece che per brand."""
+    messages = data.get("messages")
+    if not isinstance(messages, list):
+        return
+    demoted_ids: set = set()
+
+    def scansiona(content: list, annidato: bool) -> None:
+        da_rimuovere: list = []
+        for i, blk in enumerate(content):
+            if not isinstance(blk, dict):
+                continue
+            if blk.get("type") in ("tool_use", "server_tool_use", "mcp_tool_use", "tool_reference") \
+                    and (blk.get("name") or blk.get("tool_name")) not in allow:
+                tid = blk.get("id")
+                if isinstance(tid, str):
+                    demoted_ids.add(tid)
+                if annidato:
+                    da_rimuovere.append(i)
+                else:
+                    content[i] = {"type": "text",
+                                  "text": f"[tool_use {blk.get('name')}] "
+                                          + json.dumps(blk.get("input"), ensure_ascii=False, default=str)[:2000]}
+                continue
+            figli = blk.get("content")
+            if isinstance(figli, dict):
+                figli = figli.get("tool_references")
+            if isinstance(figli, list):
+                scansiona(figli, True)
+        for i in reversed(da_rimuovere):
+            del content[i]
+
+    for msg in messages:
+        if isinstance(msg, dict) and isinstance(msg.get("content"), list):
+            scansiona(msg["content"], False)
+    if demoted_ids:
+        for msg in messages:
+            content = msg.get("content") if isinstance(msg, dict) else None
+            if not isinstance(content, list):
+                continue
+            for i, blk in enumerate(content):
+                if isinstance(blk, dict) and blk.get("type") == "tool_result" \
+                        and blk.get("tool_use_id") in demoted_ids:
+                    content[i] = {"type": "text",
+                                  "text": f"[tool_result {blk.get('tool_use_id')}] "
+                                          + json.dumps(blk.get("content"), ensure_ascii=False, default=str)[:2000]}
+
+
+def slim_local_body(body: bytes, mode: str = "local") -> bytes:
+    """Slim del body per il provider local: allowlist tool + pulizia dei
+    riferimenti orfani + rimozione delle liste agent/skills nei system-reminder.
+    NON tocca system top-level, CLAUDE.md, max_tokens, thinking, metadata.
+    Logga `local_slim` SOLO se la riduzione supera 1000 char."""
+    if os.environ.get("AIROUTER_LOCAL_SLIM", "1") == "0":
+        return body
+    try:
+        data = json.loads(body)
+    except Exception:
+        return body
+    before = len(body)
+    # 1) allowlist tool + invariante riferimenti (demote con brand-check
+    # aggirato: qui i nomi da declassare sono quelli FUORI allowlist, non
+    # quelli brandizzati, quindi riusiamo demote_foreign_tool_use con un
+    # backend fittizio dopo aver marchiato i rimossi come brand "local_orphan").
+    tools = data.get("tools")
+    removed_names: list[str] = []
+    if isinstance(tools, list) and tools:
+        allow = set(filter(None, os.environ.get(
+            "AIROUTER_LOCAL_TOOL_ALLOWLIST", LOCAL_TOOL_ALLOWLIST_DEFAULT).split(",")))
+        removed_names = [t.get("name", "?") for t in tools
+                         if not (isinstance(t, dict) and t.get("name") in allow)]
+        if removed_names:
+            kept = [t for t in tools if isinstance(t, dict) and t.get("name") in allow]
+            if kept:
+                data["tools"] = kept
+            else:
+                data.pop("tools", None)
+                data.pop("tool_choice", None)
+            tool_isolation.sanitize_tool_choice(data)
+            tool_isolation.sanitize_defer_loading(data)
+        # Invariante: nessun riferimento a un nome fuori allowlist puo'
+        # sopravvivere nei messages (anche se tools[] non lo dichiarava).
+        _demote_removed_tool_refs(data, allow)
+    # 2) liste agent/skills nei system-reminder dei messages
+    reminders_removed = 0
+    for msg in data.get("messages", []):
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list):
+            continue
+        for i, blk in enumerate(content):
+            if isinstance(blk, dict) and blk.get("type") == "text" \
+                    and isinstance(blk.get("text"), str):
+                nuovo, n = _slim_system_reminders(blk["text"])
+                if n:
+                    blk["text"] = nuovo
+                    reminders_removed += n
+    after = len(json.dumps(data).encode())
+    if before - after > 1000:
+        debug_catalog.record_event(
+            severity="info", category="local", kind="local_slim",
+            snippet=(f"chars={before}->{after} tools_kept={len(kept) if isinstance(tools, list) and tools else 0} "
+                     f"tools_removed={removed_names[:10]} reminders_removed={reminders_removed}"),
+        )
+    return json.dumps(data).encode()

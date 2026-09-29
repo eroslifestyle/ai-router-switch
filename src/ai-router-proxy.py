@@ -951,6 +951,7 @@ async def handle(request):
                 _local_body = _local_mod.inject_system_hint(_local_body)
             _local_body = strip_thinking_blocks(_local_body)
             _local_body = strip_thinking_for_model(_local_body, _req_model, log_fn=log, backend="local")
+            _local_body = _local_mod.slim_local_body(_local_body, mode)
             _local_body = _local_mod.set_body_model(_local_body, _local_model)
 
             # Trace completo per debug provider local
