@@ -53,6 +53,17 @@ FIT_GRID_STEPS = int(os.environ.get("AIROUTER_FIT_GRID_STEPS", "64"))
 _STICKY_DROP_COUNT: dict = {}
 _STICKY_DROP_COUNT_MAX = 2000
 
+# Quando il punto di taglio sticky esce dal budget, il nuovo taglio lascia libero
+# circa questo fraction del budget: i turni successivi ci stanno per molti turni
+# senza spostare il taglio, invece di avanzare di pochi messaggi a ogni turno
+# (finestra scorrevole che rompeva il prefisso e la prompt cache a ogni richiesta).
+REWRITE_HEADROOM_FRACTION = float(os.environ.get("AIROUTER_REWRITE_HEADROOM", "0.25"))
+
+# Riassunto in cache per (fp -> (drop_count, summary)): finche' il punto di taglio
+# non cambia, il summary nel system viene riemesso BYTE-IDENTICO invece di essere
+# ricalcolato sull'intera storia crescente (che cambiava il system a ogni turno).
+_STICKY_SUMMARY: dict = {}
+
 
 def _tool_result_text(content) -> str:
     """Testo di un tool_result, che il formato sia stringa o lista di blocchi."""
@@ -216,7 +227,6 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
     # arrivava a 52k token invece dei ~196k consentiti a MiniMax).
     budget_chars = int(safe_limit * bytes_per_token(model))
     budget = int(budget_chars * SUMMARY_BUDGET_SHARE)
-    summary = build_shrink_summary(msgs, budget)
 
     # Helper per costruire il system preservando liste e cache_control
     def _build_system(system_raw, summary):
@@ -236,6 +246,16 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
             # Assente, None o altro tipo
             return summary if summary else None
 
+    # Summary in cache: riusato byte-identico finche' il punto di taglio (drop_count)
+    # non cambia; ricalcolato sull'intera storia a ogni turno rompeva il system e
+    # con lui la prompt cache. Stessa struttura e limiti di _STICKY_DROP_COUNT.
+    last_drop = _STICKY_DROP_COUNT.get(fp, 0)
+    cached = _STICKY_SUMMARY.get(fp)
+    if cached and cached[0] == last_drop:
+        summary = cached[1]
+    else:
+        summary = build_shrink_summary(msgs, budget)
+
     system_content = _build_system(data.get("system"), summary)
 
     def _make_candidate(system_val):
@@ -254,7 +274,6 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
     # ricalcolare keep da zero, cosi' il prefisso msgs[drop_count:] resta
     # identico tra un turno e l'altro e il prompt caching lato provider tiene.
     # Vedi commento su _STICKY_DROP_COUNT sopra.
-    last_drop = _STICKY_DROP_COUNT.get(fp, 0)
     keep = 0
     sticky_hit = False
     if 0 < last_drop < len(msgs):
@@ -263,45 +282,97 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
             keep = sticky_keep
             sticky_hit = True
     if not keep:
-        keep = _fit_keep(msgs, model, safe_limit, _candidate)
+        # Taglio a scatti con margine: si cerca il keep per il budget RIDOTTO
+        # (REWRITE_HEADROOM_FRACTION libero), cosi' il nuovo drop_count resta
+        # valido per molti turni invece di slittare a ogni richiesta.
+        headroom_limit = int(safe_limit * (1.0 - REWRITE_HEADROOM_FRACTION))
+        # Il summary consuma budget: si misura il candidato col summary GIA'
+        # dentro, altrimenti il keep "con margine" sfora il safe_limit e la
+        # correzione sotto lo riporta al budget pieno, cancellando il margine.
+        probe = _make_candidate(_build_system(data.get("system"), summary))
+        # Il margine vale quando il taglio STICKY e' gia' attivo (sessione che
+        # scorre). Al primo taglio di una sessione si riempie la finestra al
+        # limite pieno: l'80% di riempimento e' il contratto del fit originale
+        # (test_finestra_adattiva_locale), e una sessione a un turno non ha
+        # prefissi da proteggere.
+        fit_limit = safe_limit if not last_drop else headroom_limit
+        keep = _fit_keep(msgs, model, fit_limit, probe)
+        # ponytail: se il margine non basta per lo summary reale, si rientra col pieno
+        if keep and estimate_tokens_body(probe(_tail(msgs, keep)), model) > safe_limit:
+            keep = _fit_keep(msgs, model, safe_limit, probe)
 
     if keep:
-        if len(_STICKY_DROP_COUNT) > _STICKY_DROP_COUNT_MAX:
-            _STICKY_DROP_COUNT.clear()
-        _STICKY_DROP_COUNT[fp] = len(msgs) - keep
-        log.info("shrink: keep %s a %d messaggi (drop_count=%d) fp=%s",
-                  "stabile" if sticky_hit else "ricalcolato", keep, len(msgs) - keep, fp)
         # Secondo passaggio: i messaggi appena usciti dalla finestra vengono messi
         # da parte (per sopravvivere a un /compact) e quelli PERTINENTI alla
         # richiesta attuale rientrano come estratti nel system. "Recente" e "utile"
         # non coincidono: la decisione presa duecento messaggi fa e' spesso quella
         # che serve adesso. Due passaggi e non uno perche' il blocco richiamato
         # occupa spazio, quindi la finestra va rimisurata con lui dentro.
-        dropped = msgs[:-keep] if keep < len(msgs) else []
-        recall_block = ""
-        if dropped:
-            try:
-                import context_recall
-                context_recall.archive(fp, dropped)
-                recall_block = context_recall.build_recall_block(
-                    fp, msgs, dropped, int(budget * context_recall.RECALL_BUDGET_SHARE))
-            except Exception as e:
-                log.warning("ctx-recall fallito fp=%s: %s", fp, e)
+        #
+        # Il blocco richiamato va in cache insieme al summary per (fp, drop_count):
+        # build_recall_block interroga la richiesta corrente (query_text = ultimo
+        # messaggio user), quindi su sticky hit varrebbe un testo diverso a ogni
+        # turno e romperebbe il system lo stesso. archive() viene chiamato SOLO
+        # quando cambia il punto di taglio: i dropped sono gli stessi altrimenti.
+        cached_recall = _STICKY_SUMMARY.get(fp) if sticky_hit else None
+        recall_block = cached_recall[2] if cached_recall and len(cached_recall) > 2 else None
+        if recall_block is None:
+            dropped = msgs[:-keep] if keep < len(msgs) else []
+            recall_block = ""
+            if dropped:
+                try:
+                    import context_recall
+                    if not sticky_hit:
+                        context_recall.archive(fp, dropped)
+                    recall_block = context_recall.build_recall_block(
+                        fp, msgs, dropped, int(budget * context_recall.RECALL_BUDGET_SHARE))
+                except Exception as e:
+                    log.warning("ctx-recall fallito fp=%s: %s", fp, e)
 
+        final_keep = keep
+        recall_system = None
         if recall_block:
-            system_recall = _build_system(system_content, recall_block)
-            candidate_recall = _make_candidate(system_recall)
-            keep_recall = _fit_keep(msgs, model, safe_limit, candidate_recall)
+            # Anche qui vale lo sticky: ricalcolare keep col fit a ogni turno
+            # sposterebbe il prefisso comunque, invalidando il taglio scelto sopra.
+            # Il fit di questo ramo usa lo stesso limite CON margine: rientrare
+            # al limite pieno cancellerebbe l'headroom e il taglio slitterebbe
+            # comunque a ogni turno.
+            if sticky_hit:
+                keep_recall = keep
+            else:
+                system_recall = _build_system(system_content, recall_block)
+                # Stesso limite usato per il keep principale: al primo taglio
+                # (fit a limite pieno per il contratto dell'80%) un rifit con
+                # margine qui sotto accorcerebbe la finestra e abbasserebbe il
+                # riempimento; nelle sessioni in corso il margine protegge il
+                # prefisso.
+                fit_recall_limit = safe_limit if not last_drop else headroom_limit
+                keep_recall = _fit_keep(msgs, model, fit_recall_limit,
+                                        _make_candidate(system_recall))
+                if not keep_recall:
+                    keep_recall = _fit_keep(msgs, model, safe_limit,
+                                            _make_candidate(system_recall))
             if keep_recall:
-                log.info("shrink: finestra a %d messaggi + %d caratteri richiamati fp=%s",
-                         keep_recall, len(recall_block), fp)
-                return (candidate_recall(_tail(msgs, keep_recall)), True)
+                final_keep = keep_recall
+                recall_system = _build_system(system_content, recall_block)
             # Il richiamo non ci sta: meglio la finestra piena senza estratti.
 
-        if keep > SHRINK_KEEP_TAIL:
-            log.info("shrink: finestra scorrevole a %d messaggi (minimo fisso %d) fp=%s",
-                     keep, SHRINK_KEEP_TAIL, fp)
-        return (_candidate(_tail(msgs, keep)), True)
+        # Sticky salvato col keep EFFETTIVAMENTE restituito (recall incluso):
+        # salvare un valore diverso sposterebbe il prefisso al turno successivo.
+        drop = len(msgs) - final_keep
+        if not sticky_hit or drop != _STICKY_DROP_COUNT.get(fp):
+            if len(_STICKY_DROP_COUNT) > _STICKY_DROP_COUNT_MAX:
+                _STICKY_DROP_COUNT.clear()
+            _STICKY_DROP_COUNT[fp] = drop
+            if len(_STICKY_SUMMARY) > _STICKY_DROP_COUNT_MAX:
+                _STICKY_SUMMARY.clear()
+            _STICKY_SUMMARY[fp] = (drop, summary, recall_block)
+        if final_keep > SHRINK_KEEP_TAIL:
+            log.info("shrink: keep %s a %d messaggi (drop_count=%d) fp=%s",
+                     "stabile" if sticky_hit else "ricalcolato", final_keep, drop, fp)
+        if recall_system is not None:
+            return (_make_candidate(recall_system)(_tail(msgs, final_keep)), True)
+        return (_candidate(_tail(msgs, final_keep)), True)
 
     # Nemmeno un messaggio ci sta: si scende ai tentativi degradanti. Il candidato
     # a coda fissa serve ancora alla scelta del piu' piccolo, in fondo.
