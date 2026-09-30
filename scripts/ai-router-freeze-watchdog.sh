@@ -18,6 +18,11 @@ CRASH_DIR="$HOME/.claude/state/ai-router-crash-dumps"
 WATCHDOG_LOG="$HOME/.claude/logs/ai-router-freeze-watchdog.log"
 
 mkdir -p "$(dirname "$WATCHDOG_LOG")" "$CRASH_DIR" "$(dirname "$STATE_FILE")"
+# ponytail: rotazione semplice stile rotate_if_needed (5MB -> .1); logrotate non configurato per i log utente
+WATCHDOG_MAX_BYTES=5242880
+if [ -f "$WATCHDOG_LOG" ] && [ "$(stat -c%s "$WATCHDOG_LOG")" -gt "$WATCHDOG_MAX_BYTES" ]; then
+    mv -f "$WATCHDOG_LOG" "${WATCHDOG_LOG}.1"
+fi
 
 ts() { date "+%Y-%m-%dT%H:%M:%S"; }
 log() { echo "[$(ts)] $*" >> "$WATCHDOG_LOG"; }
