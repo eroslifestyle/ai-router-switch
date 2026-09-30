@@ -26,6 +26,9 @@ ANTHROPIC_MAX_RETRIES = int(os.environ.get("AIROUTER_ANTHROPIC_MAX_RETRIES", "2"
 ANTHROPIC_RETRY_BASE_SEC = float(os.environ.get("AIROUTER_ANTHROPIC_RETRY_BASE_SEC", "0.5"))
 ANTHROPIC_RETRY_MAX_SLEEP_SEC = float(os.environ.get("AIROUTER_ANTHROPIC_RETRY_MAX_SLEEP_SEC", "60"))
 ANTHROPIC_RETRIABLE_STATUSES = frozenset({429, 500, 502, 503, 504, 529})
+# retry-after oltre questa soglia (secondi) = quota esaurita, non pacing: il 429
+# torna SUBITO al client senza dormire né ritentare.
+MAX_RETRY_AFTER_SEC = float(os.environ.get("AIROUTER_MAX_RETRY_AFTER_SEC", "60"))
 
 
 def parse_retry_after(value: str):
@@ -92,6 +95,12 @@ async def anthropic_call_with_retry(forward_fn, request, body, session,
             last_up = up
             break
         retry_after = parse_retry_after(up.headers.get("retry-after", ""))
+        if retry_after is not None and retry_after > MAX_RETRY_AFTER_SEC:
+            # 429 fail-fast: retry-after=Xs > soglia → quota esaurita, ritorno subito.
+            if log_fn:
+                log_fn(f"{tag} {up.status} fail-fast: retry-after={retry_after}s "
+                       f"> soglia {MAX_RETRY_AFTER_SEC}s → relay al client senza retry")
+            return up, True
         delay = backoff_sleep_sec(attempt, retry_after)
         if log_fn:
             log_fn(f"{tag} {up.status}: retry {attempt+1}/{ANTHROPIC_MAX_RETRIES} "
