@@ -15,6 +15,8 @@ import paths
 import tool_isolation
 import secrets_provider
 from synthetic_response import synthetic_error
+from context_rewrite import rewrite_for_context, _STICKY_DROP_COUNT, _STICKY_SUMMARY
+from token_counter import estimate_tokens_body
 
 LOCAL_MODEL_CODE = 'code-max'
 # Era 'code-fast', tolto il 2026-08-19 (decisione utente: un solo modello locale).
@@ -88,6 +90,28 @@ def resolve_local_model(requested: Optional[str]) -> str:
     if requested in (LOCAL_MODEL_CODE, LOCAL_MODEL_FALLBACK, LOCAL_MODEL_FAST, LOCAL_MODEL_THINK):
         return requested
     return LOCAL_MODEL_CODE
+
+
+# --- 400 exceed_context_size_error (2026-10-01): llama.cpp rifiuta il prompt
+# oltre la finestra e LiteLLM avvolge l'errore in ContextWindowExceededError;
+# il JSON con n_prompt_tokens/n_ctx e' annidato dentro una stringa, quindi si
+# estraggono con regex. Un solo retry con body accorciato sul limite reale.
+_CTX_EXCEEDED_RE = re.compile(
+    r"exceed_context_size_error|ContextWindowExceededError", re.IGNORECASE)
+_PROMPT_TOKENS_RE = re.compile(r"n_prompt_tokens['\"\\]*\s*[:=]\s*(\d+)")
+_N_CTX_RE = re.compile(r"n_ctx['\"\\]*\s*[:=]\s*(\d+)")
+
+
+def parse_ctx_exceeded(text: str) -> Optional[tuple]:
+    """Estrae (n_prompt_tokens, n_ctx) dal corpo di un 400 ctx-exceeded, o None."""
+    if not _CTX_EXCEEDED_RE.search(text):
+        return None
+    try:
+        prompt_tokens = int(_PROMPT_TOKENS_RE.search(text).group(1))
+        n_ctx = int(_N_CTX_RE.search(text).group(1))
+        return (prompt_tokens, n_ctx)
+    except (AttributeError, ValueError):
+        return None
 
 
 # --- Correzione difensiva stop_reason (LiteLLM 1.95.0 non mappa finish_reason
@@ -405,8 +429,12 @@ async def forward_local(
         'anthropic-version': anth_version,
     }
 
-    # Loop retry: stesso numero di tentativi per tutti i provider locali.
-    max_attempts = LOCAL_MAX_RETRY + 1
+    # Loop retry: stesso numero di tentativi per tutti i provider locali. Il
+    # tentativo EXTRA serve solo al ctx-retry, che non dipende da
+    # LOCAL_MAX_RETRY (anche a 0 deve poter accorciare e ritentare una volta);
+    # i retry 5xx/connessione restano gated da attempt < LOCAL_MAX_RETRY.
+    max_attempts = LOCAL_MAX_RETRY + 2
+    ctx_retry_done = False   # un solo retry per ctx-exceeded
 
     for attempt in range(max_attempts):
         try:
@@ -435,6 +463,43 @@ async def forward_local(
                 debug_catalog.record_event(
                     severity="block", category="local", kind="quota_429_local",
                     code=429, snippet=f"model={mod_reale}")
+            if status == 400:
+                # 400 exceed_context_size_error: accorciamo sul limite reale e
+                # ritentiamo UNA volta. Il retry rientra nel timeout complessivo
+                # (LOCAL_TIMEOUT_SEC invariato, < 300s del client). Il ctx-retry
+                # non dipende da LOCAL_MAX_RETRY: si fa sempre la prima volta.
+                _err_text = (await resp.read()).decode("utf-8", errors="replace")
+                await resp.release()
+                _content_type = resp.headers.get('content-type', 'application/json')
+                _ctx = parse_ctx_exceeded(_err_text)
+                if _ctx and not ctx_retry_done:
+                    ctx_retry_done = True
+                    n_prompt, n_ctx_limit = _ctx
+                    # Il limite è in TOKEN per lo stimatore del router:
+                    # scala la stima del body col rapporto fra finestra
+                    # reale e token reali contati da llama.cpp.
+                    stima = estimate_tokens_body(body, mod_reale)
+                    nuovo_limite = max(1, int(n_ctx_limit * 0.9 * stima / n_prompt))
+                    # fp usa-e-getta: non deve finire nello stato sticky condiviso
+                    _fp = f"ctx-retry-{id(body)}-{attempt}"
+                    nuovo_body, _taglio = rewrite_for_context(
+                        body, mod_reale, _fp, safe_limit_override=nuovo_limite)
+                    _STICKY_DROP_COUNT.pop(_fp, None)
+                    _STICKY_SUMMARY.pop(_fp, None)
+                    log_fn(f"local ctx-exceeded: n_prompt={n_prompt} n_ctx={n_ctx_limit} "
+                           f"→ retry accorciato (taglio={_taglio})")
+                    debug_catalog.record_event(
+                        severity="error", category="local", kind="local_ctx_exceeded_retry",
+                        code=400,
+                        snippet=f"n_prompt={n_prompt} n_ctx={n_ctx_limit} trimmed={_taglio}")
+                    body = nuovo_body
+                    continue
+                # Non ctx-exceeded, o ctx-retry già usato: inoltra il 400
+                # (risposta già letta: si restituisce una Response nuova).
+                # Via header e non content_type=: aiohttp rifiuta i valori
+                # con "; charset=..." nel parametro content_type.
+                return web.Response(body=_err_text.encode(), status=status,
+                                    headers={"Content-Type": _content_type})
             if passthrough:
                 _max_tok = requested_max_tokens(body)
                 if status == 200 and _max_tok:

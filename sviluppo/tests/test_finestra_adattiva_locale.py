@@ -48,7 +48,7 @@ def _corpo_lungo(model: str, coppie: int = 0, max_tokens: int = MAX_TOKENS) -> b
 def test_i_modelli_locali_non_cadono_piu_sul_default():
     # Valori dal num_ctx dei Modelfile Ollama e dal -c delle unit llama.cpp.
     attesi = {
-        "code-max": 262_144, "coding-fast": 32_768,
+        "code-max": 131_072, "coding-fast": 32_768,
         "fast-max": 32_768, "cyber-max": 32_768, "coding-light": 16_384,
         "coder-abliterated": 131_072, "chat-max": 131_072,
     }

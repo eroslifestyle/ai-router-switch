@@ -12,6 +12,11 @@ BYTES_PER_TOKEN = {
     "anthropic_old": 3.5,   # misurato: 3.53 byte/token (Haiku 4-5, Sonnet 4-5, Sonnet 4-6, Opus 4-5, Opus 4-6)
     "minimax": 3.8,         # misurato: 3.85 byte/token
     "glm": 4.0,             # misurato: 4.06 byte/token
+    # Misurato 2026-10-01 su 400 exceed_context_size_error di llama.cpp:
+    # 474.410 byte = 140.206 token reali (3,38 byte/token). Il default 4.0
+    # sottostimava i token del 18% e il gate lasciava passare corpi troppo grandi.
+    "code-max": 3.3,
+    "qwen3-coder": 3.3,     # stesso backend Qwen3-Coder-Next (match per prefisso)
 }
 
 DEFAULT_BYTES_PER_TOKEN = 4.0  # fallback quando il modello non è noto
@@ -61,6 +66,12 @@ def bytes_per_token(model: Optional[str]) -> float:
 
     if model_lower.startswith("glm"):
         return BYTES_PER_TOKEN["glm"]
+
+    if model_lower.startswith("code-max"):
+        return BYTES_PER_TOKEN["code-max"]
+
+    if model_lower.startswith("qwen3-coder"):
+        return BYTES_PER_TOKEN["qwen3-coder"]
 
     return DEFAULT_BYTES_PER_TOKEN
 

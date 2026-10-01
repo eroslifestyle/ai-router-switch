@@ -83,13 +83,14 @@ MODEL_CONTEXT_MAP = {
     # quello di -c nella unit, confermato dal backend vivo via /props. Senza questa
     # voce ereditava il default 200.000 e il gate lasciava passare corpi che il
     # backend non regge.
-    # 262.144 dal 2026-08-19: e' il massimo nativo di Qwen3-Coder-Next, e il
-    # raddoppio da 131.072 costa appena 1,8 GB di GTT (misurato: 48.272 -> 50.124 MB).
-    # La KV cache e' piccola perche' l'architettura e' ibrida: pochi layer di full
-    # attention, il resto lineare. Il grosso dei 46 GB sono i pesi, non il contesto.
+    # 131.072 dal 2026-10-01: l'unità attiva (2026-10-01) gira con -c 131072; i
+    # due valori erano divergenti e il gate lasciava passare prompt ~140k che il
+    # backend rifiutava con 400 exceed_context_size_error.
+    # 262k non servirebbe comunque: con LOCAL_TIMEOUT_SEC=240 e prefill a
+    # ~300-650 tok/s il prompt utile resta ~70-100k token.
     # Se si cambia -c nelle unit llama-qcnext{,-always}.service, questo valore va
     # cambiato con loro: e' il gate a decidere cosa il router lascia passare.
-    "code-max": 262_144,
+    "code-max": 131_072,
     # Gli altri modelli locali (misurati 2026-08-19 su `ollama show` e sulle unit
     # llama.cpp). Senza queste voci cadevano tutti sul default 200.000: il gate
     # lasciava passare corpi fino a 3x la capacita' vera e Ollama li troncava in

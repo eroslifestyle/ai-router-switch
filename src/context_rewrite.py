@@ -192,16 +192,18 @@ def _fit_keep(msgs: list, model: str, safe_limit: int, make_candidate) -> int:
     return best
 
 
-def rewrite_for_context(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
+def rewrite_for_context(body: bytes, model: str, fp: str,
+                        safe_limit_override: int | None = None) -> Tuple[bytes, bool]:
     # Fail-safe: un errore nel rewrite non deve MAI bloccare il proxy.
     try:
-        return _rewrite_impl(body, model, fp)
+        return _rewrite_impl(body, model, fp, safe_limit_override)
     except Exception as e:
         log.warning("rewrite_for_context fail-safe: %s", e)
         return (body, False)
 
 
-def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
+def _rewrite_impl(body: bytes, model: str, fp: str,
+                  safe_limit_override: int | None = None) -> Tuple[bytes, bool]:
     try:
         data = json.loads(body)
     except (json.JSONDecodeError, ValueError):
@@ -215,7 +217,9 @@ def _rewrite_impl(body: bytes, model: str, fp: str) -> Tuple[bytes, bool]:
     # Riserva all'output esattamente il max_tokens chiesto dal client invece di
     # una percentuale fissa: su un modello da 1M con max_tokens=32k questo
     # restituisce ~168k token di contesto in piu' rispetto al buffer del 20%.
-    safe_limit = get_safe_input_limit(model, data.get("max_tokens"))
+    # Override (2026-10-01): il retry post-400 di local_backend passa il limite
+    # calcolato dal n_ctx/n_prompt REALI restituiti da llama.cpp, stima a parte.
+    safe_limit = safe_limit_override or get_safe_input_limit(model, data.get("max_tokens"))
 
     if token_est <= safe_limit:
         return (body, False)
