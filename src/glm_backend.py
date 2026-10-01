@@ -780,6 +780,8 @@ async def forward_glm(request, body: bytes, session, model: str,
     # ISOLAMENTO TOOL (2026-07-19): choke-point unico, vedi tool_isolation.py.
     body = tool_isolation.filter_tools_for_backend(body, "glm")
     body = tool_isolation.strip_heavy_mcp_for_glm(body)
+    # 400 [1210] (2026-10-01): riferimenti a tool tolti dagli strip qui sopra
+    body = tool_isolation.drop_orphan_tool_references(body)
 
     # SANITIZZAZIONE MESSAGES (2026-09-20): thinking/signature/content-vuoti/
     # ruoli consecutivi verso z.ai — vedi sanitize_glm_messages.

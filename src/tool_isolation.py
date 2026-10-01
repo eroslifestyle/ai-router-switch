@@ -481,6 +481,54 @@ def strip_heavy_mcp_for_glm(body: bytes) -> bytes:
     # superano la soglia di byte, fallback generico per-dimensione.
     return strip_tools_by_size_for_glm(json.dumps(data).encode())
 
+
+def drop_orphan_tool_references(body: bytes) -> bytes:
+    """Rimuove i `tool_reference` che nominano tool assenti da `tools`.
+
+    Causa del 400 [1210] di z.ai, verificata il 2026-10-01 sui 5 body di
+    logs/glm-1210-bodies: tutti avevano, nella LISTA `content` di un
+    `tool_result` (risultato di ToolSearch), riferimenti a tool tolti dagli
+    strip GLM o mai dichiarati; rimuovendo solo quelli z.ai risponde 200.
+    Copre anche la forma dict `{"tool_references": [...]}` della beta
+    tool-search. Un `content` lista che resta vuoto diventa un blocco text
+    (verificato 200). Body senza riferimenti orfani -> ritornato identico."""
+    if b"tool_reference" not in body:
+        return body
+    try:
+        data = json.loads(body)
+    except Exception:
+        return body
+    if not isinstance(data, dict) or not isinstance(data.get("messages"), list):
+        return body
+    presenti = {t.get("name") for t in data.get("tools") or [] if isinstance(t, dict)}
+    tolti: list[str] = []
+
+    def pulisci(blocchi: list) -> list:
+        tenuti = []
+        for blk in blocchi:
+            if isinstance(blk, dict) and blk.get("type") == "tool_reference" \
+                    and blk.get("tool_name") not in presenti:
+                tolti.append(str(blk.get("tool_name")))
+                continue
+            figli = blk.get("content") if isinstance(blk, dict) else None
+            if isinstance(figli, list) and b"tool_reference" in json.dumps(figli).encode():
+                blk["content"] = pulisci(figli) or [{"type": "text", "text": "Tool loaded."}]
+            elif isinstance(figli, dict) and isinstance(figli.get("tool_references"), list):
+                figli["tool_references"] = pulisci(figli["tool_references"])
+            tenuti.append(blk)
+        return tenuti
+
+    for msg in data["messages"]:
+        if isinstance(msg, dict) and isinstance(msg.get("content"), list):
+            msg["content"] = pulisci(msg["content"])
+    if not tolti:
+        return body
+    debug_catalog.record_event(
+        severity="info", category="glm", kind="orphan_tool_reference_drop",
+        snippet=f"dropped={len(tolti)} esempi={sorted(set(tolti))[:5]}")
+    return json.dumps(data).encode()
+
+
 _TOOL_USE_NAME_AFTER = re.compile(r'"type"\s*:\s*"tool_use"\s*,\s*(?:[^{}]*?,\s*)??"name"\s*:\s*"([^"]+)"')
 _TOOL_USE_NAME_BEFORE = re.compile(r'"name"\s*:\s*"([^"]+)"\s*,\s*(?:[^{}]*?,\s*)??"type"\s*:\s*"tool_use"')
 
