@@ -180,3 +180,13 @@ if __name__ == "__main__":
             fn()
             print(f"ok  {nome}")
     print("tutti i test passati")
+
+
+def test_repair_conserva_system_a_meta_conversazione():
+    """Dal 2026-10-01 i role=system non in testa restano al loro posto: gli upstream
+    li accettano e scartarli faceva perdere fino a 36.787 caratteri a turno nel rewrite."""
+    msgs = [{"role": "user", "content": "ciao"},
+            {"role": "assistant", "content": "ok"},
+            {"role": "system", "content": "reminder"},
+            {"role": "user", "content": "e ora?"}]
+    assert [m["role"] for m in _repair_message_sequence(msgs)] == ["user", "assistant", "system", "user"]

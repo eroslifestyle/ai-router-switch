@@ -813,34 +813,14 @@ def _must_stay_system(msg) -> bool:
 def _repair_message_sequence(messages: list) -> list:
     if not messages:
         return messages
-    # Lo scarto dei messaggi role=system era MUTO. Verificato il 2026-08-08 con
-    # una prova diretta: un messaggio system con "rispondi SOLO ANANAS" viene
-    # eliminato e la risposta lo ignora — il contenuto è perso e nessuno lo
-    # segnala, né al client né al log. Lo scarto in sé è corretto (l'API
-    # Anthropic vuole il system come campo top-level, non fra i messages), ma
-    # deve essere contabile: qui si registra soltanto, non si cambia il
-    # comportamento. La correzione vera — promuovere il contenuto nel campo
-    # `system` invece di buttarlo — è una voce aperta nel TODO, perché
-    # cambierebbe cosa viene inviato all'upstream.
-    _scartati = [m for m in messages if isinstance(m, dict) and m.get("role") == "system"
-                 and not _must_stay_system(m)]
-    _preservati = [m for m in messages if isinstance(m, dict) and m.get("role") == "system"
-                   and _must_stay_system(m)]
-    if _scartati:
-        try:
-            _persi = sum(len(str(m.get("content", ""))) for m in _scartati)
-            log(f"repair: scartati {len(_scartati)} messaggi role=system "
-                f"({_persi} caratteri di contenuto persi, non promossi nel campo system)")
-        except Exception:
-            pass
-    if _preservati:
-        try:
-            log(f"repair: preservati {len(_preservati)} messaggi role=system "
-                f"con blocchi tool_addition/tool_removal o campi per-turno (l'API li ammette solo li')")
-        except Exception:
-            pass
-    msgs = [dict(m) for m in messages
-            if m.get("role") != "system" or _must_stay_system(m)]
+    # I messaggi role=system dentro `messages` restano al loro posto: Claude Code
+    # li manda di routine (3.278 richieste a log) e Anthropic, z.ai e llama.cpp
+    # li accettano (verificato il 2026-10-01: 1.322 ok su anthropic, sonda
+    # "rispondi SOLO ANANAS" rispettata da glm-4.7, 200 su code-max). Prima qui
+    # venivano scartati: solo nel rewrite/shrink, fino a 36.787 caratteri persi
+    # a turno. Restano fuori solo quelli in testa, perche' la sequenza deve
+    # iniziare con un messaggio user (ciclo qui sotto).
+    msgs = [dict(m) for m in messages if isinstance(m, dict)]
     changed = True
     while changed and msgs:
         changed = False
