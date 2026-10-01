@@ -42,3 +42,33 @@ def test_forward_glm_chiama_on_shrink_col_body_ridotto(monkeypatch):
     except Exception:
         pass  # la rete fallisce di proposito: conta solo il callback
     assert ridotti and visti == ridotti
+
+
+def test_forward_qwen_chiama_on_shrink_col_body_ridotto(monkeypatch):
+    """Lo shrink preventivo di forward_qwen notifica il body ridotto al proxy."""
+    import qwen_backend
+
+    async def _key():
+        return "k"
+
+    ridotti = []
+
+    async def _shrink(body, target):
+        ridotti.append(body[:target])
+        return ridotti[-1]
+
+    monkeypatch.setattr(qwen_backend, "get_qwen_key", _key)
+    monkeypatch.setattr(qwen_backend, "QWEN_SHRINK_TARGET_BYTES", 100)
+    import context_shrink
+    monkeypatch.setattr(context_shrink, "shrink_body_to_budget", _shrink)
+
+    visti = []
+    body = (b'{"model":"qwen-coder-plus","max_tokens":10,"messages":[{"role":"user","content":"'
+            + b"x" * 500 + b'"}]}')
+    try:
+        asyncio.run(qwen_backend.forward_qwen(
+            _Req(), body, _BoomSession(), "claude-haiku-4-5", log_fn=lambda *_: None,
+            upstream_model="qwen-coder-plus", on_shrink=visti.append))
+    except Exception:
+        pass  # la rete fallisce di proposito: conta solo il callback
+    assert ridotti and visti == ridotti

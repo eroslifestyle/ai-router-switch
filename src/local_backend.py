@@ -389,7 +389,8 @@ async def forward_local(
     model: str,
     log_fn: Callable[..., None] = print,
     passthrough: bool = False,
-    upstream_model: str = ''
+    upstream_model: str = '',
+    on_shrink=None
 ) -> Optional[aiohttp.ClientResponse]:
     """Inoltra la richiesta al backend locale con retry su errori transienti."""
     key = await get_local_key()
@@ -493,6 +494,8 @@ async def forward_local(
                         code=400,
                         snippet=f"n_prompt={n_prompt} n_ctx={n_ctx_limit} trimmed={_taglio}")
                     body = nuovo_body
+                    if on_shrink is not None:
+                        on_shrink(nuovo_body)
                     continue
                 # Non ctx-exceeded, o ctx-retry già usato: inoltra il 400
                 # (risposta già letta: si restituisce una Response nuova).

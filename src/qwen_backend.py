@@ -436,7 +436,7 @@ QWEN_LIMITER = QwenRateLimiter()
 
 
 async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
-                       passthrough: bool = False, upstream_model: str = ""):
+                       passthrough: bool = False, upstream_model: str = "", on_shrink=None):
     """Inoltra richiesta all'upstream Qwen Anthropic-compatible.
 
     DIFFERENZE da forward_glm:
@@ -477,6 +477,8 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
         if _shrunk is not None and len(_shrunk) < len(body):
             log_fn(f"QWEN preventivo shrink {len(body)}b -> {len(_shrunk)}b")
             body = _shrunk
+            if on_shrink is not None:
+                on_shrink(_shrunk)
 
     # Il gateway risponde 413 RequestTooLarge sui byte, prima ancora di valutare
     # il contesto del modello, e non spiega perche'. Intercettarlo qui produce un

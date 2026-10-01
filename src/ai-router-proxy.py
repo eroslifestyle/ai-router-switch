@@ -767,6 +767,14 @@ async def handle(request):
     )
     relay = _relay.relay
 
+    # ctx: i backend che accorciano il body dopo il calcolo del delta lo notificano qui
+    def _on_upstream_shrink(shrunk, _orig=_orig_body, _m=ctx_model):
+        try:
+            _relay.usage_delta_tokens = max(_relay.usage_delta_tokens, max(0,
+                estimate_tokens_body(_orig, _m) - estimate_tokens_body(shrunk, _m)))
+        except Exception as _e:
+            log(f"ctx: usage-delta upstream-shrink EXC {_e} fp={fp}")
+
     # ─────────────────────────────────────────────────────────────────────────────
     # TUNNEL TRASPARENTE: dispatch universale per tutte le modalità (righe 486-550)
     # ─────────────────────────────────────────────────────────────────────────────
@@ -907,16 +915,9 @@ async def handle(request):
             _glm_body = strip_thinking_blocks(body)
             _glm_body = _glm_mod.strip_thinking_for_model(_glm_body, _req_model, log_fn=log, backend="GLM")
             _glm_body = _glm_mod.set_body_model(_glm_body, _glm_model)
-            def _glm_on_shrink(shrunk, _orig=_orig_body, _m=ctx_model):
-                # ctx: lo shrink GLM avviene dopo il calcolo del delta: aggiornalo qui
-                try:
-                    _relay.usage_delta_tokens = max(_relay.usage_delta_tokens, max(0,
-                        estimate_tokens_body(_orig, _m) - estimate_tokens_body(shrunk, _m)))
-                except Exception as _e:
-                    log(f"ctx: usage-delta GLM EXC {_e} fp={fp}")
             up = await _glm_mod.forward_glm(request, _glm_body, session,
                                             _req_model or _glm_model, log_fn=log,
-                                            passthrough=True, upstream_model=_glm_model, on_shrink=_glm_on_shrink)
+                                            passthrough=True, upstream_model=_glm_model, on_shrink=_on_upstream_shrink)
             return await relay(up, chat_fp_for_rewrite=fp,
                                extra_headers={"x-ai-verified": f"tunnel-{mode}-glm({_glm_model})"}, final_override=f"glm:{_glm_model}")
         except Exception as e:
@@ -940,7 +941,7 @@ async def handle(request):
             _qwen_body = _qwen_mod.set_body_model(_qwen_body, _qwen_model)
             up = await _qwen_mod.forward_qwen(request, _qwen_body, session,
                                               _req_model or _qwen_model, log_fn=log,
-                                              passthrough=True, upstream_model=_qwen_model)
+                                              passthrough=True, upstream_model=_qwen_model, on_shrink=_on_upstream_shrink)
             return await relay(up, chat_fp_for_rewrite=fp,
                                extra_headers={"x-ai-verified": f"tunnel-{mode}-qwen({_qwen_model})"}, final_override=f"qwen:{_qwen_model}")
         except Exception as e:
@@ -976,13 +977,14 @@ async def handle(request):
             _local_body = strip_thinking_blocks(_local_body)
             _local_body = strip_thinking_for_model(_local_body, _req_model, log_fn=log, backend="local")
             _local_body = _local_mod.slim_local_body(_local_body, mode)
+            _on_upstream_shrink(_local_body)
             _local_body = _local_mod.set_body_model(_local_body, _local_model)
 
             # Trace completo per debug provider local
             start_trace = time.monotonic()
             up = await _local_mod.forward_local(request, _local_body, session,
                                                 _req_model or _local_model, log_fn=log,
-                                                passthrough=True, upstream_model=_local_model)
+                                                passthrough=True, upstream_model=_local_model, on_shrink=_on_upstream_shrink)
             elapsed_ms = (time.monotonic() - start_trace) * 1000
 
             # Cattura risposta per trace
