@@ -8,6 +8,7 @@ import os
 import queue as _queue_mod
 import random
 import threading
+import logging
 import time
 from collections import deque
 
@@ -535,6 +536,43 @@ def log(msg: str):
             print(line, file=__import__('sys').stderr)
         except Exception:
             pass
+
+
+# ── Bridge logging stdlib → log() (2026-10-01) ──────────────────────────────
+# I moduli src/ che usano logging.getLogger (context_rewrite, context_recall)
+# non avevano alcun handler configurato: i loro INFO finivano nel lastResort
+# (solo WARNING, su stderr) e MAI in ai-router.log. Questo handler inoltra i
+# record alla coda di log(), rispettandone il formato. No loop: log() non usa
+# logging. Le librerie esterne restano a WARNING (vedi _install_stdlib_bridge).
+
+class _StdlibLogBridge(logging.Handler):
+    def emit(self, record):
+        try:
+            log(record.getMessage())
+        except Exception:
+            self.handleError(record)
+
+
+_PROJECT_LOGGERS = ("context_rewrite", "context_recall")
+
+
+def _install_stdlib_bridge():
+    """Handler root a livello INFO; root resta a WARNING.
+
+    A INFO solo i logger del progetto (_PROJECT_LOGGERS): le librerie
+    (urllib3, httpx, aiohttp, asyncio...) restano al loro livello.
+    """
+    global _STDLIB_BRIDGE_INSTALLED
+    if _STDLIB_BRIDGE_INSTALLED:
+        return
+    _STDLIB_BRIDGE_INSTALLED = True
+    handler = _StdlibLogBridge(level=logging.INFO)
+    logging.getLogger().addHandler(handler)
+    for name in _PROJECT_LOGGERS:
+        logging.getLogger(name).setLevel(logging.INFO)
+
+
+_STDLIB_BRIDGE_INSTALLED = False
 
 
 # log_exc rimossa il 2026-08-07: nessun chiamante. Era `log(msg + traceback)`.

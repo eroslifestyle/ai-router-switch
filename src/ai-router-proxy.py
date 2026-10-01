@@ -1275,6 +1275,8 @@ def main():
     _sys.excepthook = lambda t, v, tb: _death(f"UNHANDLED {t.__name__}: {v}")
     import atexit as _atexit
     _atexit.register(lambda: _death("EXIT pulito (atexit)"))
+    from router_utils import _install_stdlib_bridge
+    _install_stdlib_bridge()
     log(f"START ai-router-proxy multi-port {LISTEN_PORTS}")
     try:
         asyncio.run(_run_multiport())
