@@ -41,6 +41,7 @@ CTX = ContextManager()
 # ── Moduli condivisi (gia' estratti in file separati) ───────────────────────
 from model_context_map import get_safe_input_limit, has_measured_context_limit
 from context_rewrite import rewrite_for_context
+from token_counter import estimate_tokens_body
 from context_alert import notify_context_threshold
 from sse_utils import _sse_events_from_message, _send_sse_message
 from anthropic_body import strip_thinking_blocks
@@ -393,6 +394,9 @@ async def handle(request):
                 ctx_check["action"],
             )
 
+        # ctx: conservo il body ORIGINALE (prima di qualunque accorciatura) per
+        # calcolare il delta di usage da restituire al client.
+        _orig_body = body
         # Nuovo: calcola safe_limit e determina se serve rewrite.
         # Lo spazio da riservare all'output e' il max_tokens che il client ha
         # chiesto davvero, non una percentuale fissa: il 20% sprecava 72k di
@@ -574,6 +578,18 @@ async def handle(request):
         except Exception as e2:
             log(f"ctx: bottleneck-shrink EXC {e2} mode={mode} fp={fp}")
 
+    # ctx: se il body e' stato accorciato, l'usage upstream riporta i token del
+    # body RIDOTTO e il client non compatta mai. Il relay aggiunge il delta a
+    # usage.input_tokens della risposta: il client vede il contesto originale.
+    _usage_delta_tokens = 0
+    if _orig_body is not body and len(_orig_body) > len(body):
+        try:
+            _usage_delta_tokens = max(0,
+                estimate_tokens_body(_orig_body, ctx_model)
+                - estimate_tokens_body(body, ctx_model))
+        except Exception as _e:
+            log(f"ctx: usage-delta EXC {_e} fp={fp}")
+
     # TRIM INTERCEPT RIMOSSO (fix 2026-07-21): sostituiva il body APPENA ARRIVATO
     # con uno salvato in un turno PRECEDENTE (se più piccolo — quasi sempre vero in
     # sessioni agentiche dove il body cresce). Il body stantio NON conteneva l'ultimo
@@ -747,6 +763,7 @@ async def handle(request):
         # fix 2026-07-21: no-op — il salvataggio cross-turno alimentava il TRIM
         # INTERCEPT (rimosso): body stantii sostituivano le richieste nuove.
         trim_context_fn=lambda body, fp: None,
+        usage_delta_tokens=_usage_delta_tokens,
     )
     relay = _relay.relay
 

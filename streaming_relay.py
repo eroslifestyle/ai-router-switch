@@ -13,6 +13,40 @@ from router_utils import collect_tools_stats
 import tool_isolation
 
 
+
+_SSE_EVENT_PAT = re_module.compile(
+    rb'event:\s*(message_start|message_delta)\ndata:\s*(\{.*?\})\n\n',
+    re_module.DOTALL,
+)
+_INPUT_TOKENS_PAT = re_module.compile(rb'("input_tokens"\s*:\s*)(\d+)')
+
+
+def _patch_sse_usage_input_tokens(chunk: bytes, delta: int):
+    """Aggiunge delta a input_tokens dentro gli eventi message_start/message_delta.
+
+    z.ai/GLM manda input_tokens VUOTO nel message_start e valorizzato nel
+    message_delta: il client legge l'usage finale da entrambi (FIX F), quindi il
+    delta va su ogni evento dei due il cui usage ha input_tokens > 0, al massimo
+    una volta per evento. Un message_start a 0 resta 0 (patchera' il delta).
+    Ritorna (chunk, numero eventi patchati); 0 patch = chunk invariato.
+    Per chunk, nessun buffering.
+    """
+    if b"input_tokens" not in chunk:
+        return chunk, 0
+
+    def _sub(m):
+        ev_name, data = m.group(1), m.group(2)
+        m2 = _INPUT_TOKENS_PAT.search(data)
+        if not m2 or int(m2.group(2)) == 0:
+            return m.group(0)
+        new_data = data[:m2.start()] + m2.group(1) + str(int(m2.group(2)) + delta).encode() + data[m2.end():]
+        return b"event: " + ev_name + b"\ndata: " + new_data + b"\n\n"
+
+    out = _SSE_EVENT_PAT.sub(_sub, chunk)
+    # subn conta anche i match non modificati: conta solo le patch reali
+    return out, (1 if out != chunk else 0)
+
+
 class StreamingRelay:
     """Relay SSE/streaming/non-streaming con riscrittura model + usage tracking."""
 
@@ -28,6 +62,7 @@ class StreamingRelay:
         log_fn,
         log_router_usage_fn,
         trim_context_fn,
+        usage_delta_tokens: int = 0,   # ctx: token da restituire al client perché veda il contesto originale
     ):
         self.request = request
         self.body = body
@@ -42,6 +77,7 @@ class StreamingRelay:
         self.log_fn = log_fn
         self.log_router_usage_fn = log_router_usage_fn
         self.trim_context_fn = trim_context_fn
+        self.usage_delta_tokens = int(usage_delta_tokens or 0)
 
     @property
     def is_synthetic(self) -> bool:
@@ -261,6 +297,11 @@ class StreamingRelay:
             _t_start = time.monotonic()
         _ttfb_ms = None
         model_rewrite_done = orig_model is None  # se non c'è orig_model, skip subito
+        # ctx: se la richiesta è stata accorciata (rewrite/bottleneck), il client
+        # deve vedere i token del body ORIGINALE in usage.input_tokens, altrimenti
+        # non compatta mai (bug saturazione >3x finestra). Patch solo su
+        # message_start (SSE) o usage (JSON), resto byte per byte.
+        usage_delta_pending = self.usage_delta_tokens > 0
         # FIX F: accumula chunks per estrarre usage reale dai record SSE/JSON
         _acc_buf = bytearray()
         _buf_str = ""
@@ -287,6 +328,14 @@ class StreamingRelay:
                 if chunk_count == 1:
                     _ttfb_ms = (time.monotonic() - _t_start) * 1000.0
                     self.log_fn(f"relay first chunk {len(chunk)}B (SSE={is_sse})")
+                # ctx: usage al client — patch SOLO message_start/message_delta (GLM
+                # mette input_tokens nel delta), zero buffering. _raw_chunk per FIX F:
+                # il sidecar registra i token upstream.
+                _raw_chunk = chunk
+                if usage_delta_pending and is_sse:
+                    chunk, _np = _patch_sse_usage_input_tokens(chunk, self.usage_delta_tokens)
+                    if _np:
+                        self.log_fn(f"ctx: usage al client +{self.usage_delta_tokens} token x{_np} eventi (contesto originale riscritto)")
                 # FIX E: riscrivi il campo 'model' nello stream SSE (solo primo chunk rilevante)
                 if not model_rewrite_done and orig_model:
                     if is_sse:
@@ -309,10 +358,25 @@ class StreamingRelay:
                             model_rewrite_done = True
                         except Exception:
                             pass  # non-JSON body, skip
-                # FIX F: accumulazione parziale per usage extraction
+
+                # ctx: usage al client per risposte NON-streaming JSON
+                # (indipendente dal rewrite del model). Patch una volta sola.
+                if usage_delta_pending and not is_sse:
+                    try:
+                        j = json.loads(chunk)
+                        if isinstance(j, dict) and isinstance(j.get("usage"), dict):
+                            j["usage"]["input_tokens"] = int(j["usage"].get("input_tokens", 0) or 0) + self.usage_delta_tokens
+                            chunk = json.dumps(j).encode()
+                            usage_delta_pending = False
+                            self.log_fn(f"ctx: usage al client +{self.usage_delta_tokens} token (contesto originale riscritto)")
+                    except Exception:
+                        pass  # non-JSON body, skip
+                # FIX F: accumulazione per usage extraction — sul chunk PRIMA della
+                # patch usage-delta: il sidecar deve registrare i token PAGATI
+                # (upstream), non quelli gonfiati mostrati al client.
                 if len(_acc_buf) < _acc_limit:
-                    _acc_buf.extend(chunk[:(_acc_limit - len(_acc_buf))])
-                _tail_buf.extend(chunk)
+                    _acc_buf.extend(_raw_chunk[:(_acc_limit - len(_acc_buf))])
+                _tail_buf.extend(_raw_chunk)
                 if len(_tail_buf) > _tail_limit:
                     del _tail_buf[:len(_tail_buf) - _tail_limit]
                 await resp.write(chunk)
