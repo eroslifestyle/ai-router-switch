@@ -746,13 +746,15 @@ def sanitize_glm_messages(body: bytes, log_fn=None) -> bytes:
 
 async def forward_glm(request, body: bytes, session, model: str,
                       log_fn=print, passthrough: bool = False,
-                      upstream_model: str = ""):
+                      upstream_model: str = "", on_shrink=None):
     """Invia request al backend GLM con retry loop 2 tentativi (R3-#6).
 
     Args:
         passthrough: se True, ritorna la ClientResponse raw (per relay streaming).
                      Il caller deve chiamare .release() o consumare il body.
                      se False (default), legge il body e ritorna web.Response.
+        on_shrink: callback(body_ridotto) chiamata se lo shrink preventivo accorcia il body
+                   (il proxy ci ricalcola l'usage da restituire al client).
     """
 
     def _err(status, etype, msg, headers=None):
@@ -803,6 +805,8 @@ async def forward_glm(request, body: bytes, session, model: str,
             log_fn(f"GLM preventivo shrink {len(body)}b -> {len(_shrunk)}b "
                    f"(target {_shrink_target}b per {upstream_model or model})")
             body = _shrunk
+            if on_shrink is not None:
+                on_shrink(_shrunk)
 
     url = GLM_UPSTREAM + request.path_qs
 
