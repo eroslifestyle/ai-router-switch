@@ -454,9 +454,16 @@ class Card(QWidget):
         if mode == "claude-design":
             # Non è una modalità router: lancia una sessione claude DIRETTA ad Anthropic
             # (first-party) per /design, bypassando il router senza toccarlo.
+            # Claude Design lavora sulla cartella di avvio: prima si sceglie il progetto.
             import subprocess
+            from PySide6.QtWidgets import QFileDialog
+            project_dir = QFileDialog.getExistingDirectory(
+                self, "Claude Design — scegli il progetto", "/mnt/nvme2/projects/Progetti")
+            if not project_dir:
+                return
             try:
-                subprocess.Popen(["gnome-terminal", "--", "/home/mrxxx/.claude/scripts/claude-design"])
+                subprocess.Popen(["gnome-terminal", "--working-directory", project_dir, "--",
+                                  "/home/mrxxx/.claude/scripts/claude-design", project_dir])
             except Exception:
                 pass
             return
