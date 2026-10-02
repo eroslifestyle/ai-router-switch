@@ -53,7 +53,7 @@ MODES = [
     {"id": "mix-gm", "icon": "🟢🟠", "label": "MixGM", "exec": "GLM-5.2 THINK + MiniMax ACT"},
     {"id": "mix-gm-2", "icon": "🟢🟠⚡", "label": "MixGM-2", "exec": "MixGM + delega forzata (deny)"},
     {"id": "mix-ag", "icon": "🔵🟢", "label": "MixAG", "exec": "Anthropic THINK + GLM ACT (deny)"},
-    {"id": "opr", "icon": "🌐", "label": "OPR", "exec": "Ox Alpha via OpenRouter"},
+    {"id": "claude-design", "icon": "🎨", "label": "Claude Design", "exec": "Sessione diretta /design"},
     {"id": "mix-al", "icon": "🔵🖥", "label": "MixAL", "exec": "Anthropic THINK + LLM locale ACT"},
     {"id": "local", "icon": "🖥️", "label": "Local", "exec": "Tutto su LLM locale (code-max)"},
 ]
@@ -357,7 +357,7 @@ class Card(QWidget):
 
         solo_grid = QGridLayout()
         solo_grid.setSpacing(SPACING)
-        solo_ids = ["anthropic", "minimax", "glm", "qwen", "opr", "local"]
+        solo_ids = ["anthropic", "minimax", "glm", "qwen", "claude-design", "local"]
         self._cards = {}
         for i, mid in enumerate(solo_ids):
             m = next(x for x in MODES if x["id"] == mid)
@@ -450,6 +450,15 @@ class Card(QWidget):
         self._stop_btn.setEnabled(is_active)
 
     def _do_switch(self, mode):
+        if mode == "claude-design":
+            # Non è una modalità router: lancia una sessione claude DIRETTA ad Anthropic
+            # (first-party) per /design, bypassando il router senza toccarlo.
+            import subprocess
+            try:
+                subprocess.Popen(["gnome-terminal", "--", "/home/mrxxx/.claude/scripts/claude-design"])
+            except Exception:
+                pass
+            return
         j = http_post(f"{ROUTER}/admin/mode/{mode}")
         if j and j.get("ok"):
             self._current = mode
