@@ -53,7 +53,7 @@ MODES = [
     {"id": "mix-gm", "icon": "🟢🟠", "label": "MixGM", "exec": "GLM-5.2 THINK + MiniMax ACT"},
     {"id": "mix-gm-2", "icon": "🟢🟠⚡", "label": "MixGM-2", "exec": "MixGM + delega forzata (deny)"},
     {"id": "mix-ag", "icon": "🔵🟢", "label": "MixAG", "exec": "Anthropic THINK + GLM ACT (deny)"},
-    {"id": "claude-design", "icon": "🎨", "label": "Claude Design", "exec": "Sessione diretta /design"},
+    {"id": "claude-design", "icon": "🎨", "label": "Claude Design", "exec": "Sessione diretta /design", "btn": "APRI"},
     {"id": "mix-al", "icon": "🔵🖥", "label": "MixAL", "exec": "Anthropic THINK + LLM locale ACT"},
     {"id": "local", "icon": "🖥️", "label": "Local", "exec": "Tutto su LLM locale (code-max)"},
 ]
@@ -219,6 +219,7 @@ class ModeCard(QWidget):
         self._on_switch = on_switch
         self._active = False
         self._switching = False
+        self._btn_text = self._m.get("btn", "ON")
         self.setFixedSize(self.CARD_W, self.CARD_H)
         self._build_ui()
 
@@ -257,7 +258,7 @@ class ModeCard(QWidget):
         btn_row.setSpacing(0)
         btn_row.setContentsMargins(0, 0, 0, 0)
         btn_row.addStretch()
-        self._btn = QPushButton("ON")
+        self._btn = QPushButton(self._btn_text)
         self._btn.setFont(QFont("Sans", 9, QFont.Weight.Bold))
         self._btn.setCursor(Qt.PointingHandCursor)
         self._btn.setFixedSize(self.BTN_W, self.BTN_H)
@@ -270,11 +271,11 @@ class ModeCard(QWidget):
 
     def _update_style(self):
         if self._active:
-            self._btn.setText("ON")
+            self._btn.setText(self._btn_text)
             self._btn.setStyleSheet(f"QPushButton {{ background: {C['green_btn']}; color: #ffffff; border: none; border-radius: 6px; font-weight: bold; font-size: 9pt; }}")
             self.setStyleSheet(f"QWidget#modecard {{ background: {C['accent_bg']}; border: 1.5px solid {C['green_btn']}; border-radius: 10px; }}")
         else:
-            self._btn.setText("ON")
+            self._btn.setText(self._btn_text)
             self._btn.setStyleSheet(f"QPushButton {{ background: {C['gray_btn']}; color: {C['muted']}; border: 1px solid {C['border']}; border-radius: 6px; font-weight: bold; font-size: 9pt; }} QPushButton:hover {{ border-color: {C['blue']}; color: {C['txt']}; }}")
             self.setStyleSheet(f"QWidget#modecard {{ background: {C['bg1']}; border: 1.5px solid {C['border']}; border-radius: 10px; }}")
 
