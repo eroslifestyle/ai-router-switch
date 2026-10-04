@@ -12,6 +12,7 @@ _ALIAS_MAP = {
     "mixgm2": "mix-gm-2",
     "mixag": "mix-ag",
     "mixag2": "mix-ag",
+    "mixal": "mix-al",
 }
 _INTERNAL_TO_DISPLAY = {
     "mix-am": "MixAM", "mix-am-2": "MixAM-2", "mix-gm": "MixGM", "mix-gm-2": "MixGM-2", "mix-ag": "MixAG",

@@ -29,6 +29,7 @@ def test_alias_brevi():
         "mixam": "mix-am",
         "mixgm": "mix-gm",
         "mixag": "mix-ag",
+        "mixal": "mix-al",
     }
     for alias, canonico in alias_map.items():
         result = parse_router_command(f"!router {alias}")
