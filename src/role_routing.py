@@ -30,7 +30,7 @@ _ACT_MODELS = ("claude-haiku",)
 #   AIROUTER_GPT_MODEL=<modello>
 # Verifica cosa è servito davvero:
 #   curl -s -H "Authorization: Bearer $KEY" http://127.0.0.1:4000/v1/models
-GPT_MODE_THINK = os.environ.get("AIROUTER_GPT_MODEL", "code-max")
+GPT_MODE_THINK = os.environ.get("AIROUTER_GPT_MODEL", "coder-next-ablit")
 
 # ── Provider model overrides ───────────────────────────────────────────────────
 MINIMAX_THINK = "MiniMax-M3"
@@ -42,10 +42,13 @@ GLM_ACT = "glm-4.7"
 # 3.7-max. Si usa il piu' nuovo.
 QWEN_THINK = "qwen3.8-max"
 QWEN_ACT = "qwen3-coder-plus"
-# code-max: esecutore coding locale (Qwen3-Coder-Next 80B MXFP4 servito da
-# llama.cpp dietro LiteLLM). Il provider 'local' NON ha un modello THINK:
-# in mix-al il THINK resta su Anthropic.
-LOCAL_ACT = "code-max"
+# Unico modello locale (scelta utente 2026-10-04 "tieni solo coder-next-ablit"):
+# Qwen3-Coder-Next 80B abliterato servito da Ollama (:11434), mappato in LiteLLM
+# come `coder-next-ablit`. Usato da local, mix-al e gpt — una sola copia in
+# memoria. Il provider 'local' NON ha un THINK: in mix-al/gpt il THINK resta su
+# Anthropic. `code-max` (llama.cpp) dismesso per non tenere due copie dello
+# stesso 80B (~55 GB l'una) su un APU a memoria unica.
+LOCAL_ACT = "coder-next-ablit"
 # LOCAL_ACT_FAST era code-fast (Laguna XS 2.1, 33B-A3B via Ollama), esecutore ACT
 # di local e mix-al dal 2026-08-17. Rimosso il 2026-08-19 per decisione utente: in
 # locale si usa solo code-max. Due modelli locali insieme si contendono la stessa
@@ -53,12 +56,9 @@ LOCAL_ACT = "code-max"
 # che ha causato i lockup da saturazione GTT. L'alias resta puntato a code-max
 # perche' e' citato altrove; non introdurre un secondo modello locale senza motivo.
 LOCAL_ACT_FAST = LOCAL_ACT
-# LOCAL_PURE: la modalità `local` usa il modello Qwen3-Coder-Next abliterato
-# servito da Ollama (:11434), mappato in LiteLLM come `coder-next-ablit` (vedi
-# anche LOCAL_MODEL_PURE in local_backend.py). Scelta utente 2026-10-04: in
-# `local` si usa questo modello, lo stesso che gira in pi-agent. mix-al e gpt
-# restano su code-max (llama.cpp): non condividono questa costante.
-LOCAL_PURE = "coder-next-ablit"
+# Alias storico: era il modello della sola `local`, ora coincide con LOCAL_ACT
+# (tutto il coding locale è su coder-next-ablit). Tenuto per i riferimenti esistenti.
+LOCAL_PURE = LOCAL_ACT
 
 
 # ── Role constants ─────────────────────────────────────────────────────────────
