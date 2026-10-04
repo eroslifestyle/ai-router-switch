@@ -91,6 +91,13 @@ MODEL_CONTEXT_MAP = {
     # Se si cambia -c nelle unit llama-qcnext{,-always}.service, questo valore va
     # cambiato con loro: e' il gate a decidere cosa il router lascia passare.
     "code-max": 131_072,
+    # coder-next-ablit: Qwen3-Coder-Next abliterato via Ollama (modalità `local`,
+    # 2026-10-04). ollama `/api/show` riporta context_length 262144, come la
+    # config di pi-agent (contextWindow 262144). NB: è la finestra MASSIMA del
+    # modello; il prefill reale in 240s (LOCAL_TIMEOUT_SEC) resta il limite
+    # pratico — se emergono timeout su prompt grandi, la leva è lo shrink target,
+    # non questo valore (che deve restare la capacità vera, non una stima).
+    "coder-next-ablit": 262_144,
     # Gli altri modelli locali (misurati 2026-08-19 su `ollama show` e sulle unit
     # llama.cpp). Senza queste voci cadevano tutti sul default 200.000: il gate
     # lasciava passare corpi fino a 3x la capacita' vera e Ollama li troncava in

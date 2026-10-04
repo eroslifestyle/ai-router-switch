@@ -53,6 +53,12 @@ LOCAL_ACT = "code-max"
 # che ha causato i lockup da saturazione GTT. L'alias resta puntato a code-max
 # perche' e' citato altrove; non introdurre un secondo modello locale senza motivo.
 LOCAL_ACT_FAST = LOCAL_ACT
+# LOCAL_PURE: la modalità `local` usa il modello Qwen3-Coder-Next abliterato
+# servito da Ollama (:11434), mappato in LiteLLM come `coder-next-ablit` (vedi
+# anche LOCAL_MODEL_PURE in local_backend.py). Scelta utente 2026-10-04: in
+# `local` si usa questo modello, lo stesso che gira in pi-agent. mix-al e gpt
+# restano su code-max (llama.cpp): non condividono questa costante.
+LOCAL_PURE = "coder-next-ablit"
 
 
 # ── Role constants ─────────────────────────────────────────────────────────────
@@ -108,10 +114,11 @@ ROUTING_TABLE = {
     ("mix-gm-2", ROLE_ACT): ("minimax", MINIMAX_ACT),
     ("mix-al", ROLE_THINK): ("anthropic", None),
     ("mix-al", ROLE_ACT): ("local", LOCAL_ACT_FAST),
-    # local è una modalità pura: THINK/VERIFY e ACT vanno entrambi a code-max
-    # (2026-08-19: code-fast rimosso, un solo modello locale).
-    ("local", ROLE_THINK): ("local", LOCAL_ACT),
-    ("local", ROLE_ACT): ("local", LOCAL_ACT_FAST),
+    # local è una modalità pura: THINK/VERIFY e ACT vanno entrambi allo stesso
+    # modello (2026-10-04: coder-next-ablit via Ollama/LiteLLM, al posto di
+    # code-max; think==act mantiene invariata la logica di reroute).
+    ("local", ROLE_THINK): ("local", LOCAL_PURE),
+    ("local", ROLE_ACT): ("local", LOCAL_PURE),
     # gpt: MODELLO UNICO, quello gia' residente in memoria (decisione utente
     # 2026-08-18). Il THINK separato coder-abliterated e' stato escluso: teneva
     # 40 GB di GTT con la macchina al 99% di RAM, e col contesto pieno di Claude
@@ -285,7 +292,7 @@ def model_provider(model_name: str | None) -> str | None:
     # Modelli locali (LiteLLM/llama.cpp su questa macchina): confronto ESATTO o
     # startswith, mai `in`, per non catturare per sbaglio altri nomi. Serve
     # all'isolamento fra modalita': un modello locale non va mai a un provider remoto.
-    if model_lower in ("code-max", "code-max-ollama") or model_lower.startswith("qcnext"):
+    if model_lower in ("code-max", "code-max-ollama", "coder-next-ablit") or model_lower.startswith("qcnext"):
         return "local"
 
     return None
