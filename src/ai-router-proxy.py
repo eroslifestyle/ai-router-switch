@@ -969,13 +969,21 @@ async def handle(request):
             from gpt_tool_trim import strip_mcp_tools
             _local_body = strip_mcp_tools(_local_body)
             if mode == "local":
+                # Mode local puro usa Qwen3-Coder-Next 80B abliterato (Ollama) di
+                # default; mix-al/gpt restano su code-max. Un override esplicito vince.
+                if not _model_override:
+                    _local_model = _local_mod.LOCAL_MODEL_PURE
                 # Il modello locale è solo-testo: rimuovi le immagini (llama.cpp le
                 # rifiuta con 500) sostituendole con una nota, poi istruisci il
                 # modello a delegarle a vision_local/ocr_image.
                 _local_body = _local_mod.strip_images_with_note(_local_body)
                 _local_body = _local_mod.inject_system_hint(_local_body)
             _local_body = strip_thinking_blocks(_local_body)
-            _local_body = strip_thinking_for_model(_local_body, _req_model, log_fn=log, backend="local")
+            # Nessun modello locale supporta il campo `thinking` (l'abliterato
+            # via Ollama risponde 500); va tolto SEMPRE, non in base al modello
+            # richiesto da Claude Code (opus/sonnet lo supportano). Vedi
+            # local_backend.drop_thinking_field.
+            _local_body = _local_mod.drop_thinking_field(_local_body)
             _local_body = _local_mod.slim_local_body(_local_body, mode)
             _on_upstream_shrink(_local_body)
             _local_body = _local_mod.set_body_model(_local_body, _local_model)

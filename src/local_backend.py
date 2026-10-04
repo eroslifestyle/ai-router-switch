@@ -28,6 +28,10 @@ LOCAL_MODEL_FAST = LOCAL_MODEL_CODE
 # Senza questa voce nell'allow-list di resolve_local_model, il THINK di gpt veniva
 # scartato su code-max (:8083) — resolve_route lo instrada bene, ma qui ripiegava.
 LOCAL_MODEL_THINK = 'coder-abliterated'
+# Modello della modalità `local` pura (THINK+ACT locale): Qwen3-Coder-Next 80B
+# abliterato servito da Ollama (:11434), mappato in LiteLLM come coder-next-ablit.
+# Solo mode local lo usa; mix-al e gpt restano su code-max (llama.cpp :8083).
+LOCAL_MODEL_PURE = 'coder-next-ablit'
 # Nessun fallback: il modello locale ha una sola via, llama.cpp :8083 dietro LiteLLM.
 # L'alias Ollama code-max-ollama e' stato rimosso il 2026-08-04 (duplicazione da 48GB).
 LOCAL_MODEL_FALLBACK = LOCAL_MODEL_CODE  # default quando non specificato
@@ -85,9 +89,29 @@ def set_body_model(body: bytes, model: str) -> bytes:
         return body
 
 
+def drop_thinking_field(body: bytes) -> bytes:
+    """Rimuove il campo top-level `thinking` dal body.
+
+    Nessun modello locale lo supporta: l'abliterato via Ollama/LiteLLM risponde
+    500 ``"...qwen3-coder-next-abliterated:latest" does not support thinking``
+    (2026-10-04). La decisione NON può basarsi sul modello RICHIESTO
+    (opus/sonnet il thinking lo supportano, ed è quello che mandava Claude Code):
+    dipende dall'esecutore LOCALE, che non lo supporta mai. pi-agent lo evita
+    dichiarando il modello ``reasoning: false``; qui lo spogliamo a valle."""
+    if b'"thinking"' not in body:
+        return body
+    try:
+        d = json.loads(body)
+    except Exception:
+        return body
+    if isinstance(d, dict) and d.pop("thinking", None) is not None:
+        return json.dumps(d).encode()
+    return body
+
+
 def resolve_local_model(requested: Optional[str]) -> str:
     """Restituisce il modello richiesto se consentito, altrimenti LOCAL_MODEL_CODE."""
-    if requested in (LOCAL_MODEL_CODE, LOCAL_MODEL_FALLBACK, LOCAL_MODEL_FAST, LOCAL_MODEL_THINK):
+    if requested in (LOCAL_MODEL_CODE, LOCAL_MODEL_FALLBACK, LOCAL_MODEL_FAST, LOCAL_MODEL_THINK, LOCAL_MODEL_PURE):
         return requested
     return LOCAL_MODEL_CODE
 
