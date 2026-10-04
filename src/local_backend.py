@@ -710,9 +710,15 @@ def slim_local_body(body: bytes, mode: str = "local") -> bytes:
                     reminders_removed += n
     after = len(json.dumps(data).encode())
     if before - after > 1000:
+        # tools_kept dal body FINALE: `kept` locale esiste solo se qualcosa è stato
+        # rimosso (dentro `if removed_names`), e leggerlo quando c'erano tool ma
+        # nessuno fuori allowlist dava UnboundLocalError -> 502 su ogni richiesta
+        # mix-al/local/gpt con tool (fix 2026-10-04).
+        _tools_final = data.get("tools")
         debug_catalog.record_event(
             severity="info", category="local", kind="local_slim",
-            snippet=(f"chars={before}->{after} tools_kept={len(kept) if isinstance(tools, list) and tools else 0} "
+            snippet=(f"chars={before}->{after} "
+                     f"tools_kept={len(_tools_final) if isinstance(_tools_final, list) else 0} "
                      f"tools_removed={removed_names[:10]} reminders_removed={reminders_removed}"),
         )
     return json.dumps(data).encode()
