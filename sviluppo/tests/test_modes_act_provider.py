@@ -60,3 +60,16 @@ def test_import_a_livello_di_modulo():
     # l'import non deve stare rientrato (cioe' dentro una funzione)
     inizio = src.rfind("\n", 0, riga_import) + 1
     assert src[inizio:riga_import] == ""
+
+
+def test_local_alias_morto_rimappato_su_coder_next():
+    """code-max (llama.cpp :8083, dismesso 2026-10-04) e qcnext* non devono essere
+    inoltrati tal quali: senza rimappa il router manda un modello morto -> 500.
+    Vanno riscritti sull'unico modello locale vivo (coder-next-ablit)."""
+    for mode in ("mix-al", "local", "gpt"):
+        for dead in ("code-max", "code-max-ollama", "qcnext-mxfp4", "QCNext-MXFP4"):
+            provider, override = resolve_route(mode, dead)
+            assert provider == "local", (mode, dead, provider)
+            assert override == "coder-next-ablit", (mode, dead, override)
+    # il modello vivo resta servibile (override None = inoltra coder-next-ablit)
+    assert resolve_route("local", "coder-next-ablit") == ("local", None)

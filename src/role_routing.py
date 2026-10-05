@@ -307,6 +307,12 @@ def _nativize(provider: str, override: str | None, model_name: str | None) -> st
     if foreign is not None and foreign != provider:
         return _NATIVE_EXECUTOR[provider]
 
+    # Un solo modello locale VIVO: coder-next-ablit. `code-max` (llama.cpp :8083)
+    # e qcnext* sono dismessi dal 2026-10-04 ("tieni solo coder-next-ablit"); se un
+    # client li chiede ancora, senza rimappa il router inoltra un modello morto -> 500.
+    if provider == "local" and model_name and model_name.lower() != LOCAL_ACT:
+        return LOCAL_ACT
+
     return override
 
 
