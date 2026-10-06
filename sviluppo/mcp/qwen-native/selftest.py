@@ -56,9 +56,21 @@ def test_live_web_search():
     print("OK live web search:", out.strip()[:80])
 
 
+def test_image_locale():
+    import os
+    from pathlib import Path
+    if not Path(s.IMGFORGE).is_file():
+        print("SKIP immagine locale (imgforge assente)")
+        return
+    out = s._image_generate("a simple red circle on white background", "/tmp/qn_selftest.png", "sdxl-turbo")
+    assert os.path.isfile(out) and os.path.getsize(out) > 1000, f"immagine non generata: {out}"
+    print("OK immagine locale:", out, os.path.getsize(out), "byte")
+
+
 if __name__ == "__main__":
     test_compatible_base_pura()
     test_image_block_da_base64()
     test_live_vision()
     test_live_web_search()
+    test_image_locale()
     print("\nSELFTEST OK")

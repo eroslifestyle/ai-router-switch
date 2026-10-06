@@ -29,10 +29,17 @@ VISION_MODEL = os.environ.get("QWEN_VISION_MODEL", "deepseek-v4-flash")
 SEARCH_MODEL = os.environ.get("QWEN_SEARCH_MODEL", "qwen3.8-flash")
 TIMEOUT_SEC = float(os.environ.get("QWEN_MCP_TIMEOUT_SEC", "90"))
 WORKSPACE_STUB = (
-    "servizio nativo DashScope non disponibile: QWEN_WORKSPACE_ID non configurato "
-    "e il token-plan non espone l'host workspace aliyuncs. Configura il workspace "
-    "per abilitare questo tool."
+    "servizio non disponibile: la chiave token-plan è 401 su dashscope-intl (nativi Qwen "
+    "richiedono una DASHSCOPE_API_KEY separata) e il backend locale corrispondente non è "
+    "attivo. Fornisci una chiave Alibaba Model Studio, oppure avvia il backend locale."
 )
+# Immagini: backend LOCALE sd-cli via lo script imgforge della skill hulk-image
+# (stable-diffusion.cpp, Vulkan, offline). Preset verificato: sdxl-turbo.
+IMGFORGE = os.environ.get(
+    "IMGFORGE_BIN", str(Path.home() / ".claude/skills/hulk-image/scripts/imgforge.sh")
+)
+IMAGE_PRESET = os.environ.get("QWEN_IMAGE_PRESET", "sdxl-turbo")
+IMAGE_TIMEOUT_SEC = float(os.environ.get("QWEN_IMAGE_TIMEOUT_SEC", "600"))
 
 mcp = FastMCP("qwen-native")
 
@@ -145,14 +152,43 @@ def web_scrape(target: str) -> str:
     return out.stdout.strip() or (out.stderr.strip() or "nessun risultato")
 
 
+def _image_generate(prompt: str, output_path: str = "", preset: str = "") -> str:
+    """Genera un'immagine in LOCALE (sd-cli/imgforge). Ritorna il path del PNG prodotto."""
+    if not Path(IMGFORGE).is_file():
+        return f"imgforge non trovato: {IMGFORGE} (skill hulk-image assente?)"
+    out = output_path or str(Path("/tmp/qwen-native") / f"img_{abs(hash(prompt)) % 10**8}.png")
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    try:
+        r = subprocess.run(
+            [IMGFORGE, preset or IMAGE_PRESET, prompt, out],
+            capture_output=True, text=True, timeout=IMAGE_TIMEOUT_SEC,
+        )
+    except subprocess.TimeoutExpired:
+        return f"timeout generazione immagine ({IMAGE_TIMEOUT_SEC}s)"
+    if r.returncode != 0 or not Path(out).is_file():
+        return f"errore sd-cli (rc={r.returncode}): {(r.stderr or r.stdout)[-300:]}"
+    return out
+
+
+@mcp.tool
+def qwen_image(prompt: str, output_path: str = "", preset: str = "") -> str:
+    """Genera un'immagine da testo in LOCALE (stable-diffusion.cpp, offline, zero cloud).
+
+    preset: sdxl-turbo (default, veloce) | sdxl-lightning | flux2-klein | qwen-image (buono per testo).
+    Ritorna il path del PNG. NON usa Qwen cloud (chiave token-plan non abilita i nativi DashScope).
+    """
+    return _image_generate(prompt, output_path, preset)
+
+
 def _native_stub():
     def _tool() -> str:
         return WORKSPACE_STUB
     return _tool
 
 
-# Servizi nativi DashScope: stub finché manca il workspace (vedi modulo docstring).
-for _n in ("qwen_image", "qwen_video", "qwen_tts", "qwen_asr", "qwen_embed", "qwen_rerank"):
+# Nativi ancora bloccati: backend locale assente/giù (chatterbox TTS, whisper ASR, embed)
+# oppure serve DASHSCOPE_API_KEY (video Qwen, rerank). Stub con messaggio accurato.
+for _n in ("qwen_video", "qwen_tts", "qwen_asr", "qwen_embed", "qwen_rerank"):
     mcp.tool(name=_n, description=f"[STUB] {WORKSPACE_STUB}")(_native_stub())
 # qwen_music: fun-music-v1 dà 404 sull'account anche col workspace -> stub permanente.
 mcp.tool(name="qwen_music", description="[STUB] fun-music-v1 non esiste sull'account (404).")(_native_stub())
