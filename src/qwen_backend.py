@@ -312,6 +312,33 @@ def add_qwen_system_cache(body: bytes, log_fn=None) -> bytes:
     return json.dumps(data).encode()
 
 
+def strip_tool_mutation_blocks(body: bytes, log_fn=None) -> bytes:
+    """Rimuove i content block tool_addition/tool_removal per l'upstream Qwen.
+
+    L'upstream token-plan non conosce quei tag in nessuna posizione (400
+    "Request body format invalid", relay_error_400 mode=qwen 2026-10-06 15:15).
+    Anthropic li ammette solo dentro role=system (router_utils._must_stay_system),
+    ma per Qwen sono ridondanti: il set di tool e' gia' nel campo `tools`.
+    """
+    try:
+        data = json.loads(body)
+    except (ValueError, TypeError):
+        return body
+    removed = 0
+    for msg in data.get("messages") or []:
+        content = msg.get("content")
+        if isinstance(content, list):
+            keep = [b for b in content
+                    if not (isinstance(b, dict) and b.get("type") in ("tool_addition", "tool_removal"))]
+            removed += len(content) - len(keep)
+            msg["content"] = keep
+    if removed:
+        if log_fn:
+            log_fn(f"QWEN: rimossi {removed} blocchi tool_addition/tool_removal")
+        return json.dumps(data).encode()
+    return body
+
+
 def clamp_qwen_max_tokens(body: bytes, log_fn=None) -> bytes:
     """Limita max_tokens nel body al limite QWEN_MAX_TOKENS_LIMIT.
 
@@ -543,6 +570,7 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
 
     body = tool_isolation.filter_tools_for_backend(body, "qwen")
     body = qwen_tool_trim.strip_heavy_connectors(body)
+    body = strip_tool_mutation_blocks(body, log_fn=log_fn)
     body = clamp_qwen_max_tokens(body, log_fn=log_fn)
 
     # SHRINK TESTO PREVENTIVO: se il body supera il target, riduce il contesto

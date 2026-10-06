@@ -4,7 +4,7 @@ sys.path.insert(0, 'src')
 import json
 
 import qwen_backend
-from qwen_backend import normalize_qwen_thinking, add_qwen_system_cache
+from qwen_backend import normalize_qwen_thinking, add_qwen_system_cache, strip_tool_mutation_blocks
 
 ACT = "qwen3.8-flash"
 THINK = qwen_backend.QWEN_THINK  # "qwen3.8-max"
@@ -56,3 +56,23 @@ def test_cache_system_lista_marca_solo_ultimo():
 def test_cache_senza_system_invariato():
     body = _body(messages=[])
     assert add_qwen_system_cache(body) == body
+
+
+def test_strip_tool_mutation_rimuove_da_user_e_system():
+    body = _body(model="m", max_tokens=32,
+                 messages=[{"role": "system", "content": [
+                     {"type": "text", "text": "nuovo tool"},
+                     {"type": "tool_addition", "name": "Read"}]},
+                     {"role": "user", "content": [
+                     {"type": "tool_removal", "name": "Grep"},
+                     {"type": "text", "text": "ciao"}]}])
+    out = json.loads(strip_tool_mutation_blocks(body))
+    assert out["messages"][0]["content"] == [{"type": "text", "text": "nuovo tool"}]
+    assert out["messages"][1]["content"] == [{"type": "text", "text": "ciao"}]
+    assert out["model"] == "m" and out["max_tokens"] == 32
+
+
+def test_strip_tool_mutation_senza_blocchi_byte_identici():
+    body = _body(messages=[{"role": "user", "content": [
+        {"type": "text", "text": "ciao"}]}])
+    assert strip_tool_mutation_blocks(body) == body
