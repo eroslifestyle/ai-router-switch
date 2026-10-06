@@ -65,8 +65,8 @@ MODEL_CONTEXT_MAP = {
     #
     # SOVRASTIME GRAVI corrette: qwen3-max era 1.000.000 e il reale e 258.048; qwen3-coder-next
     # era 1.000.000 e il reale e 204.800. Oltre quei limiti l upstream avrebbe risposto 400.
-    "qwen3.8-max": 983_616,        # dichiarato dal gateway
-    "qwen3.8-flash": 983_616,      # token-plan 2026-10-06 (non verificato: allineato alla serie .8/.7)
+    "qwen3.8-max": 983_616,        # verificato su token-plan 2026-10-06 (400: "Range of input length should be [1, 983616]")
+    "qwen3.8-flash": 983_616,      # verificato su token-plan 2026-10-06 (stesso 400 boundary di qwen3.8-max)
     "deepseek-v4-pro": 1_000_000,  # token-plan 2026-10-06 (non verificato: da doc 1M context)
     "deepseek-v4-flash": 1_000_000, # token-plan 2026-10-06 (non verificato)
     "qwen3.7-max": 983_616,        # dichiarato dal gateway
