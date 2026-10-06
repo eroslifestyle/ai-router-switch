@@ -939,6 +939,8 @@ async def handle(request):
             _qwen_body = strip_thinking_blocks(body)
             _qwen_body = strip_thinking_for_model(_qwen_body, _req_model, log_fn=log, backend="qwen")
             _qwen_body = _qwen_mod.set_body_model(_qwen_body, _qwen_model)
+            _qwen_body = _qwen_mod.normalize_qwen_thinking(_qwen_body, _qwen_model, log_fn=log)
+            _qwen_body = _qwen_mod.add_qwen_system_cache(_qwen_body, log_fn=log)
             up = await _qwen_mod.forward_qwen(request, _qwen_body, session,
                                               _req_model or _qwen_model, log_fn=log,
                                               passthrough=True, upstream_model=_qwen_model, on_shrink=_on_upstream_shrink)

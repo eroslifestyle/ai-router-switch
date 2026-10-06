@@ -31,6 +31,7 @@ from aiohttp import ClientTimeout
 
 import paths
 import secrets_provider
+from role_routing import QWEN_THINK  # single source of truth (nessun ciclo: role_routing a top-level importa solo os)
 import debug_catalog
 import tool_isolation
 import qwen_tool_trim
@@ -251,6 +252,64 @@ async def qwen_dashscope_base() -> str:
 def resolve_qwen_upstream_model(tier: str) -> str:
     """Mappa il tier al modello Qwen corrispondente."""
     return QWEN_MODEL_FOR_TIER.get(tier, tier)
+
+
+def normalize_qwen_thinking(body: bytes, upstream_model: str, log_fn=None) -> bytes:
+    """Normalizza `thinking` per l'upstream token-plan (2026-10-06).
+
+    L'upstream RIFIUTA thinking={"type":"enabled","budget_tokens":N} con 400
+    "InvalidParameter: Request body format invalid" (misurato: è la forma che
+    Claude Code manda di default -> le chat nuove in qwen morivano 400). Accetta
+    invece adaptive / disabled / assente.
+
+    - ACT (qualsiasi modello diverso da QWEN_THINK): thinking FORZATO disabled.
+      Il thinking nativo di default e' 2x piu' lento e su max_tokens piccoli
+      produce risposte SOLO-thinking (stop=max_tokens, zero testo).
+    - THINK (QWEN_THINK): il ragionamento resta, ma enabled+budget -> adaptive.
+    """
+    try:
+        data = json.loads(body)
+    except (ValueError, TypeError):
+        return body
+    thinking = data.get("thinking")
+    if upstream_model != QWEN_THINK:
+        if thinking != {"type": "disabled"}:
+            data["thinking"] = {"type": "disabled"}
+            if log_fn:
+                log_fn("QWEN ACT: thinking forzato disabled")
+    elif isinstance(thinking, dict) and thinking.get("type") == "enabled":
+        data["thinking"] = {"type": "adaptive"}
+        if log_fn:
+            log_fn("QWEN THINK: thinking enabled+budget -> adaptive (400 upstream)")
+    else:
+        return body
+    return json.dumps(data).encode()
+
+
+def add_qwen_system_cache(body: bytes, log_fn=None) -> bytes:
+    """Marca il prefisso system con cache_control ephemeral.
+
+    Il vendor cachera da sé solo su prefisso identico (misurato: cache_read alla
+    2a richiesta); il marker esplicito rende il riuso affidabile sul system prompt
+    stabile, ~2x piu' veloce sul prefill dei contesti grandi.
+    """
+    try:
+        data = json.loads(body)
+    except (ValueError, TypeError):
+        return body
+    system = data.get("system")
+    if isinstance(system, str) and system:
+        data["system"] = [{"type": "text", "text": system,
+                          "cache_control": {"type": "ephemeral"}}]
+    elif isinstance(system, list) and system:
+        last = system[-1]
+        if isinstance(last, dict) and "cache_control" not in last:
+            last["cache_control"] = {"type": "ephemeral"}
+    else:
+        return body
+    if log_fn:
+        log_fn("QWEN: cache_control ephemeral sul system")
+    return json.dumps(data).encode()
 
 
 def clamp_qwen_max_tokens(body: bytes, log_fn=None) -> bytes:
