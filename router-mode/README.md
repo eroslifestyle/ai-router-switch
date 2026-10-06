@@ -5,7 +5,7 @@
 Standalone control panel for the AI Router (`:8787`) with 9 orchestration modes. Provides both CLI and GUI interfaces to switch modes and monitor router health in real-time.
 
 **Location**: `~/.claude/router-mode/`  
-**Modes**: anthropic · minimax · glm · qwen · mix-am · mix-am-2 · mix-gm · mix-gm-2 · mix-ag · mix-al · local (13 canonical; `mix-ag-2` alias of `mix-ag`, absorbed 2026-09-26)
+**Card modes** (dal 2026-10-06): anthropic · minimax · glm · qwen · mix-am · mix-gm · mix-gm-2 · mix-ag · mixql · mix-al · local — `mix-am-2` e' uscita dalla card su richiesta utente (mode ancora valida nel router, porta 8781). Router VALID_MODES: 15 canonical (`mix-ag-2` = alias di `mix-ag`, assorbita 2026-09-26).
 **Proxy**: `:9988` (CORS bypass for browser fetch)
 
 ---
@@ -145,12 +145,13 @@ Planned: badge in GNOME topbar showing `MODE: mix-am` with quick-switch dropdown
 | **anthropic** | 🔵 | Claude Sonnet | Claude Haiku | — | Default, highest quality, full Claude stack |
 | **minimax** | 🟠 | MiniMax M3 | MiniMax M2.7 | — | Cost-optimized, pure MiniMax |
 | **glm** | 🟢 | GLM 5.2 (THINK) | GLM 4.7 | same model as THINK | Z.ai only, context-aware tiering |
-| **qwen** | 🟣 | Qwen 3.7-max | Qwen coder-plus | same model as THINK | Alibaba Model Studio pure, DashScope key |
+| **qwen** | 🟣 | Qwen 3.8-max | Qwen 3.8-flash | same model as THINK | Alibaba Model Studio pure, DashScope key |
 | **mix-am** | 🔷 | Claude (THINK) | MiniMax M2.7 | same model as THINK | Balanced: smart planning + fast exec |
-| **mix-am-2** | 🔷⚡ | Claude (THINK) | MiniMax M2.7 | same model as THINK | MixAM + delega forzata (deny su coding del THINK) |
+| **mix-am-2** | 🔷⚡ | Claude (THINK) | MiniMax M2.7 | same model as THINK | MixAM + delega forzata (deny su coding del THINK). Fuori dalla card dal 2026-10-06, mode ancora nel router (porta 8781) |
 | **mix-gm** | 🟢🟠 | GLM 5.2 (THINK) | MiniMax M2.7 (ACT) | same model as THINK | Hybrid: GLM reasoning + MiniMax execution |
 | **mix-gm-2** | 🟢🟠⚡ | GLM 5.2 (THINK) | MiniMax M2.7 (ACT) | same model as THINK | MixGM + delega forzata (deny su coding del THINK) |
 | **mix-ag** | 🔵🟢 | Claude (THINK) | GLM 4.7 (ACT) | same model as THINK | Hybrid: Anthropic planning + GLM cost-efficiency (delega forzata) |
+| **mixql** | 🟣🖥 | Qwen 3.8-max (THINK) | modello locale (ACT) | same model as THINK | Hybrid: Qwen planning + local LLM exec (in card dal 2026-10-06, al posto di mix-am-2) |
 | **mix-al** | 🔵🖥 | Claude (THINK) | code-max (local) | same model as THINK | Hybrid: Anthropic planning + local LLM exec |
 | **local** | 🖥️ | code-max | code-max | same model as THINK | Pure local LLM (llama.cpp), full isolation |
 

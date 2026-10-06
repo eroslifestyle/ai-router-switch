@@ -35,6 +35,8 @@ DESKTOP_NAME = "router-mode-panel"
 # La sezione SOLO ospita 5 modalita' su griglia 3x2 (2 righe). MULTI ospita 6
 # modalita' su griglia 3x2 (2 righe): -124 dopo che mix-ag-2 e' stata assorbita in mix-ag (2026-09-26).
 # Varianti -2 restano: mix-am-2/mix-gm-2 (delega forzata via hook).
+# mix-am-2 uscita dalla CARD il 2026-10-06 su richiesta utente (modalita' ancora
+# nel router, porta 8781); al suo posto in MULTI e' entrata mixql (Qwen THINK + local ACT).
 WINDOW_W, WINDOW_H = 480, 856
 TITLE_H = 38
 # 56 non bastava: il titolo da 24pt piu' il sottotitolo che va a capo sforavano
@@ -47,12 +49,12 @@ MODES = [
     {"id": "anthropic", "icon": "🔵", "label": "Anthropic", "exec": "Claude Opus/Sonnet"},
     {"id": "minimax", "icon": "🟠", "label": "MiniMax", "exec": "M3 orch / M2.7 act"},
     {"id": "mix-am", "icon": "🔷", "label": "MixAM", "exec": "Anthropic THINK + MiniMax ACT"},
-    {"id": "mix-am-2", "icon": "🔷⚡", "label": "MixAM-2", "exec": "MixAM + delega forzata (deny)"},
     {"id": "glm", "icon": "🟢", "label": "GLM", "exec": "GLM-5.2 orch / tiering"},
-    {"id": "qwen", "icon": "🟣", "label": "Qwen", "exec": "3.7-max / coder-plus"},
+    {"id": "qwen", "icon": "🟣", "label": "Qwen", "exec": "3.8-max / 3.8-flash"},
     {"id": "mix-gm", "icon": "🟢🟠", "label": "MixGM", "exec": "GLM-5.2 THINK + MiniMax ACT"},
     {"id": "mix-gm-2", "icon": "🟢🟠⚡", "label": "MixGM-2", "exec": "MixGM + delega forzata (deny)"},
     {"id": "mix-ag", "icon": "🔵🟢", "label": "MixAG", "exec": "Anthropic THINK + GLM ACT (deny)"},
+    {"id": "mixql", "icon": "🟣🖥", "label": "MixQL", "exec": "Qwen THINK + LLM locale ACT"},
     {"id": "claude-design", "icon": "🎨", "label": "Claude Design", "exec": "Sessione diretta /design", "btn": "APRI"},
     {"id": "mix-al", "icon": "🔵🖥", "label": "MixAL", "exec": "Anthropic THINK + LLM locale ACT"},
     {"id": "local", "icon": "🖥️", "label": "Local", "exec": "Tutto su LLM locale (code-max)"},
@@ -388,7 +390,7 @@ class Card(QWidget):
 
         multi_grid = QGridLayout()
         multi_grid.setSpacing(SPACING)
-        multi_ids = ["mix-am", "mix-am-2", "mix-gm", "mix-gm-2", "mix-ag", "mix-al"]
+        multi_ids = ["mix-am", "mix-gm", "mix-gm-2", "mix-ag", "mix-al", "mixql"]
         for i, mid in enumerate(multi_ids):
             m = next(x for x in MODES if x["id"] == mid)
             card = ModeCard(m, self._do_switch)
