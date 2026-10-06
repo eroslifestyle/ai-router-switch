@@ -119,7 +119,7 @@ HOP_HEADERS = frozenset({
 })
 
 # ── Valid modes ────────────────────────────────────────────────────────────────
-VALID_MODES = ("anthropic", "minimax", "mix-am", "mix-am-2", "mix-ag", "mix-gm", "mix-gm-2", "glm", "qwen", "mix-al", "local", "gpt", "ultra")
+VALID_MODES = ("anthropic", "minimax", "mix-am", "mix-am-2", "mix-ag", "mix-gm", "mix-gm-2", "glm", "qwen", "mix-al", "mixaq", "mixql", "local", "gpt", "ultra")
 
 # Modalita' che instradano traffico verso Anthropic (THINK o ESECUZIONE).
 # Sorgente: tabella gerarchica in ~/.claude/CLAUDE.md. Le modalita qui elencate
@@ -131,6 +131,7 @@ MODES_USING_ANTHROPIC = frozenset({
     "mix-am", "mix-am-2",   # Anthropic THINK + MiniMax ACT
     "mix-ag",      # Anthropic THINK + GLM ACT
     "mix-al",      # Anthropic THINK/VERIFY + LLM locale ACT
+    "mixaq",       # Anthropic THINK + Qwen ACT (token-plan)
     "ultra",       # Anthropic THINK/VERIFY + GLM ACT + MiniMax codice via CLI
 })
 
@@ -152,6 +153,8 @@ PORT_MODE = {
     # 8785 era di mix-ag-2 (assorbita in mix-ag il 2026-09-26, alias legacy mantenuto)
     8786: "gpt",     # sandbox: prova gpt (pura locale, THINK e ACT sullo stesso modello)
     8788: "ultra",   # 14a modalita': Anthropic THINK + GLM ACT + MiniMax codice via CLI
+    8789: "mixaq",   # sandbox: Anthropic THINK + Qwen ACT (token-plan). 8790 occupata (errno 98)
+    8791: "mixql",   # sandbox: Qwen THINK + LLM locale ACT
 }
 _pm_override = os.environ.get("AIROUTER_PORT_MODE_JSON", "").strip()
 if _pm_override:

@@ -79,7 +79,7 @@ QWEN_MODEL_FOR_TIER = {
     # Il default resta allineato al modello vero per non ingannare chi legge.
     QWEN_TIER_TOP: os.environ.get("QWEN_MODEL_TOP", "qwen3.8-max"),
     QWEN_TIER_MID: os.environ.get("QWEN_MODEL_MID", "qwen3.7-plus"),
-    QWEN_TIER_CODER: os.environ.get("QWEN_MODEL_CODER", "qwen3-coder-plus"),
+    QWEN_TIER_CODER: os.environ.get("QWEN_MODEL_CODER", "deepseek-v4-pro"),  # token-plan: qwen3-coder-plus NON servito (probe 2026-10-06), deepseek-v4-pro leader SWE-Verified
     QWEN_TIER_VISION: os.environ.get("QWEN_MODEL_VISION", "qwen3-vl-plus"),
 }
 
@@ -93,7 +93,24 @@ QWEN_MODEL_MUSIC = os.environ.get("QWEN_MODEL_MUSIC", "fun-music-v1")
 QWEN_MODEL_EMBED = os.environ.get("QWEN_MODEL_EMBED", "text-embedding-v4")
 QWEN_MODEL_RERANK = os.environ.get("QWEN_MODEL_RERANK", "qwen3-rerank")
 
-QWEN_MAX_TOKENS_LIMIT = int(os.environ.get("AIROUTER_QWEN_MAX_TOKENS_LIMIT", "65536"))
+QWEN_MAX_TOKENS_LIMIT = int(os.environ.get("AIROUTER_QWEN_MAX_TOKENS_LIMIT", "131072"))
+# Tetto max_tokens PER-MODELLO (stile GLM_MAX_OUTPUT). I modelli del token-plan hanno
+# finestre fino a 1M; 131072 e' un tetto d'output prudente e uniforme sui modelli serviti.
+# Valori da affinare quando si misura l'output cap reale per modello. Fallback: QWEN_MAX_TOKENS_LIMIT.
+QWEN_MAX_OUTPUT = {
+    "qwen3.8-max": 131072,
+    "qwen3.8-flash": 131072,
+    "qwen3.7-plus": 131072,
+    "deepseek-v4-pro": 131072,
+    "deepseek-v4-flash": 131072,
+}
+
+
+def qwen_max_output_for(model: str | None) -> int:
+    """Tetto max_tokens per il modello (fallback QWEN_MAX_TOKENS_LIMIT)."""
+    if model and model in QWEN_MAX_OUTPUT:
+        return QWEN_MAX_OUTPUT[model]
+    return QWEN_MAX_TOKENS_LIMIT
 # Tetto sulla DIMENSIONE DEL CORPO, ortogonale al context window: il gateway
 # Model Studio risponde 413 RequestTooLarge guardando i byte, PRIMA di valutare
 # il contesto del modello, e nella risposta non dichiara alcun limite.
@@ -252,10 +269,11 @@ def clamp_qwen_max_tokens(body: bytes, log_fn=None) -> bytes:
             return body
 
         original = max_tokens
+        limit = qwen_max_output_for(data.get("model"))
         if max_tokens < 1:
             max_tokens = 1
-        elif max_tokens > QWEN_MAX_TOKENS_LIMIT:
-            max_tokens = QWEN_MAX_TOKENS_LIMIT
+        elif max_tokens > limit:
+            max_tokens = limit
 
         if max_tokens != original:
             data["max_tokens"] = max_tokens

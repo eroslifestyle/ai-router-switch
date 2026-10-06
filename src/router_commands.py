@@ -13,10 +13,14 @@ _ALIAS_MAP = {
     "mixag": "mix-ag",
     "mixag2": "mix-ag",
     "mixal": "mix-al",
+    "mix-aq": "mixaq",
+    "mix-ql": "mixql",
 }
 _INTERNAL_TO_DISPLAY = {
     "mix-am": "MixAM", "mix-am-2": "MixAM-2", "mix-gm": "MixGM", "mix-gm-2": "MixGM-2", "mix-ag": "MixAG",
     "mix-al": "MixAL",  # aggiunta 2026-08-04: l'8a modalita' mancava dalla mappa
+    "mixaq": "MixAQ",   # aggiunta 2026-10-06: Anthropic THINK + Qwen ACT (token-plan)
+    "mixql": "MixQL",   # aggiunta 2026-10-06: Qwen THINK + LLM locale ACT
     "local": "Local",   # aggiunta 2026-08-04: 9a modalita', pura locale (tutto su code-max)
     "gpt": "GPT",       # aggiunta 2026-08-18: 13a modalita', pura locale su GPT_MODE_THINK
     "ultra": "Ultra",   # aggiunta 2026-08-22: 14a modalita', Anthropic THINK + GLM ACT + MiniMax codice via CLI
