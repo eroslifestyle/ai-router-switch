@@ -35,6 +35,7 @@ from role_routing import QWEN_THINK  # single source of truth (nessun ciclo: rol
 import debug_catalog
 import tool_isolation
 import qwen_tool_trim
+import token_counter
 from synthetic_response import synthetic_error, synthetic_rate_limit
 
 # Import lazy per evitare ciclo: router_constants importa qwen_backend PRIMA di definire
@@ -372,6 +373,79 @@ def clamp_qwen_max_tokens(body: bytes, log_fn=None) -> bytes:
         return body
 
 
+def prepare_qwen_body(body: bytes, upstream_model: str, log_fn=None) -> bytes:
+    """Preparazione completa del body per l'upstream Qwen in UN solo parse.
+
+    Single-parse: prima il body veniva parsato/ri-serializzato 5 volte
+    (set_body_model + normalize_thinking + system_cache + strip_tool_mutation
+    + clamp_max_tokens dal proxy e da forward_qwen), ~50-150ms per body grandi.
+    Qui le 5 trasformazioni vivono sullo STESSO dict, un json.loads + un
+    json.dumps. Le funzioni esistenti restano intatte per i test.
+
+    Ordine: model → clamp max_tokens (su upstream_model) → thinking →
+    cache_control system → rimozione blocchi tool_addition/tool_removal.
+    Body non-JSON: ritornato invariato.
+    """
+    t0 = time.monotonic()
+    try:
+        data = json.loads(body)
+    except (ValueError, TypeError):
+        return body
+    n_tools_mut = 0
+    # 1. model
+    if isinstance(data, dict):
+        data["model"] = upstream_model
+        # 2. clamp max_tokens (ora usa upstream_model, non data.get("model"))
+        clamp_from = clamp_to = None
+        mt = data.get("max_tokens")
+        if "max_tokens" in data and isinstance(mt, int):
+            limit = qwen_max_output_for(upstream_model)
+            new = 1 if mt < 1 else (limit if mt > limit else mt)
+            if new != mt:
+                data["max_tokens"] = new
+                clamp_from, clamp_to = mt, new
+        # 3. thinking (stesse regole di normalize_qwen_thinking)
+        thinking = data.get("thinking")
+        th_action = "keep"
+        if upstream_model != QWEN_THINK:
+            if thinking != {"type": "disabled"}:
+                data["thinking"] = {"type": "disabled"}
+                th_action = "disabled"
+        elif isinstance(thinking, dict) and thinking.get("type") == "enabled":
+            data["thinking"] = {"type": "adaptive"}
+            th_action = "adaptive"
+        # 4. cache_control ephemeral sul system
+        cache_action = "skip"
+        system = data.get("system")
+        if isinstance(system, str) and system:
+            data["system"] = [{"type": "text", "text": system,
+                              "cache_control": {"type": "ephemeral"}}]
+            cache_action = "on"
+        elif isinstance(system, list) and system:
+            last = system[-1]
+            if isinstance(last, dict) and "cache_control" not in last:
+                last["cache_control"] = {"type": "ephemeral"}
+                cache_action = "on"
+        # 5. rimozione blocchi tool_addition/tool_removal
+        for msg in data.get("messages") or []:
+            if not isinstance(msg, dict):
+                continue
+            content = msg.get("content")
+            if isinstance(content, list):
+                keep = [b for b in content
+                        if not (isinstance(b, dict) and b.get("type") in ("tool_addition", "tool_removal"))]
+                n_tools_mut += len(content) - len(keep)
+                msg["content"] = keep
+    out = json.dumps(data).encode()
+    if log_fn:
+        ms = (time.monotonic() - t0) * 1000
+        clamp_s = f"{clamp_from}->{clamp_to}" if clamp_from is not None else "-"
+        log_fn(f"QWEN prep: model={upstream_model} thinking={th_action} "
+               f"cache={cache_action} clamp={clamp_s} tools_mut={n_tools_mut} "
+               f"{len(body)}b->{len(out)}b {ms:.1f}ms")
+    return out
+
+
 def set_body_model(body: bytes, model: str) -> bytes:
     """Imposta il campo 'model' nel body della richiesta.
 
@@ -390,14 +464,9 @@ def set_body_model(body: bytes, model: str) -> bytes:
 # Il guardrail sui byte QWEN_MAX_BODY_BYTES resta attivo ed e' cosa diversa.
 
 
-def _estimate_tokens(data: bytes) -> int:
-    """Stima il numero di token per un body JSON."""
-    try:
-        decoded = json.loads(data)
-        text = json.dumps(decoded, ensure_ascii=False)
-        return max(1, len(text) // 4)
-    except Exception:
-        return max(1, len(data) // 4)
+def _estimate_tokens(data: bytes, model: str | None = None) -> int:
+    """Stima il numero di token per un body JSON (delega a token_counter)."""
+    return token_counter.estimate_tokens_body(data, model)
 
 
 _last_qwen_alert_ts = 0.0  # istante dell'ultimo popup
@@ -568,10 +637,10 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
         log_fn("QWEN: chiave assente (QWEN_API_KEY/DASHSCOPE_API_KEY o secrets.sh qwen.api_key)")
         return _err(502, "qwen_unavailable", "qwen key missing")
 
+    # strip_tool_mutation_blocks + clamp_qwen_max_tokens non servono piu' qui:
+    # vivono in prepare_qwen_body, che il proxy chiama prima di inoltrare.
     body = tool_isolation.filter_tools_for_backend(body, "qwen")
     body = qwen_tool_trim.strip_heavy_connectors(body)
-    body = strip_tool_mutation_blocks(body, log_fn=log_fn)
-    body = clamp_qwen_max_tokens(body, log_fn=log_fn)
 
     # SHRINK TESTO PREVENTIVO: se il body supera il target, riduce il contesto
     # prima di chiamare l'upstream Qwen. Qwen non risponde con un 400
@@ -580,7 +649,12 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
         from context_shrink import shrink_body_to_budget
         _shrunk = await shrink_body_to_budget(body, QWEN_SHRINK_TARGET_BYTES)
         if _shrunk is not None and len(_shrunk) < len(body):
-            log_fn(f"QWEN preventivo shrink {len(body)}b -> {len(_shrunk)}b")
+            _before = len(body)
+            log_fn(f"QWEN preventivo shrink {_before}b -> {len(_shrunk)}b")
+            debug_catalog.record_event(
+                severity="info", category="qwen", kind="qwen_preventive_shrink",
+                code=0,
+                snippet=f"{_before}b -> {len(_shrunk)}b target={QWEN_SHRINK_TARGET_BYTES} model={upstream_model or model}")
             body = _shrunk
             if on_shrink is not None:
                 on_shrink(_shrunk)
@@ -609,11 +683,18 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
     for attempt in range(2):
         resp = None
         try:
-            est_tokens = _estimate_tokens(body)
             lim_model = upstream_model or model
+            est_tokens = _estimate_tokens(body, lim_model)
             budget = QWEN_STREAM_ACQUIRE_CAP_SEC if passthrough else QWEN_RETRY_CAP_SEC
 
+            _t_acq = time.monotonic()
             entry = await QWEN_LIMITER.acquire(lim_model, est_tokens, budget_sec=budget)
+            wait_ms = (time.monotonic() - _t_acq) * 1000
+            snap = QWEN_LIMITER.snapshot().get("per_model", {}).get(lim_model, {})
+            log_fn(f"qwen digest: model={lim_model} body={len(body)}b tools={body.count(b'\"input_schema\"')} "
+                   f"est={est_tokens}tok rpm={snap.get('rpm_used','?')}/{snap.get('rpm_limit','?')} "
+                   f"tpm={snap.get('tpm_used','?')}/{snap.get('tpm_limit','?')} wait={wait_ms:.0f}ms attempt={attempt+1}")
+            # ponytail: tools contato su b'"input_schema"' (una occorrenza per tool def), zero parse extra
 
             if passthrough:
                 timeout = ClientTimeout(total=None, sock_connect=15, sock_read=120)
@@ -651,7 +732,7 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
                     category="qwen",
                     kind="qwen_429_backoff",
                     code=429,
-                    snippet=f"backoff {step}s"
+                    snippet=f"backoff {step}s model={lim_model} est={est_tokens} attempt={attempt+1}"
                 )
                 try:
                     _raw429 = await resp.read()
@@ -700,7 +781,7 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
                     category="qwen",
                     kind="qwen_5xx_retry",
                     code=resp.status,
-                    snippet=f"status={resp.status}"
+                    snippet=f"status={resp.status} model={lim_model} attempt={attempt+1}"
                 )
                 try:
                     await resp.read()
@@ -724,6 +805,10 @@ async def forward_qwen(request, body: bytes, session, model: str, log_fn=print,
 
         except RateLimitExhausted as e:
             log_fn(f"QWEN rate-limit exhausted: {e}")
+            debug_catalog.record_event(
+                severity="block", category="qwen", kind="qwen_rate_budget_exhausted",
+                code=429,
+                snippet=f"{e} model={upstream_model or model} body={len(body)}b")
             if passthrough:
                 return synthetic_rate_limit(f"qwen rate-limit: budget esaurito. {e}",
                                             retry_after="10")
