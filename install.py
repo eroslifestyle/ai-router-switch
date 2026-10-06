@@ -17,7 +17,7 @@ REQUIRED = ["aiohttp", "brotli", "multidict", "PIL"]
 # Elenco esplicito, non un range: 8780 e 8785 sono saltate. 8780 e' occupata da un altro
 # servizio (chatterbox-gpu su 0.0.0.0:8780); 8785 era di mix-ag-2 (assorbita in mix-ag il 2026-09-26).
 # Un range nasconderebbe il salto e reintrodurrebbe il conflitto al primo refactor.
-FIXED_PORTS = [8771, 8772, 8773, 8774, 8775, 8776, 8777, 8778, 8779, 8781, 8784, 8786, 8788]
+FIXED_PORTS = [8771, 8772, 8773, 8774, 8775, 8776, 8777, 8778, 8779, 8781, 8784, 8786, 8788, 8789, 8791]
 DYNAMIC_PORT = 8787
 PORTS_STR = " ".join(map(str, FIXED_PORTS + [DYNAMIC_PORT]))
 

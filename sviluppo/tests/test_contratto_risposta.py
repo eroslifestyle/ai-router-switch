@@ -66,6 +66,8 @@ CONTRATTO_OSSERVATO = {
     "mix-gm-2": {"encoding": "identity", "id": "esadecimale"},  # routing identico a mix-gm
     "mix-ag": {"encoding": "gzip", "id": "msg_"},
     "qwen": {"encoding": "gzip", "id": "msg_"},
+    "mixaq": {"encoding": "gzip", "id": "msg_"},      # ACT→qwen (role_routing.py:120), stesso contratto di qwen
+    "mixql": {"encoding": "identity", "id": "resp_"}, # ACT→local (role_routing.py:125), stesso contratto di local
     "local": {"encoding": "identity", "id": "resp_"},
     # gpt: pura locale come `local`, stesso backend → stesso contratto osservato.
     # Non ancora verificata su traffico reale: il modello non e' servito (2026-08-18).
