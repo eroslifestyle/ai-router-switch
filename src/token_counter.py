@@ -17,6 +17,9 @@ BYTES_PER_TOKEN = {
     # sottostimava i token del 18% e il gate lasciava passare corpi troppo grandi.
     "code-max": 3.3,
     "qwen3-coder": 3.3,     # stesso backend Qwen3-Coder-Next (match per prefisso)
+    # Misurato 2026-10-06 su traffico reale (join digest body-bytes ↔ sidecar usage,
+    # n=4, mediana 3.61): il default 4.0 sottostimava i token del ~10%.
+    "qwen3.8": 3.6,
 }
 
 DEFAULT_BYTES_PER_TOKEN = 4.0  # fallback quando il modello non è noto
@@ -69,6 +72,9 @@ def bytes_per_token(model: Optional[str]) -> float:
 
     if model_lower.startswith("code-max"):
         return BYTES_PER_TOKEN["code-max"]
+
+    if model_lower.startswith("qwen3.8"):
+        return BYTES_PER_TOKEN["qwen3.8"]
 
     if model_lower.startswith("qwen3-coder"):
         return BYTES_PER_TOKEN["qwen3-coder"]

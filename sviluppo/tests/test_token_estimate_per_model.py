@@ -5,7 +5,15 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[2] / "src"
 sys.path.insert(0, str(SRC))
 
-from token_counter import bytes_per_token, estimate_tokens_body, BYTES_PER_TOKEN
+from token_counter import bytes_per_token, estimate_tokens, estimate_tokens_body, BYTES_PER_TOKEN
+
+
+def test_qwen38_divisore_misurato():
+    """qwen3.8 usa 3.6 b/tok (misurato 2026-10-06); ramo coder resta intatto."""
+    assert bytes_per_token("qwen3.8-max") == 3.6
+    assert bytes_per_token("qwen3.8-flash") == 3.6
+    assert bytes_per_token("qwen3-coder-plus") == 3.3  # regressione
+    assert estimate_tokens("x" * 360, "qwen3.8-max") == 100
 
 
 def test_classificazione_tokenizer_nuovo():
