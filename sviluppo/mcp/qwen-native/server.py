@@ -29,9 +29,10 @@ VISION_MODEL = os.environ.get("QWEN_VISION_MODEL", "deepseek-v4-flash")
 SEARCH_MODEL = os.environ.get("QWEN_SEARCH_MODEL", "qwen3.8-flash")
 TIMEOUT_SEC = float(os.environ.get("QWEN_MCP_TIMEOUT_SEC", "90"))
 WORKSPACE_STUB = (
-    "servizio non disponibile: la chiave token-plan è 401 su dashscope-intl (nativi Qwen "
-    "richiedono una DASHSCOPE_API_KEY separata) e il backend locale corrispondente non è "
-    "attivo. Fornisci una chiave Alibaba Model Studio, oppure avvia il backend locale."
+    "servizio non disponibile: richiede un backend LOCALE non ancora attivo "
+    "(policy utente 2026-10-06: niente API esterne per questi tool). "
+    "Attiva il backend locale corrispondente (es. chatterbox TTS, whisper ASR, "
+    "embed_local) per abilitarlo. Nessun fallback cloud."
 )
 # Immagini: backend LOCALE sd-cli via lo script imgforge della skill hulk-image
 # (stable-diffusion.cpp, Vulkan, offline). Preset verificato: sdxl-turbo.
@@ -186,8 +187,8 @@ def _native_stub():
     return _tool
 
 
-# Nativi ancora bloccati: backend locale assente/giù (chatterbox TTS, whisper ASR, embed)
-# oppure serve DASHSCOPE_API_KEY (video Qwen, rerank). Stub con messaggio accurato.
+# Nativi in attesa di backend LOCALE (policy utente 2026-10-06: niente API esterne qui).
+# tts/asr/embed -> backend locale non attivo ora; video/rerank -> nessun backend locale.
 for _n in ("qwen_video", "qwen_tts", "qwen_asr", "qwen_embed", "qwen_rerank"):
     mcp.tool(name=_n, description=f"[STUB] {WORKSPACE_STUB}")(_native_stub())
 # qwen_music: fun-music-v1 dà 404 sull'account anche col workspace -> stub permanente.
