@@ -34,8 +34,10 @@ def test_mixaq_think_resta_anthropic_passthrough():
 
 
 def test_mixaq_act_va_su_qwen_flash():
-    # ACT su Qwen, modello di partenza della ladder scalare.
-    assert rr.resolve_route("mixaq", ACT_MODEL) == ("qwen", "qwen3.8-flash")
+    # ACT su Qwen: default della cascade policy §2.1 (deepseek-v4.1-flash),
+    # NON qwen3.8-flash (vietato §2.4 — timeout). Ladder agent-side.
+    assert rr.MIXAQ_ACT == "deepseek-v4.1-flash"
+    assert rr.resolve_route("mixaq", ACT_MODEL) == ("qwen", "deepseek-v4.1-flash")
 
 
 def test_mixql_think_va_su_qwen_max():

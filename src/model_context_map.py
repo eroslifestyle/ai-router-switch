@@ -68,6 +68,8 @@ MODEL_CONTEXT_MAP = {
     "qwen3.8-max": 983_616,        # verificato su token-plan 2026-10-06 (400: "Range of input length should be [1, 983616]")
     "qwen3.8-flash": 983_616,      # verificato su token-plan 2026-10-06 (stesso 400 boundary di qwen3.8-max)
     "deepseek-v4-pro": 1_000_000,  # token-plan 2026-10-06 (non verificato: da doc 1M context)
+    "deepseek-v4.1-flash": 1_000_000, # verificato su token-plan 2026-10-09 (probe 400: "[1, 1000000]")
+    "kimi-k2.7-code": 262_144,     # verificato su token-plan 2026-10-09 (probe 400: "[1, 262144]")
     "deepseek-v4-flash": 1_000_000, # token-plan 2026-10-06 (non verificato)
     "qwen3.7-max": 983_616,        # dichiarato dal gateway
     "qwen3.7-plus": 983_616,        # dichiarato dal gateway

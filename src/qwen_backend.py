@@ -105,6 +105,8 @@ QWEN_MAX_OUTPUT = {
     "qwen3.7-plus": 131072,
     "deepseek-v4-pro": 131072,
     "deepseek-v4-flash": 131072,
+    "deepseek-v4.1-flash": 131072,
+    "kimi-k2.7-code": 131072,
 }
 
 

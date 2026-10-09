@@ -42,6 +42,12 @@ GLM_ACT = "glm-4.7"
 # 3.7-max. Si usa il piu' nuovo.
 QWEN_THINK = "qwen3.8-max"
 QWEN_ACT = "qwen3.8-flash"  # token-plan: qwen3-coder-plus NON servito (probe 2026-10-06); ladder flash->deepseek-v4-pro->qwen3.8-max
+# mixaq ACT: cascade della policy ~/.claude/prompts/qwen-hierarchy-policy-prompt.md
+# §2.1: deepseek-v4.1-flash -> kimi-k2.7-code -> deepseek-v4-pro -> qwen3.8-max
+# (scala di 1 livello dopo 2 fail; ogni task resetta al livello 1; se serve vision
+# salta il livello 3). qwen3.8-flash NON è il default mixaq: §2.4 lo vieta (timeout).
+# I 4 modelli della cascade sono SERVITI dal token-plan (probe 2026-10-09).
+MIXAQ_ACT = "deepseek-v4.1-flash"
 # Unico modello locale (scelta utente 2026-10-04 "tieni solo coder-next-ablit"):
 # Qwen3-Coder-Next 80B abliterato servito da Ollama (:11434), mappato in LiteLLM
 # come `coder-next-ablit`. Usato da local, mix-al e gpt — una sola copia in
@@ -115,9 +121,10 @@ ROUTING_TABLE = {
     ("mix-al", ROLE_THINK): ("anthropic", None),
     ("mix-al", ROLE_ACT): ("local", LOCAL_ACT_FAST),
     # mixaq (token-plan Qwen): THINK su Anthropic (scelta manuale /model), ACT su
-    # Qwen. Mirror di mix-am/mix-ag/mix-al; deny-mode in enforce_hierarchy.
+    # Qwen con la cascade della policy §2.1 (default deepseek-v4.1-flash, ladder
+    # agent-side scelta dal THINK). Mirror di mix-am/mix-ag/mix-al; deny-mode.
     ("mixaq", ROLE_THINK): ("anthropic", None),
-    ("mixaq", ROLE_ACT): ("qwen", QWEN_ACT),
+    ("mixaq", ROLE_ACT): ("qwen", MIXAQ_ACT),
     # mixql: THINK su Qwen (qwen3.8-max, 1M finestra), ACT sul modello LOCALE.
     # VERIFY lo fa il THINK Qwen (ROLE_VERIFY=ROLE_THINK). Nessun fallback cloud
     # automatico sul locale giu': 502 esplicito, switch solo su decisione agente.
