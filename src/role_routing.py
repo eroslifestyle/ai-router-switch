@@ -41,13 +41,14 @@ GLM_ACT = "glm-4.7"
 # 2026-08-03 lo trova DISPONIBILE sull'account (HTTP 200), insieme a
 # 3.7-max. Si usa il piu' nuovo.
 QWEN_THINK = "qwen3.8-max"
-QWEN_ACT = "qwen3.8-flash"  # token-plan: qwen3-coder-plus NON servito (probe 2026-10-06); ladder flash->deepseek-v4-pro->qwen3.8-max
+QWEN_ACT = "deepseek-v4.1-flash"  # cascade policy §2.1 (file ~/.claude/prompts/qwen-hierarchy-policy-prompt.md); qwen3.8-flash VIETATO §2.4 (timeout)
 # mixaq ACT: cascade della policy ~/.claude/prompts/qwen-hierarchy-policy-prompt.md
-# §2.1: deepseek-v4.1-flash -> kimi-k2.7-code -> deepseek-v4-pro -> qwen3.8-max
+# §2.1 (stessa cascade di qwen pura): deepseek-v4.1-flash -> kimi-k2.7-code -> deepseek-v4-pro -> qwen3.8-max
 # (scala di 1 livello dopo 2 fail; ogni task resetta al livello 1; se serve vision
 # salta il livello 3). qwen3.8-flash NON è il default mixaq: §2.4 lo vieta (timeout).
-# I 4 modelli della cascade sono SERVITI dal token-plan (probe 2026-10-09).
-MIXAQ_ACT = "deepseek-v4.1-flash"
+# I 4 modelli della cascade sono SERVITI dal token-plan (probe 2026-10-09). Vale
+# per qwen pura E mixaq: stesso esecutore, cambia solo il THINK (Qwen vs Anthropic).
+MIXAQ_ACT = QWEN_ACT
 # Unico modello locale (scelta utente 2026-10-04 "tieni solo coder-next-ablit"):
 # Qwen3-Coder-Next 80B abliterato servito da Ollama (:11434), mappato in LiteLLM
 # come `coder-next-ablit`. Usato da local, mix-al e gpt — una sola copia in

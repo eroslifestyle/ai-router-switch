@@ -50,8 +50,9 @@ def test_mixql_act_va_sul_modello_locale():
 
 def test_qwen_act_non_e_piu_coder_plus():
     # qwen3-coder-plus NON è servito dal token-plan (probe 2026-10-06).
-    assert rr.QWEN_ACT == "qwen3.8-flash"
-    assert rr.resolve_route("qwen", ACT_MODEL) == ("qwen", "qwen3.8-flash")
+    # qwen pura segue la stessa cascade policy §2.1 di mixaq (utente 2026-10-09).
+    assert rr.QWEN_ACT == "deepseek-v4.1-flash"
+    assert rr.resolve_route("qwen", ACT_MODEL) == ("qwen", "deepseek-v4.1-flash")
 
 
 def test_porte_sandbox_mixaq_mixql():
