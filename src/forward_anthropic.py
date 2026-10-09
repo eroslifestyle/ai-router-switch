@@ -226,6 +226,10 @@ async def forward_anthropic(request, body, session):
         if tok:
             headers["Authorization"] = f"Bearer {tok}"
             _merge_beta(headers, "oauth-2025-04-20")
+            # Anthropic dà precedenza a x-api-key sul Bearer: la dummy del
+            # client (es. ANTHROPIC_API_KEY=dummy dei subagent) deve andare.
+            headers.pop("x-api-key", None)
+            headers.pop("X-Api-Key", None)
         elif auth:
             pass
 
