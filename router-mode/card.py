@@ -408,6 +408,7 @@ class Card(QWidget):
 
         self._center()
         self._service_status = "unknown"
+        self._busy = False
         self._timer = QTimer()
         self._timer.timeout.connect(self._refresh)
         self._timer.start(5000)
@@ -434,6 +435,8 @@ class Card(QWidget):
             self.move(r.center().x() - WINDOW_W // 2, r.center().y() - WINDOW_H // 2)
 
     def _refresh(self):
+        if self._busy:
+            return
         self._current = get_current()
         j = http_get(f"{ROUTER}/health")
         self._health_ok = bool(j and j.get("ok"))
@@ -475,24 +478,64 @@ class Card(QWidget):
             self._current = mode
         self._update_ui()
 
-    def _run_systemctl(self, action, wait_s):
+    SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    BUSY_TIMEOUT_S = 20
+
+    def _run_systemctl(self, action, btn, label):
+        """Esegue systemctl senza bloccare la UI e anima `btn` finche' il router non risponde."""
         import subprocess
         import time
-        try:
-            subprocess.run(["systemctl", "--user", action, "ai-router"], capture_output=True, timeout=10)
-            time.sleep(wait_s)
-        except Exception:
-            pass
+        if self._busy:
+            return
+        self._busy = True
+        self._busy_btn, self._busy_label = btn, label
+        self._busy_frame = 0
+        self._busy_deadline = time.monotonic() + self.BUSY_TIMEOUT_S
+        self._busy_action = action
+        for b in (self._start_btn, self._restart_btn, self._stop_btn):
+            b.setEnabled(False)
+        self._proc = subprocess.Popen(["systemctl", "--user", action, "ai-router"],
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self._busy_timer = QTimer(self)
+        self._busy_timer.timeout.connect(self._busy_tick)
+        self._busy_timer.start(100)
+
+    def _busy_tick(self):
+        import time
+        spin = self.SPINNER_FRAMES[self._busy_frame % len(self.SPINNER_FRAMES)]
+        self._busy_frame += 1
+        self._busy_btn.setText(f"{spin}  {self._busy_label}")
+        self._hero._health_lbl.setText(f"{spin} {self._busy_label.upper()}")
+        self._hero._health_lbl.setStyleSheet(f"background:transparent;color:{C['warn']};font-weight:bold")
+        if self._proc.poll() is None:
+            return
+        # health ogni ~1s, non a ogni frame (http_get e' bloccante)
+        if self._busy_action == "stop":
+            if self._busy_frame >= 10:
+                return self._busy_done()
+        elif self._busy_frame % 10 == 0:
+            j = http_get(f"{ROUTER}/health")
+            if j and j.get("ok"):
+                return self._busy_done()
+        if time.monotonic() > self._busy_deadline:
+            self._busy_done()
+
+    def _busy_done(self):
+        self._busy_timer.stop()
+        self._busy = False
+        self._start_btn.setText("▶  Start")
+        self._restart_btn.setText("↻  Riavvia")
+        self._stop_btn.setText("■  Stop")
         self._refresh()
 
     def _start_router(self):
-        self._run_systemctl("start", 1.5)
+        self._run_systemctl("start", self._start_btn, "Avvio…")
 
     def _restart(self):
-        self._run_systemctl("restart", 2.5)
+        self._run_systemctl("restart", self._restart_btn, "Riavvio…")
 
     def _stop_router(self):
-        self._run_systemctl("stop", 1.0)
+        self._run_systemctl("stop", self._stop_btn, "Arresto…")
 
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
