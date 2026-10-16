@@ -1,8 +1,50 @@
 # ~130 lines
 """Router constants extracted from ai-router-proxy.py (~lines 386-476 + scattered scalars)."""
 import os
+import sys
+from urllib.parse import urlparse
 
 import paths
+
+# ── Upstream allowlist ──────────────────────────────────────────────────────────
+# L'URL di upstream si puo' cambiare da env (utile per test/staging), ma l'env la
+# puo' scrivere chiunque nel processo: senza un controllo un valore ostile
+# dirotta il token OAuth / la chiave provider verso un host attaccante.
+# Difesa: l'hostname deve stare in una allowlist, oppure in AIROUTER_UPSTREAM_ALLOW
+# (lista extra esplicita, separata da virgola) per uno staging noto.
+# Vincolo aggiunto: scheme https, con l'unica eccezione http per 127.0.0.1/localhost.
+_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _guarded_upstream(env_name, default, allowed_hosts):
+    """Legge un upstream da env, accettandolo solo se l'host e' in allowlist.
+
+    Non solleva MAI eccezioni: un crash in fase di import bloccherebbe il router
+    all'avvio, che e' un danno peggiore di un URL rifiutato. In caso di
+    violazione stampa un warning su stderr e ritorna il default.
+    """
+    raw = os.environ.get(env_name, "").strip() or default
+    try:
+        parsed = urlparse(raw)
+        host = (parsed.hostname or "").lower()
+    except Exception:
+        host = ""
+    extra = {
+        h.strip().lower()
+        for h in os.environ.get("AIROUTER_UPSTREAM_ALLOW", "").split(",")
+        if h.strip()
+    }
+    is_https = parsed.scheme == "https"
+    is_local_http = parsed.scheme == "http" and host in _LOCAL_HOSTS
+    if host in allowed_hosts or host in extra:
+        if is_https or is_local_http:
+            return raw
+    print(
+        f"[router] {env_name}={raw!r} rifiutato: host {host!r} non in allowlist "
+        f"o scheme non https (default {default!r})",
+        file=sys.stderr,
+    )
+    return default
 
 # ── Network ────────────────────────────────────────────────────────────────────
 LISTEN_HOST = os.environ.get("AIROUTER_LISTEN_HOST", "127.0.0.1")
@@ -13,8 +55,10 @@ LISTEN_PORT = int(os.environ.get("AIROUTER_PORT", "8787"))
 # TimeoutStopSec=20 -> SIGKILL certo appena c'e' uno stream SSE aperto (misurato
 # nel journal: "State 'stop-sigterm' timed out. Killing").
 SHUTDOWN_TIMEOUT_S = float(os.environ.get("AIROUTER_SHUTDOWN_TIMEOUT_S", "3.0"))
-ANTHROPIC_UPSTREAM = os.environ.get("AIROUTER_ANTHROPIC_UPSTREAM", "https://api.anthropic.com")
-MINIMAX_UPSTREAM = os.environ.get("AIROUTER_MINIMAX_UPSTREAM", "https://api.minimaxi.chat/anthropic")
+ANTHROPIC_UPSTREAM = _guarded_upstream(
+    "AIROUTER_ANTHROPIC_UPSTREAM", "https://api.anthropic.com", {"api.anthropic.com"})
+MINIMAX_UPSTREAM = _guarded_upstream(
+    "AIROUTER_MINIMAX_UPSTREAM", "https://api.minimaxi.chat/anthropic", {"api.minimaxi.chat"})
 MINIMAX_MODEL = os.environ.get("AIROUTER_MINIMAX_MODEL", "MiniMax-M3")
 # MINIMAX_ORCHESTRATOR_MODEL e MINIMAX_EXECUTORS rimossi il 2026-08-07: erano
 # residui della pipeline THINK/ACT tolta dal proxy il 2026-07-25, mai letti da
