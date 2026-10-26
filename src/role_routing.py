@@ -239,7 +239,7 @@ def modes_with_act_provider(provider: str) -> frozenset:
 _NATIVE_EXECUTOR = {
     # ponytail: local ACT = code-max, unico modello locale dal 2026-08-19
 
-    "anthropic": "claude-haiku-4-5-20251001",
+    "anthropic": "claude-haiku-5-5",
     "minimax": MINIMAX_ACT,
     "glm": GLM_ACT,
     "qwen": QWEN_ACT,
