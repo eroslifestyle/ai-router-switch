@@ -292,3 +292,39 @@ class TestStripImagesWithNote:
         ])
         tr = json.loads(lb.strip_images_with_note(body))["messages"][0]["content"][0]
         assert any("vision_local" in b.get("text", "") for b in tr["content"])
+
+
+# LiteLLM su Ollama chiude con end_turn anche dopo un blocco tool_use: il proxy
+# deve riportare stop_reason "tool_use" (o "max_tokens" se saturo, che ha priorita').
+_SSE_TOOL_START = 'data: {"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}}\n\n'
+
+
+def _sse_delta(output_tokens: int) -> str:
+    return ('data: {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, '
+            f'"usage": {{"output_tokens": {output_tokens}}}}}\n\n')
+
+
+class TestStopReasonToolUse:
+    @pytest.mark.asyncio
+    async def test_tool_use_con_end_turn_diventa_tool_use(self):
+        resp = FakeResponse([(_SSE_TOOL_START + _sse_delta(10)).encode()], "text/event-stream")
+        fixed = lb._StopReasonFixed(resp, max_tokens=400, log_fn=lambda x: None)
+        output = await collect(fixed)
+        assert b'"stop_reason": "tool_use"' in output
+        assert b"end_turn" not in output
+
+    @pytest.mark.asyncio
+    async def test_senza_tool_use_resta_end_turn(self):
+        resp = FakeResponse([_sse_delta(10).encode()], "text/event-stream")
+        fixed = lb._StopReasonFixed(resp, max_tokens=400, log_fn=lambda x: None)
+        output = await collect(fixed)
+        assert b"end_turn" in output
+        assert b"tool_use" not in output
+
+    @pytest.mark.asyncio
+    async def test_tool_use_saturo_resta_max_tokens(self):
+        resp = FakeResponse([(_SSE_TOOL_START + _sse_delta(400)).encode()], "text/event-stream")
+        fixed = lb._StopReasonFixed(resp, max_tokens=400, log_fn=lambda x: None)
+        output = await collect(fixed)
+        assert b'"stop_reason": "max_tokens"' in output
+        assert b"tool_use\"" not in output.split(b"message_delta")[-1]

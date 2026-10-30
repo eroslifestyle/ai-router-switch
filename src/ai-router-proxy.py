@@ -1007,7 +1007,8 @@ async def handle(request):
                     elapsed_ms=(time.monotonic() - _t0) * 1000,
                     request_path=request.path,
                 )
-            if up:
+            # forward_local puo' restituire una web.Response di errore, senza .content
+            if up and hasattr(up, "content"):
                 up = _local_mod.TeeResponse(up, _capture_trace)
 
             return await relay(up, chat_fp_for_rewrite=fp,

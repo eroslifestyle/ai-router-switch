@@ -1,7 +1,8 @@
-"""Mode local pura: la richiesta parte da contesto ZERO.
+"""Mode local pura: contesto minimo stile agente `pi`.
 
-Richiesta utente 2026-10-30: niente tool (nemmeno i core), niente system prompt,
-niente system-reminder nei messages. Disattivabile con AIROUTER_LOCAL_ZERO_CONTEXT=0.
+Semantica 2026-10-30: solo tool core (Bash, Read, Edit, Write, Grep, Glob; override
+AIROUTER_LOCAL_ZERO_TOOLS), system corto con la directory di lavoro, niente
+system-reminder nei messages. Disattivabile con AIROUTER_LOCAL_ZERO_CONTEXT=0.
 """
 
 import json
@@ -16,9 +17,9 @@ import local_backend  # noqa: E402
 def _body_con_contesto() -> bytes:
     return json.dumps({
         "model": "coder-next-ablit",
-        "tools": [{"name": "Bash"}],
+        "tools": [{"name": "Bash"}, {"name": "mcp__x__y"}],
         "tool_choice": {"type": "auto"},
-        "system": [{"type": "text", "text": "X"}],
+        "system": "Sei Claude Code.\nPrimary working directory: /tmp/proj\n",
         "messages": [
             {"role": "user", "content": [
                 {"type": "text", "text": "<system-reminder>CLAUDE.md roba</system-reminder>"},
@@ -26,6 +27,7 @@ def _body_con_contesto() -> bytes:
             ]},
             {"role": "assistant", "content": [
                 {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}},
+                {"type": "tool_use", "id": "t2", "name": "mcp__x__y", "input": {}},
             ]},
             {"role": "user", "content": [
                 {"type": "tool_result", "tool_use_id": "t1", "content": "out"},
@@ -34,18 +36,26 @@ def _body_con_contesto() -> bytes:
     }).encode()
 
 
-def test_local_rimuove_tools_system_e_reminder(monkeypatch):
+def test_local_tiene_tool_core_e_system_corto(monkeypatch):
     monkeypatch.delenv("AIROUTER_LOCAL_ZERO_CONTEXT", raising=False)
+    monkeypatch.delenv("AIROUTER_LOCAL_ZERO_TOOLS", raising=False)
     out = local_backend.slim_local_body(_body_con_contesto(), "local")
     d = json.loads(out)
-    assert "tools" not in d
-    assert "tool_choice" not in d
-    assert "system" not in d
+    assert [t["name"] for t in d["tools"]] == ["Bash"]
+    assert local_backend.LOCAL_ZERO_SYSTEM in d["system"]
+    assert "Directory di lavoro: /tmp/proj" in d["system"]
     assert "system-reminder" not in json.dumps(d)
     assert "ciao" in json.dumps(d)
-    tipi = [b.get("type") for m in d["messages"] if isinstance(m["content"], list)
-            for b in m["content"]]
-    assert "tool_use" not in tipi and "tool_result" not in tipi
+
+
+def test_tool_use_core_resta_e_mcp_declassato(monkeypatch):
+    monkeypatch.delenv("AIROUTER_LOCAL_ZERO_CONTEXT", raising=False)
+    monkeypatch.delenv("AIROUTER_LOCAL_ZERO_TOOLS", raising=False)
+    d = json.loads(local_backend.slim_local_body(_body_con_contesto(), "local"))
+    blocchi = d["messages"][1]["content"]
+    assert blocchi[0]["type"] == "tool_use" and blocchi[0]["name"] == "Bash"
+    assert blocchi[1]["type"] == "text" and "mcp__x__y" in blocchi[1]["text"]
+    assert d["messages"][2]["content"][0]["type"] == "tool_result"
 
 
 def test_messaggio_solo_reminder_diventa_segnaposto(monkeypatch):
@@ -68,3 +78,18 @@ def test_flag_zero_disattiva_zero_context(monkeypatch):
     monkeypatch.setenv("AIROUTER_LOCAL_ZERO_CONTEXT", "0")
     d = json.loads(local_backend.slim_local_body(_body_con_contesto(), "local"))
     assert "system" in d
+
+
+def test_messaggi_role_system_via_e_cwd_estratta(monkeypatch):
+    # Forma reale di Claude Code 2.1.310: ambiente e output hook in un messaggio
+    # role "system" dentro messages, non nel campo system.
+    monkeypatch.delenv("AIROUTER_LOCAL_ZERO_CONTEXT", raising=False)
+    body = json.dumps({"system": [{"type": "text", "text": "You are Claude."}], "messages": [
+        {"role": "user", "content": "ciao"},
+        {"role": "system", "content": [{"type": "text", "text":
+            "hook PONYTAIL\n - Primary working directory: /tmp/my proj\n - Is a git repository: false"}]},
+    ]}).encode()
+    d = json.loads(local_backend.slim_local_body(body, "local"))
+    assert [m["role"] for m in d["messages"]] == ["user"]
+    assert "Directory di lavoro: /tmp/my proj" in d["system"]
+    assert "PONYTAIL" not in json.dumps(d)

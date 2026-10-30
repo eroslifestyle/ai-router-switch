@@ -313,6 +313,8 @@ class _FixedContent:
         self._max = max_tokens
         self._is_sse = is_sse
         self._log = log_fn
+        # LiteLLM su Ollama manda end_turn anche con tool_use: lo ricordiamo dal SSE
+        self._saw_tool_use = False
 
     def at_eof(self):
         return self._orig.at_eof()
@@ -346,16 +348,24 @@ class _FixedContent:
             obj = json.loads(line[len(prefix):])
         except Exception:
             return line
-        if (isinstance(obj, dict)
-                and obj.get("type") == "message_delta"
-                and obj.get("delta", {}).get("stop_reason") == "end_turn"
-                and obj.get("usage", {}).get("output_tokens", 0) >= self._max):
-            obj["delta"]["stop_reason"] = "max_tokens"
-            self._log("stop_reason corretto: end_turn -> max_tokens")
-            debug_catalog.record_event(
-                severity="error", category="local", kind="truncated_response_local",
-                snippet=f"end_turn->max_tokens output_tokens={obj.get('usage', {}).get('output_tokens', 0)} max={self._max}")
-            return prefix + json.dumps(obj).encode()
+        if not isinstance(obj, dict):
+            return line
+        if obj.get("type") == "content_block_start" and isinstance(obj.get("content_block"), dict) \
+                and obj["content_block"].get("type") == "tool_use":
+            self._saw_tool_use = True
+            return line
+        if obj.get("type") == "message_delta" and obj.get("delta", {}).get("stop_reason") == "end_turn":
+            if obj.get("usage", {}).get("output_tokens", 0) >= self._max:
+                obj["delta"]["stop_reason"] = "max_tokens"
+                self._log("stop_reason corretto: end_turn -> max_tokens")
+                debug_catalog.record_event(
+                    severity="error", category="local", kind="truncated_response_local",
+                    snippet=f"end_turn->max_tokens output_tokens={obj.get('usage', {}).get('output_tokens', 0)} max={self._max}")
+                return prefix + json.dumps(obj).encode()
+            if self._saw_tool_use:
+                obj["delta"]["stop_reason"] = "tool_use"
+                self._log("stop_reason corretto: end_turn -> tool_use")
+                return prefix + json.dumps(obj).encode()
         return line
 
     def _fix_json(self, raw: bytes):
@@ -363,13 +373,18 @@ class _FixedContent:
             obj = json.loads(raw)
         except Exception:
             return raw
-        if (obj.get("stop_reason") == "end_turn"
-                and obj.get("usage", {}).get("output_tokens", 0) >= self._max):
+        if obj.get("stop_reason") != "end_turn":
+            return raw
+        if obj.get("usage", {}).get("output_tokens", 0) >= self._max:
             obj["stop_reason"] = "max_tokens"
             self._log("stop_reason corretto: end_turn -> max_tokens")
             debug_catalog.record_event(
                 severity="error", category="local", kind="truncated_response_local",
                 snippet=f"end_turn->max_tokens output_tokens={obj.get('usage', {}).get('output_tokens', 0)} max={self._max}")
+            return json.dumps(obj).encode()
+        if any(isinstance(b, dict) and b.get("type") == "tool_use" for b in obj.get("content") or []):
+            obj["stop_reason"] = "tool_use"
+            self._log("stop_reason corretto: end_turn -> tool_use")
             return json.dumps(obj).encode()
         return raw
 
@@ -591,6 +606,13 @@ async def forward_local(
 # AIROUTER_LOCAL_TOOL_ALLOWLIST. Disattivabile con AIROUTER_LOCAL_SLIM=0.
 LOCAL_TOOL_ALLOWLIST_DEFAULT = "Bash,Read,Edit,Write,Grep,Glob,Agent,MultiEdit,ToolSearch"
 
+# Mode local pura (stile agente `pi`): tool core ammessi + system corto con cwd.
+LOCAL_ZERO_TOOLS_DEFAULT = "Bash,Read,Edit,Write,Grep,Glob"
+LOCAL_ZERO_SYSTEM = ("Sei un agente di coding che lavora sul computer dell'utente. "
+    "Usa i tool per leggere e modificare file ed eseguire comandi; non descrivere "
+    "un'azione senza farla. Procedi fino a completare il task, poi rispondi in breve.")
+_CWD_RE = re.compile(r"Primary working directory: ([^\\\"]+)")
+
 _SYSTEM_REMINDER_RE = re.compile(
     r"<system-reminder[^>]*>.*?</system-reminder>", re.DOTALL)
 _SLIM_MARKERS = ("Available agent types", "The following skills are available")
@@ -663,12 +685,32 @@ def _demote_removed_tool_refs(data: dict, allow: set) -> None:
 
 
 def _zero_context(data: dict) -> None:
-    """Mode local pura (richiesta utente 2026-10-30): la chat parte da zero —
-    niente tool (nemmeno i core), niente system prompt, niente system-reminder
-    (CLAUDE.md, memoria, hook). Disattiva con AIROUTER_LOCAL_ZERO_CONTEXT=0."""
-    for key in ("tools", "tool_choice", "system"):
-        data.pop(key, None)
-    _demote_removed_tool_refs(data, set())
+    """Mode local pura (richiesta utente 2026-10-30): la chat parte da contesto
+    minimo — solo tool core (Bash/Read/Edit/Write/Grep/Glob, override
+    AIROUTER_LOCAL_ZERO_TOOLS), system corto con la sola directory di lavoro.
+    Niente MCP, skill, CLAUDE.md, system-reminder (hook). Disattiva con
+    AIROUTER_LOCAL_ZERO_CONTEXT=0."""
+    allow = set(filter(None, os.environ.get(
+        "AIROUTER_LOCAL_ZERO_TOOLS", LOCAL_ZERO_TOOLS_DEFAULT).split(",")))
+    # Claude Code mette l'ambiente (cwd) e l'output degli hook in messaggi
+    # role "system" dentro messages, non nel campo system: cwd cercata in tutto
+    # il body, poi quei messaggi via (verificato su CC 2.1.310, 2026-10-30).
+    trovato = _CWD_RE.search(json.dumps(data, ensure_ascii=False))
+    cwd = trovato.group(1).strip() if trovato else None
+    data["messages"] = [m for m in data.get("messages", [])
+                        if not (isinstance(m, dict) and m.get("role") == "system")]
+    data["system"] = LOCAL_ZERO_SYSTEM + (f"\nDirectory di lavoro: {cwd}" if cwd else "")
+    tools = [t for t in data.get("tools") or [] if isinstance(t, dict) and t.get("name") in allow]
+    if tools:
+        data["tools"] = tools
+        scelta = data.get("tool_choice")
+        if isinstance(scelta, dict) and scelta.get("type") == "tool" \
+                and scelta.get("name") not in allow:
+            data.pop("tool_choice", None)
+    else:
+        data.pop("tools", None)
+        data.pop("tool_choice", None)
+    _demote_removed_tool_refs(data, allow)
     for msg in data.get("messages", []):
         content = msg.get("content") if isinstance(msg, dict) else None
         if isinstance(content, str):
