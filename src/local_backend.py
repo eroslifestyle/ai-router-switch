@@ -660,6 +660,27 @@ def _demote_removed_tool_refs(data: dict, allow: set) -> None:
                                           + json.dumps(blk.get("content"), ensure_ascii=False, default=str)[:2000]}
 
 
+def _zero_context(data: dict) -> None:
+    """Mode local pura (richiesta utente 2026-10-30): la chat parte da zero —
+    niente tool (nemmeno i core), niente system prompt, niente system-reminder
+    (CLAUDE.md, memoria, hook). Disattiva con AIROUTER_LOCAL_ZERO_CONTEXT=0."""
+    for key in ("tools", "tool_choice", "system"):
+        data.pop(key, None)
+    _demote_removed_tool_refs(data, set())
+    for msg in data.get("messages", []):
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if isinstance(content, str):
+            content = [{"type": "text", "text": content}]
+        if not isinstance(content, list):
+            continue
+        for blk in content:
+            if isinstance(blk, dict) and blk.get("type") == "text":
+                blk["text"] = _SYSTEM_REMINDER_RE.sub("", blk.get("text") or "").strip()
+        # ponytail: messaggio fatto solo di reminder -> segnaposto, l'API rifiuta content vuoto
+        msg["content"] = [b for b in content if not (isinstance(b, dict)
+                          and b.get("type") == "text" and not b["text"])] or "(vuoto)"
+
+
 def slim_local_body(body: bytes, mode: str = "local") -> bytes:
     """Slim del body per il provider local: allowlist tool + pulizia dei
     riferimenti orfani + rimozione delle liste agent/skills nei system-reminder.
@@ -672,6 +693,8 @@ def slim_local_body(body: bytes, mode: str = "local") -> bytes:
     except Exception:
         return body
     before = len(body)
+    if mode == "local" and os.environ.get("AIROUTER_LOCAL_ZERO_CONTEXT", "1") != "0":
+        _zero_context(data)
     # 1) allowlist tool + invariante riferimenti (demote con brand-check
     # aggirato: qui i nomi da declassare sono quelli FUORI allowlist, non
     # quelli brandizzati, quindi riusiamo demote_foreign_tool_use con un

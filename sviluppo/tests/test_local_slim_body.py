@@ -16,7 +16,7 @@ def _body(tools, messages):
 
 def test_tool_allowlist():
     tools = [{"name": "Bash", "input_schema": {}}, {"name": "Workflow", "input_schema": {}}]
-    out = json.loads(slim_local_body(_body(tools, []), "local"))
+    out = json.loads(slim_local_body(_body(tools, []), "mix-al"))
     names = [t["name"] for t in out["tools"]]
     assert names == ["Bash"]
 
@@ -32,7 +32,7 @@ def test_invariant_no_orphan_refs():
              "content": {"type": "tool_search_tool_search_result",
                          "tool_references": [{"type": "tool_reference", "tool_name": "Workflow"}]}}]},
     ]
-    out = json.dumps(json.loads(slim_local_body(_body(tools, messages), "local")))
+    out = json.dumps(json.loads(slim_local_body(_body(tools, messages), "mix-al")))
     assert "Workflow" not in out.replace("tool_use Workflow]", "") or True
     # nessun riferimento strutturale sopravvive
     d = json.loads(out)
@@ -52,7 +52,7 @@ def test_system_reminders():
         {"type": "text", "text": "prima <system-reminder>The following skills are available: x</system-reminder> dopo"},
         {"type": "text", "text": "<system-reminder>CLAUDE.md content qui</system-reminder>"},
     ]}]
-    out = json.loads(slim_local_body(_body(tools, msgs), "local"))
+    out = json.loads(slim_local_body(_body(tools, msgs), "mix-al"))
     texts = [b["text"] for b in out["messages"][0]["content"]]
     assert any("prima" in t and "dopo" in t for t in texts)
     assert any("CLAUDE.md content" in t for t in texts)
@@ -62,17 +62,17 @@ def test_system_reminders():
 def test_disabled_via_env(monkeypatch):
     monkeypatch.setenv("AIROUTER_LOCAL_SLIM", "0")
     body = _body([{"name": "Workflow", "input_schema": {}}], [])
-    assert json.loads(slim_local_body(body, "local"))["tools"][0]["name"] == "Workflow"
+    assert json.loads(slim_local_body(body, "mix-al"))["tools"][0]["name"] == "Workflow"
 
 
 def test_allowlist_override(monkeypatch):
     monkeypatch.setenv("AIROUTER_LOCAL_TOOL_ALLOWLIST", "Workflow")
     tools = [{"name": "Bash", "input_schema": {}}, {"name": "Workflow", "input_schema": {}}]
-    out = json.loads(slim_local_body(_body(tools, []), "local"))
+    out = json.loads(slim_local_body(_body(tools, []), "mix-al"))
     assert [t["name"] for t in out["tools"]] == ["Workflow"]
 
 
 def test_intact_when_nothing_to_remove():
     body = _body([{"name": "Bash", "input_schema": {}}],
                  [{"role": "user", "content": [{"type": "text", "text": "ciao"}]}])
-    assert json.loads(slim_local_body(body, "local")) == json.loads(body)
+    assert json.loads(slim_local_body(body, "mix-al")) == json.loads(body)
