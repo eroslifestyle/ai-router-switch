@@ -58,6 +58,8 @@ LOCAL_TIMEOUT_SEC = int(os.environ.get('AIROUTER_LOCAL_TIMEOUT_SEC', 240))
 LOCAL_IDLE_READ_SEC = int(os.environ.get('AIROUTER_LOCAL_IDLE_READ_SEC', 90))
 # Retry solo su errori di connessione (rapidi). Su timeout NON si ritenta: vedi forward_local.
 LOCAL_MAX_RETRY = 2
+# Il trace tronca comunque a 50KB: inutile tenerne di piu' in RAM per stream lunghi.
+TRACE_TEE_MAX_BYTES = 64 * 1024
 
 def _local_env_file():
     """File .env dedicato al backend locale: non e quello della config dir."""
@@ -745,3 +747,41 @@ def slim_local_body(body: bytes, mode: str = "local") -> bytes:
                      f"tools_removed={removed_names[:10]} reminders_removed={reminders_removed}"),
         )
     return json.dumps(data).encode()
+
+
+class _TeeContent:
+    """Inoltra i chunk dell'upstream appena arrivano e ne tiene copia (max
+    TRACE_TEE_MAX_BYTES) per il trace, consegnata a on_done a fine stream."""
+    def __init__(self, content, on_done):
+        self._content = content
+        self._on_done = on_done
+
+    async def iter_any(self):
+        buf = bytearray()
+        try:
+            async for chunk in self._content.iter_any():
+                if len(buf) < TRACE_TEE_MAX_BYTES:
+                    buf += chunk
+                yield chunk
+        finally:
+            self._on_done(bytes(buf))
+
+    def __getattr__(self, name):
+        return getattr(self._content, name)
+
+
+class TeeResponse:
+    """Risposta upstream con streaming intatto + capture del body per il trace
+    (fix 2026-10-30: prima il ramo local bufferizzava tutto -> niente streaming)."""
+    def __init__(self, orig, on_done):
+        self._orig = orig
+        self._on_done = on_done
+        self.content = _TeeContent(orig.content, on_done)
+
+    async def read(self):
+        body = await self._orig.read()
+        self._on_done(body)
+        return body
+
+    def __getattr__(self, name):
+        return getattr(self._orig, name)

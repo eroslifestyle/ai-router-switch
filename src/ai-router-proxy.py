@@ -994,49 +994,21 @@ async def handle(request):
             up = await _local_mod.forward_local(request, _local_body, session,
                                                 _req_model or _local_model, log_fn=log,
                                                 passthrough=True, upstream_model=_local_model, on_shrink=_on_upstream_shrink)
-            elapsed_ms = (time.monotonic() - start_trace) * 1000
-
-            # Cattura risposta per trace
-            response_body = None
-            response_status = up.status if up else 0
-            response_headers = dict(up.headers) if up else {}
-            try:
-                if up:
-                    response_body = await up.read()
-            except Exception:
-                pass
-
-            # Registra trace
-            trace_logger.capture(
-                mode=mode,
-                model=_local_model,
-                request_body=_local_body,
-                response_status=response_status,
-                response_body=response_body,
-                response_headers=response_headers,
-                elapsed_ms=elapsed_ms,
-                request_path=request.path,
-            )
-
-            # Ricostruisci response con body letto
-            if up and response_body is not None:
-                class _FixedResponse:
-                    def __init__(self, orig, body):
-                        self._orig = orig
-                        self._body = body
-                    @property
-                    def content(self):
-                        class _Content:
-                            def __init__(self, b):
-                                self._b = b
-                            async def read(self):
-                                return self._b
-                            async def iter_any(self):
-                                yield self._b
-                        return _Content(response_body)
-                    def __getattr__(self, name):
-                        return getattr(self._orig, name)
-                up = _FixedResponse(up, response_body)
+            # Trace a fine stream (tee): lo streaming verso il client resta reale.
+            def _capture_trace(response_body: bytes, _up=up, _body=_local_body,
+                               _model=_local_model, _t0=start_trace) -> None:
+                trace_logger.capture(
+                    mode=mode,
+                    model=_model,
+                    request_body=_body,
+                    response_status=_up.status if _up else 0,
+                    response_body=response_body,
+                    response_headers=dict(_up.headers) if _up else {},
+                    elapsed_ms=(time.monotonic() - _t0) * 1000,
+                    request_path=request.path,
+                )
+            if up:
+                up = _local_mod.TeeResponse(up, _capture_trace)
 
             return await relay(up, chat_fp_for_rewrite=fp,
                                extra_headers={"x-ai-verified": f"tunnel-{mode}-local({_local_model})"}, final_override=f"local:{_local_model}")
