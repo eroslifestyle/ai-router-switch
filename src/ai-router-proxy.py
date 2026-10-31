@@ -826,7 +826,11 @@ async def handle(request):
     # Idempotente: dopo la conversione non ce ne sono piu', quindi i due call
     # site dentro forward_anthropic/forward_minimax restano come rete di
     # sicurezza per chi li invoca direttamente e diventano no-op qui.
-    if _body_dict is not None and "/v1/messages" in request.path:
+    # Eccezione: local zero-context. Li scarta slim_local_body, ma solo se
+    # arrivano ancora come role=system: promossi a user passerebbero intatti.
+    _zero_ctx_local = (mode == "local"
+                       and os.environ.get("AIROUTER_LOCAL_ZERO_CONTEXT", "1") != "0")
+    if _body_dict is not None and "/v1/messages" in request.path and not _zero_ctx_local:
         try:
             _n_sys = promote_system_messages(_body_dict)
             if _n_sys:
