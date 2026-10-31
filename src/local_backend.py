@@ -827,3 +827,83 @@ class TeeResponse:
 
     def __getattr__(self, name):
         return getattr(self._orig, name)
+
+
+# Keepalive SSE (fix 2026-10-31): con contesti da 100k+ token il prefill del
+# modello locale dura minuti SENZA byte; i client (Claude Code API_TIMEOUT_MS)
+# scadevano prima degli header e ritentavano in loop ("Request timed out").
+# Header 200 SSE subito + ping ogni SSE_KEEPALIVE_SEC finche' l'upstream tace.
+SSE_KEEPALIVE_SEC = 15
+_SSE_PING = b'event: ping\ndata: {"type": "ping"}\n\n'
+_SSE_ERROR_TYPES = {429: "rate_limit_error", 502: "overloaded_error",
+                    503: "overloaded_error", 504: "overloaded_error", 529: "overloaded_error"}
+
+
+def _sse_error_event(status: int, raw: bytes) -> bytes:
+    """Errore upstream arrivato dopo gli header 200: evento SSE `error` Anthropic."""
+    try:
+        payload = json.loads(raw)
+        if not (isinstance(payload, dict) and payload.get("type") == "error"):
+            raise ValueError("non e' un errore Anthropic")
+    except Exception:
+        payload = {"type": "error", "error": {
+            "type": _SSE_ERROR_TYPES.get(status, "api_error"),
+            "message": f"local upstream {status}: {raw[:500].decode('utf-8', 'replace')}"}}
+    return b"event: error\ndata: " + json.dumps(payload).encode() + b"\n\n"
+
+
+class _KeepaliveContent:
+    def __init__(self, owner):
+        self._owner = owner
+
+    async def iter_any(self):
+        task = self._owner._task
+        while not task.done():
+            done, _ = await asyncio.wait({task}, timeout=SSE_KEEPALIVE_SEC)
+            if not done:
+                yield _SSE_PING
+        try:
+            up = task.result()
+        except Exception as e:
+            yield _sse_error_event(502, str(e).encode())
+            return
+        self._owner._real = up
+        if getattr(up, "status", 0) == 200 and hasattr(up, "content"):
+            async for chunk in up.content.iter_any():
+                yield chunk
+            return
+        if hasattr(up, "read"):
+            raw = await up.read()
+        else:
+            raw = getattr(up, "body", b"") or b""
+        yield _sse_error_event(getattr(up, "status", 502), raw)
+
+    def at_eof(self):
+        real = self._owner._real
+        return bool(real is not None and hasattr(real, "content") and real.content.at_eof())
+
+
+class KeepaliveUpstream:
+    """Upstream 'pigro' per relay: status 200 SSE immediato, ping finche'
+    forward_local (task) non risponde, poi i chunk reali o un evento error."""
+    status = 200
+
+    def __init__(self, task):
+        self._task = task
+        self._real = None
+        self.headers = {"content-type": "text/event-stream; charset=utf-8"}
+        self.content = _KeepaliveContent(self)
+
+    @property
+    def closed(self):
+        real = self._real
+        if real is None:
+            return self._task.done()
+        return bool(getattr(real, "closed", True))
+
+    def release(self):
+        if not self._task.done():
+            self._task.cancel()  # client sparito: chiude la richiesta verso LiteLLM
+        real = self._real
+        if real is not None and hasattr(real, "release"):
+            real.release()

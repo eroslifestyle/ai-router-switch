@@ -995,9 +995,14 @@ async def handle(request):
 
             # Trace completo per debug provider local
             start_trace = time.monotonic()
-            up = await _local_mod.forward_local(request, _local_body, session,
-                                                _req_model or _local_model, log_fn=log,
-                                                passthrough=True, upstream_model=_local_model, on_shrink=_on_upstream_shrink)
+            _fwd = _local_mod.forward_local(request, _local_body, session,
+                                            _req_model or _local_model, log_fn=log,
+                                            passthrough=True, upstream_model=_local_model, on_shrink=_on_upstream_shrink)
+            # Stream: header SSE subito + ping durante il prefill (vedi KeepaliveUpstream).
+            if isinstance(_body_dict, dict) and _body_dict.get("stream"):
+                up = _local_mod.KeepaliveUpstream(asyncio.ensure_future(_fwd))
+            else:
+                up = await _fwd
             # Trace a fine stream (tee): lo streaming verso il client resta reale.
             def _capture_trace(response_body: bytes, _up=up, _body=_local_body,
                                _model=_local_model, _t0=start_trace) -> None:
