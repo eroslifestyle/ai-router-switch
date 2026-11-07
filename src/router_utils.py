@@ -353,6 +353,9 @@ def _usage_writer_loop():
                 try:
                     _fh.writelines(_batch)
                     _fh.flush()
+                    if _fh.tell() > USAGE_MAX_BYTES:  # come nel log: ruota a runtime
+                        _fh.close()
+                        _fh, _cur_path = None, None
                 except Exception:
                     pass
         except Exception as e:
@@ -454,6 +457,11 @@ def _log_writer_loop():
                 try:
                     _fh.write("\n".join(_batch) + "\n")
                     _fh.flush()
+                    # Oltre soglia: chiudi e azzera il path, il giro dopo ruota
+                    # e riapre. Prima la rotazione scattava solo al riavvio.
+                    if _fh.tell() > LOG_MAX_BYTES:
+                        _fh.close()
+                        _fh, _cur_path = None, None
                 except Exception:
                     pass
         except Exception as e:

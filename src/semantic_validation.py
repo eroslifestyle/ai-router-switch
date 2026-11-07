@@ -54,6 +54,8 @@ PATTERN_MODELLI = (
 
 # Oltre questa lunghezza il valore non e' un nome di modello ma un payload.
 MAX_LUNGHEZZA_MODELLO = 128
+MAX_RILIEVI_LOG = 3
+MAX_VALORE_CHARS = 80
 
 
 def _modello_riconosciuto(nome):
@@ -118,5 +120,9 @@ def descrivi(rilievi):
     """Riga sintetica per il log, vuota se non c'e' nulla da dire."""
     if not rilievi:
         return ""
-    parti = [f"{r['campo']}={r['valore']} ({r['motivo']})" for r in rilievi]
-    return "; ".join(parti)
+    # Tetto: una conversazione lunga produceva centinaia di rilievi e righe da
+    # ~27 KB (202 MB di log in 2,5 h, misurato 2026-11-07).
+    parti = [f"{r['campo']}={str(r['valore'])[:MAX_VALORE_CHARS]} ({r['motivo']})"
+             for r in rilievi[:MAX_RILIEVI_LOG]]
+    extra = len(rilievi) - MAX_RILIEVI_LOG
+    return "; ".join(parti) + (f"; (+{extra} altri)" if extra > 0 else "")
