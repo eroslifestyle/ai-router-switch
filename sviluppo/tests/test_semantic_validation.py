@@ -163,3 +163,18 @@ class TestDescrizione:
     def test_contiene_campo_valore_e_motivo(self):
         testo = sv.descrivi(sv.valuta(_corpo(model="xyz")))
         assert "model" in testo and "xyz" in testo and "pattern" in testo
+
+
+class TestDescriviTetto:
+    """Il log non deve esplodere con conversazioni lunghe (2026-11-07)."""
+
+    def test_massimo_tre_rilievi_e_conteggio(self):
+        rilievi = [{"campo": f"messages[{i}].role", "valore": "system", "motivo": "x"}
+                   for i in range(10)]
+        testo = sv.descrivi(rilievi)
+        assert testo.count("messages[") == sv.MAX_RILIEVI_LOG
+        assert testo.endswith("(+7 altri)")
+
+    def test_valore_lungo_troncato(self):
+        testo = sv.descrivi([{"campo": "model", "valore": "a" * 500, "motivo": "x"}])
+        assert "a" * (sv.MAX_VALORE_CHARS + 1) not in testo
