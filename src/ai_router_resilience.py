@@ -331,7 +331,7 @@ class Resilience:
                 "content-type": "application/json",
             }
             body = {
-                "model": "claude-haiku-4-5",
+                "model": "claude-haiku-5-5",
                 "max_tokens": 5,
                 "messages": [{"role": "user", "content": "."}],
             }
