@@ -667,3 +667,24 @@ class TestTickInvokesRefresh:
             "try_refresh_oauth è stato invocato quando il token scade fuori dal margine: "
             "il check del margine non funziona correttamente!"
         )
+
+
+# Regressione 2026-11-13: solo 401/403 provano un token morto. 429, 5xx, 400/404
+# erano trattati come token scaduto: DEGRADED e tutto il traffico bloccato.
+@pytest.mark.parametrize("status,atteso", [(200, True), (429, True), (529, True), (400, True), (404, True), (401, False), (403, False)])
+def test_self_test_solo_401_403_sono_auth_ko(status, atteso):
+    import asyncio
+    risposta = MagicMock(status=status)
+    risposta.__aenter__ = MagicMock(return_value=asyncio.sleep(0, result=risposta))
+    risposta.__aexit__ = MagicMock(return_value=asyncio.sleep(0))
+    risposta.text = MagicMock(return_value=asyncio.sleep(0, result="x"))
+    sessione = MagicMock(post=MagicMock(return_value=risposta))
+    ok, _ = asyncio.run(Resilience.__new__(Resilience)._async_self_test("t", session=sessione))
+    assert ok is atteso
+
+
+def test_self_test_rete_giu_non_blocca():
+    import asyncio
+    sessione = MagicMock(post=MagicMock(side_effect=OSError("rete giu")))
+    ok, msg = asyncio.run(Resilience.__new__(Resilience)._async_self_test("t", session=sessione))
+    assert ok is True and "inconclusivo" in msg

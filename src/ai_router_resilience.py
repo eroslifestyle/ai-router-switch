@@ -30,6 +30,9 @@ import urllib.error
 
 import paths
 
+# Unici status che provano un token OAuth non valido (vedi _async_self_test).
+AUTH_FAIL_STATUSES = frozenset({401, 403})
+
 STATE_DIR = paths.state_dir()
 STATE_FILE = STATE_DIR / "ai-router-resilience-state.json"
 CRASH_DIR = STATE_DIR / "ai-router-crash-dumps"
@@ -338,10 +341,17 @@ class Resilience:
             async with sess.post(url, headers=headers, json=body) as r:
                 if 200 <= r.status < 300:
                     return True, f"ok status={r.status}"
+                # DEGRADED blocca TUTTO il traffico: solo un 401/403 prova che il
+                # token e' morto. 429/5xx/400/404 e la rete sono inconclusivi: non si
+                # blocca, le richieste vere riceveranno l'errore reale (bug
+                # 2026-11-13: un 429 mandava in DEGRADED e il test ogni 30s
+                # rinnovava il 429 all'infinito, serviva il riavvio del PC).
+                if r.status not in AUTH_FAIL_STATUSES:
+                    return True, f"inconclusivo, status={r.status} (non di autenticazione)"
                 txt = (await r.text())[:200]
                 return False, f"status={r.status} body={txt}"
         except Exception as e:
-            return False, f"exception={type(e).__name__}: {e}"
+            return True, f"inconclusivo, exception={type(e).__name__}: {e}"
         finally:
             if owns:
                 await sess.close()
