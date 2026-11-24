@@ -818,6 +818,16 @@ def _must_stay_system(msg) -> bool:
 
 
 # ── Message sequence repair ────────────────────────────────────────────────────
+# Testo del messaggio sintetico inserito in testa quando la sequenza non inizia
+# con un utente di testo. Costante di modulo: usata da _repair_message_sequence
+# e da repair_tail.
+MESSAGGIO_CRONOLOGIA_COMPRESSA = (
+    "La cronologia precedente e' stata compressa per ragioni di spazio. "
+    "Il contesto mancante e' nel riassunto system. "
+    "Non commentare il contesto mancante, prosegui normalmente."
+)
+
+
 def _repair_message_sequence(messages: list) -> list:
     if not messages:
         return messages
@@ -867,11 +877,47 @@ def _repair_message_sequence(messages: list) -> list:
             return not any(isinstance(b, dict) and b.get("type") == "tool_result" for b in c)
         return True
     if not _first_is_clean_user(msgs):
-        msgs.insert(0, {"role": "user", "content":
-            "La cronologia precedente e' stata compressa per ragioni di spazio. "
-            "Il contesto mancante e' nel riassunto system. "
-            "Non commentare il contesto mancante, prosegui normalmente."})
+        msgs.insert(0, {"role": "user", "content": MESSAGGIO_CRONOLOGIA_COMPRESSA})
     return msgs
+
+
+def _e_user_solo_tool_result(message: dict) -> bool:
+    """True se il messaggio è uno user composto solo da blocchi tool_result (o vuoto: la riparazione lo scarta uguale)."""
+    if message.get("role") != "user":
+        return False
+    content = message.get("content")
+    return isinstance(content, list) and all(
+        isinstance(b, dict) and b.get("type") == "tool_result" for b in content)
+
+
+def _e_ancora_tool_use(message: dict) -> bool:
+    """True se il messaggio è un assistant con almeno un blocco tool_use."""
+    content = message.get("content")
+    return message.get("role") == "assistant" and isinstance(content, list) and any(
+        isinstance(b, dict) and b.get("type") == "tool_use" for b in content)
+
+
+def repair_tail(messages: list) -> list:
+    """Ripara una CODA di conversazione tagliata a metà.
+
+    Perché: su una coda tagliata, `_repair_message_sequence` scarta a cascata tutto
+    ciò che precede il primo user di testo tenuto. Nelle chat dei subagent c'è un
+    solo utente di testo, in apertura, quindi la coda perderebbe tutti i risultati
+    dei tool e resterebbe solo il messaggio sintetico. La coda si scorre dall'inizio
+    e si ancora al primo assistant con tool_use: da lì in poi la coppia è completa
+    e il sintetico in testa le dà un'apertura valida. Gli orfani prima dell'ancora
+    si scartano. Se la coda comincia con un user di testo (chat normale), il
+    comportamento resta quello classico, così il prefisso non cambia.
+    """
+    for indice, message in enumerate(messages):
+        if not isinstance(message, dict):
+            continue
+        if message.get("role") == "user" and not _e_user_solo_tool_result(message):
+            break
+        if _e_ancora_tool_use(message):
+            return _repair_message_sequence(
+                [{"role": "user", "content": MESSAGGIO_CRONOLOGIA_COMPRESSA}, *messages[indice:]])
+    return _repair_message_sequence(messages)
 
 
 # ── Original model tracking ────────────────────────────────────────────────────

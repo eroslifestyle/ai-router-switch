@@ -10,11 +10,11 @@ l'orchestrazione del budget e' preferibile a un refactor che tocchi il path
 critico minimax (YAGNI sulla deduplicazione, vedi step 7 del task).
 
 Helper di base condivisi: build_shrink_summary + SHRINK_KEEP_TAIL da
-trim_smart, _repair_message_sequence da router_utils."""
+trim_smart, repair_tail da router_utils."""
 import json
 import os
 
-from router_utils import log, _repair_message_sequence
+from router_utils import log, repair_tail
 from trim_smart import build_shrink_summary, SHRINK_KEEP_TAIL
 
 # Budget progressivo del riassunto (in caratteri). Identico a pipeline_minimax:
@@ -132,7 +132,7 @@ def _shrink_sticky(orig: dict, msgs: list, system_str: str,
             break
         try:
             summary = build_shrink_summary(msgs[:k], _STICKY_SUMMARY_BUDGET)
-            coda = _repair_message_sequence(msgs[k:])
+            coda = repair_tail(msgs[k:])
             if not coda:
                 break
             shrunk = dict(orig)
@@ -172,7 +172,7 @@ def _build_shrunk(orig: dict, msgs: list, system_str: str,
     """
     try:
         summary_content = build_shrink_summary(msgs, budget)
-        tail_msgs = _repair_message_sequence(msgs[-keep_tail:])
+        tail_msgs = repair_tail(msgs[-keep_tail:])
         system_content = (system_str + "\n\n" + summary_content
                           if system_str else summary_content)
         shrunk = dict(orig)

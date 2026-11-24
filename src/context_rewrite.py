@@ -4,7 +4,7 @@ import os
 from typing import Tuple
 
 from trim_smart import build_shrink_summary, SHRINK_KEEP_TAIL
-from router_utils import _repair_message_sequence
+from router_utils import _repair_message_sequence, repair_tail
 from token_counter import estimate_tokens_body, bytes_per_token
 from model_context_map import get_safe_input_limit
 
@@ -144,7 +144,7 @@ def _restore_deduped_reads(full_msgs: list, tail_msgs: list) -> list:
 
 def _tail(msgs: list, keep: int) -> list:
     """Coda riparata e con i rimandi del dedup risolti."""
-    return _restore_deduped_reads(msgs, _repair_message_sequence(msgs[-keep:]))
+    return _restore_deduped_reads(msgs, repair_tail(msgs[-keep:]))
 
 
 def _fit_keep(msgs: list, model: str, safe_limit: int, make_candidate) -> int:
@@ -185,10 +185,18 @@ def _fit_keep(msgs: list, model: str, safe_limit: int, make_candidate) -> int:
         else:
             hi = mid - 1
 
-    # Nemmeno il primo scalino entra: si prova comunque il minimo, cosi' una
-    # conversazione di pochi messaggi enormi non finisce a zero per colpa del passo.
-    if not best and _entra(1):
-        best = 1
+    # Nemmeno il primo scalino entra. Sotto il primo scalino la griglia e' cieca:
+    # i messaggi in mezzo possono entrare anche se il passo grosso no (su una chat
+    # lunga con risultati grossi la coda cadrebbe a 1 pur entrandone 20). Si cerca
+    # quindi il numero esatto tra 1 e il primo scalino, con ricerca binaria.
+    if not best:
+        lo, hi = 1, griglia[0] - 1
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            if _entra(mid):
+                best, lo = mid, mid + 1
+            else:
+                hi = mid - 1
     return best
 
 

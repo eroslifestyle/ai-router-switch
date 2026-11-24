@@ -5,7 +5,8 @@ import json
 sys.path.insert(0, "src")
 
 from pipeline_anthropic import _repair_message_sequence
-from context_rewrite import rewrite_for_context
+from router_utils import MESSAGGIO_CRONOLOGIA_COMPRESSA, repair_tail
+from context_rewrite import rewrite_for_context, _fit_keep, _tail
 from token_counter import estimate_tokens_body
 from model_context_map import get_safe_input_limit
 
@@ -269,3 +270,160 @@ def test_repair_orfano_in_testa_scarta_la_coppia_dopo():
     assert fixed[1]["role"] == "assistant" and fixed[1]["content"] == [
         {"type": "text", "text": "ok"}], f"Secondo messaggio inatteso: {fixed[1]}"
     print("  test_repair_orfano_in_testa_scarta_la_coppia_dopo: OK")
+
+
+# ---------------------------------------------------------------------------
+# Gruppo C – Test per repair_tail (coda tagliata a metà)
+# ---------------------------------------------------------------------------
+
+def _coda_subagent(n_terne: int = 30) -> list:
+    """Chat a forma di subagent: un solo utente di testo, poi terne system/tool_use/tool_result."""
+    msgs = [{"role": "user", "content": "incarico iniziale"}]
+    for i in range(n_terne):
+        msgs.append({"role": "system", "content": f"sistema {i}"})
+        msgs.append({"role": "assistant", "content": [
+            {"type": "tool_use", "id": f"u{i}", "name": "bash", "input": {}}]})
+        msgs.append({"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": f"u{i}",
+             "content": f"risultato-{i}"}]})
+    return msgs
+
+
+def test_repair_tail_coda_subagent_mantiene_ultime_terne():
+    """
+    Coda di 9 messaggi (3 terne) da chat subagent: repair_tail deve partire dal
+    sintetico, mantenere gli ultimi tool_result e non lasciare tool_result orfani.
+    """
+    fixed = repair_tail(_coda_subagent()[-9:])
+    assert fixed[0]["role"] == "user", f"Primo ruolo inatteso: {fixed[0]['role']}"
+    assert fixed[0]["content"] == MESSAGGIO_CRONOLOGIA_COMPRESSA, "Manca il sintetico"
+    dump = json.dumps(fixed, ensure_ascii=False)
+    assert "risultato-29" in dump, "Ultimo tool_result perso"
+    assert "risultato-27" in dump, "Terna completa precedente persa"
+    assert "risultato-26" not in dump, "Entra una terna fuori dalla coda"
+    tool_use_visti = set()
+    for msg in fixed:
+        for blocco in msg["content"] if isinstance(msg["content"], list) else []:
+            if blocco.get("type") == "tool_use":
+                tool_use_visti.add(blocco["id"])
+            if blocco.get("type") == "tool_result":
+                assert blocco["tool_use_id"] in tool_use_visti, \
+                    f"tool_result orfano: {blocco['tool_use_id']}"
+    print("  test_repair_tail_coda_subagent_mantiene_ultime_terne: OK")
+
+
+def test_repair_tail_scarta_user_solo_tool_result_orfano():
+    """
+    Coda che inizia con uno user di soli tool_result orfani: quel blocco sparisce,
+    il resto resta e il primo messaggio e' il sintetico.
+    """
+    coda = [
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "orf", "content": "orfano"}]},
+        {"role": "system", "content": "sistema"},
+        {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "t1", "name": "bash", "input": {}}]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": "risultato-1"}]},
+    ]
+    fixed = repair_tail(coda)
+    assert fixed[0]["content"] == MESSAGGIO_CRONOLOGIA_COMPRESSA, "Manca il sintetico"
+    assert "orfano" not in json.dumps(fixed, ensure_ascii=False), "Il tool_result orfano e' rimasto"
+    assert fixed[1] == coda[2], f"Coppia tool_use non tenuta: {fixed[1]}"
+    assert fixed[2] == coda[3], f"tool_result di t1 non tenuto: {fixed[2]}"
+    assert len(fixed) == 3, f"Messaggi inattesi: {len(fixed)}"
+    print("  test_repair_tail_scarta_user_solo_tool_result_orfano: OK")
+
+
+def test_repair_tail_chat_normale_identica_a_repair():
+    """
+    Chat normale: la coda comincia con assistant di solo testo e poi user di testo.
+    Nessun ancoraggio a tool_use: risultato IDENTICO a _repair_message_sequence.
+    """
+    coda = [
+        {"role": "assistant", "content": [{"type": "text", "text": "testo"}]},
+        {"role": "user", "content": "domanda"},
+        {"role": "assistant", "content": [{"type": "text", "text": "risposta"}]},
+    ]
+    assert repair_tail(coda) == _repair_message_sequence(coda), "Diverso da _repair_message_sequence"
+    assert MESSAGGIO_CRONOLOGIA_COMPRESSA not in json.dumps(repair_tail(coda), ensure_ascii=False)
+    print("  test_repair_tail_chat_normale_identica_a_repair: OK")
+
+
+def test_repair_tail_ancora_tool_use_con_user_testo_in_coda():
+    """
+    Coda [tool_use t1, tool_result t1, user di testo]: sintetico in testa e il
+    tool_result di t1 deve essere presente.
+    """
+    coda = [
+        {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "t1", "name": "bash", "input": {}}]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": "risultato-1"}]},
+        {"role": "user", "content": "testo"},
+    ]
+    fixed = repair_tail(coda)
+    assert fixed[0]["content"] == MESSAGGIO_CRONOLOGIA_COMPRESSA, "Manca il sintetico"
+    assert "risultato-1" in json.dumps(fixed, ensure_ascii=False), "tool_result di t1 perso"
+    print("  test_repair_tail_ancora_tool_use_con_user_testo_in_coda: OK")
+
+
+# ---------------------------------------------------------------------------
+# Gruppo D – Test per _fit_keep (ricerca sotto il primo scalino della griglia)
+# ---------------------------------------------------------------------------
+
+def test_fit_keep_ricerca_sotto_primo_scalino():
+    """
+    Chat normale lunga (2000 messaggi da ~1000 caratteri): con FIT_GRID_STEPS di
+    default il primo scalino e' 31 e non entra. La ricerca binaria sotto lo scalino
+    deve trovare un keep tra 1 e 31 che entra nel limite, non ricadere a 1.
+    """
+    modello = "claude-haiku-4-5"
+    msgs = [{"role": "user" if i % 2 == 0 else "assistant",
+             "content": f"{i:05d} " + "x" * 1000} for i in range(2000)]
+
+    def _candidato(coda: list) -> bytes:
+        return json.dumps({"messages": coda}).encode()
+
+    tokens_10 = estimate_tokens_body(_candidato(_tail(msgs, 10)), modello)
+    tokens_31 = estimate_tokens_body(_candidato(_tail(msgs, 31)), modello)
+    assert tokens_10 < tokens_31, "Le misure devono crescere con la coda"
+    limite = (tokens_10 + tokens_31) // 2
+    keep = _fit_keep(msgs, modello, limite, _candidato)
+    assert 1 < keep < 31, f"keep inatteso: {keep}"
+    assert estimate_tokens_body(_candidato(_tail(msgs, keep)), modello) <= limite
+    print(f"  test_fit_keep_ricerca_sotto_primo_scalino: OK (keep={keep})")
+
+
+def test_repair_tail_coda_con_user_testo_identica_a_repair():
+    """
+    Coda che inizia gia' con uno user di testo: nessun sintetico aggiunto,
+    risultato identico a _repair_message_sequence.
+    """
+    coda = [
+        {"role": "user", "content": "inizio"},
+        {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "t1", "name": "bash", "input": {}}]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": "risultato-1"}]},
+    ]
+    assert repair_tail(coda) == _repair_message_sequence(coda), "Diverso da _repair_message_sequence"
+    assert MESSAGGIO_CRONOLOGIA_COMPRESSA not in json.dumps(repair_tail(coda), ensure_ascii=False)
+    print("  test_repair_tail_coda_con_user_testo_identica_a_repair: OK")
+
+
+def test_repair_tail_lista_vuota():
+    """Lista vuota → lista vuota."""
+    assert repair_tail([]) == []
+    print("  test_repair_tail_lista_vuota: OK")
+
+
+def test_repair_message_sequence_coda_subagent_resta_uno():
+    """
+    Documenta che il comportamento di _repair_message_sequence e' INVARIATO:
+    sulla stessa coda da subagent restituisce solo il messaggio sintetico.
+    """
+    fixed = _repair_message_sequence(_coda_subagent()[-9:])
+    assert len(fixed) == 1, f"Attesi 1 messaggio, ottenuti {len(fixed)}"
+    assert fixed[0]["content"] == MESSAGGIO_CRONOLOGIA_COMPRESSA
+    print("  test_repair_message_sequence_coda_subagent_resta_uno: OK")
