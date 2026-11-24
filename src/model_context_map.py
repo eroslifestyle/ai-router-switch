@@ -9,7 +9,8 @@ MODEL_CONTEXT_MAP = {
     # l'id di catalogo claude-sonnet-4-5-20250929 riporta 1.000.000, non 200.000.
     # Il vecchio valore veniva dalla sezione SPEC non verificata e sottostimava
     # la finestra di 5 volte. Rilevato da sviluppo/tools/check_model_context.py.
-    "claude-sonnet-4-5": 1_000_000,
+    # RIVERIFICATO 2026-11-24: lo stesso id ora riporta 200.000 (la finestra da 1M non c'e' piu').
+    "claude-sonnet-4-5": 200_000,
     "sonnet-4-6": 1_000_000,  "claude-sonnet-4-6": 1_000_000,
     "sonnet-4-7": 1_000_000,  "claude-sonnet-4-7": 1_000_000,
     "sonnet-4-8": 1_000_000,  "claude-sonnet-4-8": 1_000_000,
@@ -24,6 +25,10 @@ MODEL_CONTEXT_MAP = {
     "claude-mythos-5": 1_000_000,    # doc ufficiale (stesse specifiche di Fable 5)
     "claude-mythos-preview": 1_000_000,   # doc ufficiale
     "claude-haiku-4-5-20251001": 200_000,  # doc ufficiale; confermato dall'errore upstream 400 "prompt is too long: 208904 tokens > 200000 maximum"
+    # VERIFICATO 2026-11-24 dalla Models API (/v1/models/claude-haiku-5-5): max_input_tokens
+    # 1.000.000, max_tokens 128.000. Senza questa voce cadeva sul default 200k: tolti i 128k
+    # di output restavano 72k token, e ogni subagent Haiku oltre ~250 KB veniva riscritto.
+    "claude-haiku-5-5": 1_000_000,
     # Legacy che MANCAVANO: senza queste voci cadevano sul default 200k pur
     # avendo 1M, e il gate le avrebbe riscritte a 160k senza motivo.
     "claude-opus-4-7": 1_000_000,    # doc ufficiale (tabella Legacy models)
