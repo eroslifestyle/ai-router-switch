@@ -225,3 +225,47 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def test_repair_coda_lunga_e_lineare():
+    """
+    Coda di 2.000 coppie assistant(tool_use)/user(tool_result) che parte da un
+    tool_result orfano: la riparazione deve restare lineare (sotto 0.5 s).
+    """
+    import time
+    msgs = [{"role": "user", "content": "testo iniziale"}]
+    for i in range(2000):
+        msgs.append({"role": "assistant", "content": [
+            {"type": "tool_use", "id": f"t{i}", "name": "foo"}]})
+        msgs.append({"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": f"t{i}", "content": "ok"}]})
+    start = time.perf_counter()
+    fixed = _repair_message_sequence(msgs[2:])
+    elapsed = time.perf_counter() - start
+    assert isinstance(fixed, list), "Il risultato non e' una lista"
+    assert elapsed < 0.5, f"Riparazione troppo lenta: {elapsed:.3f} s"
+    print("  test_repair_coda_lunga_e_lineare: OK")
+
+
+def test_repair_orfano_in_testa_scarta_la_coppia_dopo():
+    """
+    Il tool_result di 'b' e' orfano perche' il suo assistant(tool_use 'b') e'
+    caduto in testa: il blocco text 'ciao' deve sopravvivere, seguito da 'ok'.
+    """
+    messages = [
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "a", "content": "res"}]},
+        {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "b", "name": "foo"}]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "b", "content": "res"},
+            {"type": "text", "text": "ciao"}]},
+        {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+    ]
+    fixed = _repair_message_sequence(messages)
+    assert fixed[0]["role"] == "user", f"Primo ruolo inatteso: {fixed[0]['role']}"
+    assert fixed[0]["content"] == [{"type": "text", "text": "ciao"}], \
+        f"Contenuto inatteso: {fixed[0]['content']}"
+    assert fixed[1]["role"] == "assistant" and fixed[1]["content"] == [
+        {"type": "text", "text": "ok"}], f"Secondo messaggio inatteso: {fixed[1]}"
+    print("  test_repair_orfano_in_testa_scarta_la_coppia_dopo: OK")

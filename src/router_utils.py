@@ -828,40 +828,29 @@ def _repair_message_sequence(messages: list) -> list:
     # venivano scartati: solo nel rewrite/shrink, fino a 36.787 caratteri persi
     # a turno. Restano fuori solo quelli in testa, perche' la sequenza deve
     # iniziare con un messaggio user (ciclo qui sotto).
-    msgs = [dict(m) for m in messages if isinstance(m, dict)]
-    changed = True
-    while changed and msgs:
-        changed = False
-        while msgs and msgs[0].get("role") != "user":
-            msgs.pop(0)
-            changed = True
-        if not msgs:
-            break
-        seen = set()
-        new_msgs = []
-        for m in msgs:
-            content = m.get("content")
-            if isinstance(content, list):
-                nc = []
-                for b in content:
-                    if isinstance(b, dict) and b.get("type") == "tool_result":
-                        if b.get("tool_use_id") in seen:
-                            nc.append(b)
-                        else:
-                            changed = True
-                    else:
-                        nc.append(b)
-                for b in content:
-                    if isinstance(b, dict) and b.get("type") == "tool_use":
-                        seen.add(b.get("id"))
-                if nc:
-                    m["content"] = nc
-                    new_msgs.append(m)
-                else:
-                    changed = True
-            else:
-                new_msgs.append(m)
-        msgs = new_msgs
+    # Passata unica (2026-11-24): il vecchio punto fisso rifaceva tutta la lista a
+    # ogni messaggio scartato, quadratico: 1,3 s su 4.000 messaggi, event loop fermo.
+    # Stesso risultato: un messaggio prima del primo user tenuto non entra e i suoi
+    # tool_use non contano; un tool_result vale solo se il suo tool_use e' gia' passato.
+    msgs = []
+    seen = set()
+    for original in messages:
+        if not isinstance(original, dict):
+            continue
+        m = dict(original)
+        if not msgs and m.get("role") != "user":
+            continue
+        content = m.get("content")
+        if isinstance(content, list):
+            kept = [b for b in content
+                    if not (isinstance(b, dict) and b.get("type") == "tool_result"
+                            and b.get("tool_use_id") not in seen)]
+            if not kept:
+                continue
+            m["content"] = kept
+            seen.update(b.get("id") for b in content
+                        if isinstance(b, dict) and b.get("type") == "tool_use")
+        msgs.append(m)
     if msgs and msgs[-1].get("role") == "assistant" and isinstance(msgs[-1].get("content"), list):
         clean = [c for c in msgs[-1]["content"]
                  if not (isinstance(c, dict) and c.get("type") == "tool_use")]
