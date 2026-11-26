@@ -35,6 +35,12 @@ import pytest_asyncio
 # Il conftest vive in sviluppo/tests/, quindi parents[2] è la root del repo.
 SRC = pathlib.Path(__file__).resolve().parents[2] / "src"
 
+# Dal 2026-10-16 (commit 7068348) `router_constants` accetta un upstream da env
+# solo se l'host è in allowlist. Senza questa riga il fake server su 127.0.0.1
+# viene rifiutato e gli harness e2e ripiegano sui provider VERI: richieste reali
+# verso Anthropic e MiniMax, e cinque test falliti per risposte non previste.
+os.environ.setdefault("AIROUTER_UPSTREAM_ALLOW", "127.0.0.1")
+
 
 # ── Attesa del sidecar asincrono ─────────────────────────────────────────────
 def wait_for_sidecar_text(path: pathlib.Path, timeout: float = 2.0, interval: float = 0.02) -> str:
